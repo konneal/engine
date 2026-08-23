@@ -16,6 +16,8 @@ This repo is the orchestrator: ingestion → enrichment → indexing → serving
 - `npm run dev:public` — local dev (needs `npx wrangler login` for remote AI/Vectorize bindings)
 - `scripts/bootstrap_cloudflare.sh` — create Vectorize/KV/D1, patch ids into `wrangler.toml`, apply D1 schema, deploy (requires `npx wrangler login`)
 - `npm run deploy:public` — deploy `worker_public`
+- `npm run site:build` / `npm run site:dev` — build/serve the Astro site on `@oimlsmart/site-shell` (sibling repo `../site-shell`, file: symlink); the worker serves `site/dist` as its assets
+- `npm run test:e2e` — live golden suite (11 cases: doc-level, definitions, table values, refusal, French, filters, auth) against `BASE_URL` (default https://ai.oimlsmart.org) using the API key in `.env` (`KEY=…`)
 - Ingest (one-time venv: `python3 -m venv .venv && .venv/bin/pip install -r ingest/requirements.txt`):
   - `.venv/bin/python -m ingest.cli parse` — corpora → `artifacts/chunks.jsonl` + `manifest.json` (clean-beats-dirty precedence; shells flagged)
   - `.venv/bin/python -m ingest.cli embed` — embed via Workers AI, resumable (`artifacts/embeddings.jsonl`)
