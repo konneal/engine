@@ -91,7 +91,7 @@ def chunk_doc(doc: DocRecord) -> list[Chunk]:
     chunks: list[Chunk] = [_overview_chunk(doc, _ident_label(doc))]
     header = f"{doc.title} — {_ident_label(doc)}\n\n"
     for sec in doc.sections:
-        sec_label = f"§{sec.anchor} {sec.title}".strip() + "\n\n"
+        sec_label = (f"§{sec.anchor} " if sec.anchor else "") + (f"{sec.title}\n\n" if sec.title else "")
         for i, part in enumerate(split_long(sec.text)):
             text = (header + sec_label + part).strip()
             cid = chunk_id_for(doc.doc_id, sec.anchor, i, part)

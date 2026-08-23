@@ -12,6 +12,10 @@
     "site:build": "npm run build -w site",
     "site:dev": "npm run dev -w site",
     "test:e2e": "node tests/e2e.mjs",
-    "lint:wrangler": "python3 scripts/lint_wrangler.py"
+    "lint:wrangler": "python3 scripts/lint_wrangler.py",
+    "test:ui": "node tests/ui.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
   }
 }

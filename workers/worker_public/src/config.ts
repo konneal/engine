@@ -6,7 +6,7 @@ export const MODELS = {
 
 export const LIMITS = {
   maxInputChars: 1200,
-  maxOutputTokens: 512,
+  maxOutputTokens: 768,
   retrieveK: 20,
   rerankKeep: 5,
   cacheTtlSec: 6 * 3600,
