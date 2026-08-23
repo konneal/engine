@@ -8,6 +8,22 @@ Retrieval-augmented generation (RAG) system over OIML publications (~900 documen
 
 This repo is the orchestrator: ingestion → enrichment → indexing → serving → evaluation. It is a consumer of sibling repos and owns no source-of-truth content.
 
+## Commands
+
+- `npm install` — install worker dependencies
+- `npm run typecheck` — tsc for `worker_public`
+- `npm run lint:wrangler` — binding-isolation lint (public worker must never reference internal-tier resources)
+- `npm run dev:public` — local dev (needs `npx wrangler login` for remote AI/Vectorize bindings)
+- `scripts/bootstrap_cloudflare.sh` — create Vectorize/KV/D1, patch ids into `wrangler.toml`, apply D1 schema, deploy (requires `npx wrangler login`)
+- `npm run deploy:public` — deploy `worker_public`
+- Ingest (one-time venv: `python3 -m venv .venv && .venv/bin/pip install -r ingest/requirements.txt`):
+  - `.venv/bin/python -m ingest.cli parse` — corpora → `artifacts/chunks.jsonl` + `manifest.json` (clean-beats-dirty precedence; shells flagged)
+  - `.venv/bin/python -m ingest.cli embed` — embed via Workers AI, resumable (`artifacts/embeddings.jsonl`)
+  - `.venv/bin/python -m ingest.cli upsert` — push vectors + metadata into Vectorize
+  - `.venv/bin/python -m ingest.cli probe` — connectivity, embedding dims, sample query
+- Secrets: `npx wrangler secret put ADMIN_TOKEN -c workers/worker_public/wrangler.toml` — guards `POST /v1/admin/keys` (API key creation)
+- Generated artifacts live in `artifacts/` (gitignored); never commit them
+
 ## Model policy (open-source, cost-first, minimal accounts)
 
 Open-weight Chinese models only; **zero new accounts** — all model serving on
