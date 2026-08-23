@@ -4,6 +4,7 @@ import hashlib
 
 from .config import MAX_CHUNK_CHARS
 from .models import Chunk, DocRecord
+from .parse import normalize_identifier
 
 
 def chunk_id_for(doc_id: str, anchor: str, idx: int, body: str) -> str:
@@ -54,7 +55,7 @@ def _ident_label(doc: DocRecord) -> str:
 def _overview_chunk(doc: DocRecord, ident: str) -> Chunk:
     """Document-level chunk so 'What is R 60?' retrieves an overview, not a
     random clause."""
-    plain = doc.docidentifier or f"OIML {doc.doctype} {doc.doc_number}"
+    plain = normalize_identifier(doc.docidentifier or f"OIML {doc.doctype} {doc.doc_number}")
     parts = [f"{doc.title} — {ident}."]
     if doc.doctype in DOCTYPE_NAMES:
         parts.append(f"An OIML {DOCTYPE_NAMES[doc.doctype]}.")
@@ -95,7 +96,7 @@ def chunk_doc(doc: DocRecord) -> list[Chunk]:
         for i, part in enumerate(split_long(sec.text)):
             text = (header + sec_label + part).strip()
             cid = chunk_id_for(doc.doc_id, sec.anchor, i, part)
-            ident = doc.docidentifier or f"OIML {doc.doctype} {doc.doc_number}"
+            ident = normalize_identifier(doc.docidentifier or f"OIML {doc.doctype} {doc.doc_number}")
             chunks.append(
                 Chunk(
                     id=cid,

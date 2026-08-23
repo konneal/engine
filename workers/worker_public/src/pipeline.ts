@@ -84,15 +84,19 @@ export async function retrieve(env: any, query: string): Promise<Retrieved> {
     hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
   }
 
-  // Per-document diversity: at most 2 chunks per document so the context
-  // covers several documents instead of one document's clauses.
+  // Per-publication diversity, keyed by normalized identity: overview
+  // chunks are near-duplicates across editions — at most ONE per
+  // publication; clause chunks get a higher cap so content can fill slots.
   const perDoc = new Map<string, number>();
   const diversified: Hit[] = [];
   for (const h of hits) {
-    const n = perDoc.get(h.metadata.doc_id) ?? 0;
-    if (n < 2) {
+    const isOverview = h.metadata.clause_anchor === "overview";
+    const key = `${h.metadata.docidentifier}|${h.metadata.language}`;
+    const n = perDoc.get(key) ?? 0;
+    const cap = isOverview ? 1 : filters.doc_number ? 3 : 2;
+    if (n < cap) {
       diversified.push(h);
-      perDoc.set(h.metadata.doc_id, n + 1);
+      perDoc.set(key, n + 1);
     }
     if (diversified.length >= LIMITS.rerankKeep + 2) break;
   }
@@ -114,7 +118,7 @@ export function buildMessages(query: string, hits: Hit[], lang?: string) {
     "Quote normative values exactly (MPE values, accuracy classes, limits, edition-specific wording) — do not round, convert or paraphrase them.",
     "For definitions, quote the source definition verbatim.",
     "When passages from several editions of the same document appear, answer from the most recent edition unless the question names an edition; say which edition you used.",
-    "If the context does not contain the answer, reply exactly: I don't have information on this in the indexed OIML publications. — never invent content.",
+    "If the context does not contain the answer, reply with ONLY this exact sentence and nothing else: I don't have information on this in the indexed OIML publications. — never invent content.",
     "Be concise and precise. Answer in the question's language" + (lang ? ` (explicitly requested: ${lang})` : "") + ".",
   ].join(" ");
 

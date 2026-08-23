@@ -121,6 +121,16 @@ def clean_body(text: str) -> str:
 
 
 HEADING_NUM_RE = re.compile(r"^(\d+(?:\.\d+)*)\.?\s")
+YEAR_LANG_RE = re.compile(r"\s*:\s*(19|20)\d{2}\s*(\([A-Z/]+\))?\s*$")
+
+
+def normalize_identifier(ident: str) -> str:
+    """Stable publication identity: strip trailing year/language markers so
+    'OIML R 60-1:2017 (E)' and 'OIML R 60-1:2021' group as 'OIML R 60-1'."""
+    out = ident.strip()
+    for _ in range(2):
+        out = YEAR_LANG_RE.sub("", out)
+    return re.sub(r"\s+", " ", out).strip()
 
 
 def _html_section_anchor(el) -> tuple[str, str]:
