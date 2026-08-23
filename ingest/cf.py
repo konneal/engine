@@ -45,15 +45,18 @@ def _require_auth() -> None:
 class CF:
     def __init__(self) -> None:
         _require_auth()
-        self.client = httpx.Client(
-            headers={"Authorization": f"Bearer {API_TOKEN}"},
-            timeout=httpx.Timeout(120.0),
-        )
+        self.headers = {"Authorization": f"Bearer {API_TOKEN}"}
+
+    def _request(self, method: str, url: str, **kw) -> httpx.Response:
+        # A fresh connection per request: pooled keep-alive connections to the
+        # AI endpoint were observed wedging under concurrent load.
+        kw.setdefault("timeout", httpx.Timeout(300.0))
+        return httpx.request(method, url, headers=self.headers, **kw)
 
     def _post(self, url: str, json: dict) -> dict:
         delay = 2.0
         for attempt in range(6):
-            r = self.client.post(url, json=json)
+            r = self._request("POST", url, json=json)
             if r.status_code == 429 or r.status_code >= 500:
                 time.sleep(delay)
                 delay = min(delay * 2, 60)
@@ -103,7 +106,7 @@ class CF:
         return None
 
     def vectorize_info(self) -> dict:
-        r = self.client.get(f"{BASE}/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}")
+        r = self._request("GET", f"{BASE}/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}")
         r.raise_for_status()
         return r.json()["result"]
 

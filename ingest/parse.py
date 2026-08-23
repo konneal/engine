@@ -122,6 +122,13 @@ def clean_body(text: str) -> str:
 
 HEADING_NUM_RE = re.compile(r"^(\d+(?:\.\d+)*)\.?\s")
 YEAR_LANG_RE = re.compile(r"\s*:\s*(19|20)\d{2}\s*(\([A-Z/]+\))?\s*$")
+# the dirty corpus's OCR render embeds escaped HTML markup as literal text
+LITERAL_TAG_RE = re.compile(r"</?[a-zA-Z][^<>]{0,120}>")
+GUID_ANCHOR_RE = re.compile(r"^_?[0-9a-f]{8}-[0-9a-f]{4}-", re.I)
+
+
+def strip_literal_tags(text: str) -> str:
+    return re.sub(r"\s{2,}", " ", LITERAL_TAG_RE.sub(" ", text)).strip()
 
 
 def normalize_identifier(ident: str) -> str:
@@ -143,6 +150,9 @@ def _html_section_anchor(el) -> tuple[str, str]:
     if m:
         return m.group(1), title
     el_id = el.get("id") or ""
+    if GUID_ANCHOR_RE.match(el_id):
+        # machine-generated element ids are meaningless in citations
+        return "", title
     return el_id, title
 
 
@@ -151,7 +161,7 @@ def _table_text(tbl) -> str:
     cap_text = re.sub(r"\s+", " ", cap.get_text(" ", strip=True)) if cap else ""
     rows = []
     for tr in tbl.find_all("tr"):
-        cells = [re.sub(r"\s+", " ", c.get_text(" ", strip=True)) for c in tr.find_all(["th", "td"])]
+        cells = [strip_literal_tags(c.get_text(" ", strip=True)) for c in tr.find_all(["th", "td"])]
         cells = [c for c in cells if c]
         if cells:
             rows.append(" | ".join(cells))
@@ -202,7 +212,7 @@ def extract_html_sections(path: Path) -> list[Section]:
                 buf.append(t)
             continue
         if el.name == "li":
-            t = re.sub(r"[ \t]+", " ", el.get_text(" ", strip=True))
+            t = strip_literal_tags(el.get_text(" ", strip=True))
             if t:
                 buf.append(f"- {t}")
             continue
@@ -213,7 +223,7 @@ def extract_html_sections(path: Path) -> list[Section]:
             continue
         t = el.get_text(" ", strip=True)
         if t and not BOILERPLATE_RE.search(t):
-            buf.append(re.sub(r"[ \t]+", " ", t))
+            buf.append(strip_literal_tags(t))
     flush()
     return sections
 
