@@ -94,7 +94,7 @@ def embed(limit: int | None) -> None:
 
     batches = [todo[i : i + batch] for i in range(0, len(todo), batch)]
     with EMBED_PATH.open("a", encoding="utf-8") as out:
-        with ThreadPoolExecutor(max_workers=6) as ex:
+        with ThreadPoolExecutor(max_workers=4) as ex:
             futs = [ex.submit(run_batch, g) for g in batches]
             for n, fut in enumerate(as_completed(futs), 1):
                 group, vecs = fut.result()

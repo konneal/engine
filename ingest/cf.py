@@ -5,9 +5,36 @@ from typing import Any
 
 import httpx
 
-from .config import ACCOUNT_ID, API_TOKEN, EMBED_MODEL, INDEX_NAME
+from .config import ACCOUNT_ID, API_TOKEN, ARTIFACTS, EMBED_MODEL, INDEX_NAME
 
 BASE = "https://api.cloudflare.com/client/v4"
+
+
+def _shape_body(name: str, texts: list[str]) -> dict:
+    if name == "text":
+        return {"text": texts}
+    if name == "input.input":
+        return {"input": {"input": texts}}
+    return {"input": texts}
+
+
+def _load_shape() -> str | None:
+    p = ARTIFACTS / "embed_shape.txt"
+    if p.is_file():
+        s = p.read_text().strip()
+        if s:
+            return s
+    return None
+
+
+def _remember_shape(name: str) -> None:
+    global _KNOWN_SHAPE
+    _KNOWN_SHAPE = name
+    ARTIFACTS.mkdir(exist_ok=True)
+    (ARTIFACTS / "embed_shape.txt").write_text(name)
+
+
+_KNOWN_SHAPE = _load_shape()
 
 
 def _require_auth() -> None:
@@ -37,20 +64,27 @@ class CF:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         url = f"{BASE}/accounts/{ACCOUNT_ID}/ai/run/{EMBED_MODEL}"
-        shapes: list[dict] = [
-            {"input": {"input": texts}},
-            {"input": texts},
-            {"text": texts},
-        ]
+        if _KNOWN_SHAPE is None:
+            shapes: list[tuple[str, dict]] = [
+                ("text", {"text": texts}),
+                ("input.input", {"input": {"input": texts}}),
+                ("array", {"input": texts}),
+            ]
+        else:
+            shapes = [(_KNOWN_SHAPE, _shape_body(_KNOWN_SHAPE, texts))]
         last_err: Exception | None = None
-        for body in shapes:
+        for name, body in shapes:
             try:
                 data = self._post(url, body)
                 vecs = self._extract_vecs(data)
                 if vecs and len(vecs) == len(texts):
+                    _remember_shape(name)
                     return vecs
-            except Exception as e:  # noqa: BLE001 — try next shape
-                last_err = e
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (400, 422):
+                    last_err = e
+                    continue  # wrong request shape — try the next
+                raise  # 429-after-retries / 5xx / auth — not a shape problem
         raise RuntimeError(f"embedding failed for all shapes: {last_err}")
 
     @staticmethod
