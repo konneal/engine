@@ -2,12 +2,16 @@
   "name": "oiml-rag",
   "private": true,
   "workspaces": [
-    "workers/*"
+    "workers/*",
+    "site"
   ],
   "scripts": {
     "typecheck": "tsc -p workers/worker_public",
     "deploy:public": "npm run deploy -w workers/worker_public",
     "dev:public": "npm run dev -w workers/worker_public",
+    "site:build": "npm run build -w site",
+    "site:dev": "npm run dev -w site",
+    "test:e2e": "node tests/e2e.mjs",
     "lint:wrangler": "python3 scripts/lint_wrangler.py"
   }
 }

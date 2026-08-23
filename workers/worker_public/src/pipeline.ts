@@ -68,7 +68,35 @@ export async function retrieve(env: any, query: string): Promise<Retrieved> {
       // vector order is the fallback, by design
     }
   }
-  return { hits: hits.slice(0, LIMITS.rerankKeep), filters };
+
+  // Edition recency: when the query does not pin an edition, newer editions
+  // get a mild boost so stale duplicate chunks don't crowd out current ones.
+  if (!filters.edition) {
+    const year = (s?: string) => (/^(19|20)\d{2}$/.test(s ?? "") ? Number(s) : null);
+    const years = hits.map((h) => year(h.metadata.edition)).filter((y): y is number => y !== null && y >= 1990);
+    const max = years.length ? Math.max(...years) : 0;
+    for (const h of hits) {
+      const y = year(h.metadata.edition);
+      if (y && y >= 1990 && max > 1990) {
+        h.rerank_score = (h.rerank_score ?? h.score) + 0.02 + 0.04 * ((y - 1990) / (max - 1990));
+      }
+    }
+    hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
+  }
+
+  // Per-document diversity: at most 2 chunks per document so the context
+  // covers several documents instead of one document's clauses.
+  const perDoc = new Map<string, number>();
+  const diversified: Hit[] = [];
+  for (const h of hits) {
+    const n = perDoc.get(h.metadata.doc_id) ?? 0;
+    if (n < 2) {
+      diversified.push(h);
+      perDoc.set(h.metadata.doc_id, n + 1);
+    }
+    if (diversified.length >= LIMITS.rerankKeep + 2) break;
+  }
+  return { hits: diversified.slice(0, LIMITS.rerankKeep), filters };
 }
 
 export function buildMessages(query: string, hits: Hit[], lang?: string) {
@@ -83,7 +111,9 @@ export function buildMessages(query: string, hits: Hit[], lang?: string) {
     "You answer questions about OIML publications (legal metrology: Recommendations, Documents, Basic publications, Guides).",
     "Use ONLY the numbered context passages provided. Never use outside knowledge for substantive claims.",
     "Cite every claim inline with the passage label, e.g. [OIML R 87:2004 §3.2]. Cite only provided passages.",
-    "Quote normative values exactly (MPE values, accuracy classes, edition-specific wording) — do not round or paraphrase them.",
+    "Quote normative values exactly (MPE values, accuracy classes, limits, edition-specific wording) — do not round, convert or paraphrase them.",
+    "For definitions, quote the source definition verbatim.",
+    "When passages from several editions of the same document appear, answer from the most recent edition unless the question names an edition; say which edition you used.",
     "If the context does not contain the answer, reply exactly: I don't have information on this in the indexed OIML publications. — never invent content.",
     "Be concise and precise. Answer in the question's language" + (lang ? ` (explicitly requested: ${lang})` : "") + ".",
   ].join(" ");

@@ -26,3 +26,29 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install -r ingest/requirements.txt
       - run: python -m compileall -q ingest
+
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: git submodule update --init --remote ../site-shell || true  # no-op locally linked
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run site:build
+        continue-on-error: true  # requires the site-shell sibling; enable when vendored
+
+  e2e:
+    # Manual/nightly only — hits the live service and spends quota.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run test:e2e
+        env:
+          BASE_URL: ${{ vars.E2E_BASE_URL || 'https://ai.oimlsmart.org' }}
+          RAG_API_KEY: ${{ secrets.RAG_API_KEY }}
