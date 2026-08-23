@@ -331,7 +331,9 @@ async function handleCreateKey(env: Env, req: Request): Promise<Response> {
   const keyHash = await sha256Hex(raw);
   await env.DB.prepare(
     "INSERT INTO api_keys (id, name, key_hash, day_limit, created_at, revoked) VALUES (?1,?2,?3,?4,?5,0)",
-  ).bind(id, body.name, keyHash, dayLimit, new Date().toISOString());
+  )
+    .bind(id, body.name, keyHash, dayLimit, new Date().toISOString())
+    .run();
   return json({ id, name: body.name, day_limit: dayLimit, key: raw, note: "Store this key now — it is not retrievable again." });
 }
 

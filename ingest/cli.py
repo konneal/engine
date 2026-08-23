@@ -90,9 +90,21 @@ def embed(limit: int | None) -> None:
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     def run_batch(group):
-        return group, cf.embed([c["text"] for c in group])
+        try:
+            return group, cf.embed([c["text"] for c in group])
+        except Exception:
+            # fall back to per-item: isolate and skip genuinely bad inputs
+            texts, vecs = [], []
+            for c in group:
+                try:
+                    v = cf.embed([c["text"]])
+                    texts.append(c)
+                    vecs.append(v[0])
+                except Exception as e:
+                    print(f"  ! chunk failed {c['id']}: {e}", flush=True)
+            return texts, vecs
 
-    batches = [todo[i : i + batch] for i in range(0, len(todo), batch)]
+    batches = [todo[i : i + 25] for i in range(0, len(todo), 25)]
     with EMBED_PATH.open("a", encoding="utf-8") as out:
         with ThreadPoolExecutor(max_workers=4) as ex:
             futs = [ex.submit(run_batch, g) for g in batches]
