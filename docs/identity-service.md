@@ -7,6 +7,15 @@ nothing outside it is required reading. The canonical copy lives at
 repository — copies into consumer repos are welcome; the canonical copy
 wins on any drift.
 
+> **Repo note (2026-08):** the identity service's code is moving from
+> the smart monorepo to its own repository (`oimlsmart/identity`) — the
+> extraction changes where the code lives, NEVER the public surface:
+> the issuer `https://id.oimlsmart.org`, every endpoint, and the claims
+> contract below are stable across the move. The source paths cited in
+> §6 and §11 are the pre-extraction locations in `oimlsmart/smart`;
+> after the cutover they read as the same relative paths inside
+> `oimlsmart/identity`.
+
 ## 1. The cast
 
 - **The OP (OpenID Provider)** — the identity service at
