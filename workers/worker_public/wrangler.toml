@@ -2,6 +2,12 @@ name = "rag-public"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
 
+# Route: custom domain on the oimlsmart.org zone (OIML SMART account).
+routes = [
+  { pattern = "ai.oimlsmart.org", custom_domain = true }
+]
+
+
 [assets]
 directory = "./public"
 
@@ -14,12 +20,12 @@ index_name = "idx_oiml_public"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "KV_ID_PLACEHOLDER"
+id = "0f65d12cc77c41b5b91086de1c04f6da"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "rag-public"
-database_id = "D1_ID_PLACEHOLDER"
+database_id = "655cd63f-1826-4161-bfd1-90c584add4ce"
 
 [vars]
 INDEX_VERSION = "public-v1"
@@ -30,8 +36,3 @@ ANON_DAY_HARD_CAP = "5000"
 
 [observability]
 enabled = true
-
-# Route: uncomment after confirming the oimlsmart.org zone is on this account.
-# [routes]
-# pattern = "ai.oimlsmart.org"
-# custom_domain = true

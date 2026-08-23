@@ -13,11 +13,9 @@ if ! npx wrangler whoami >/dev/null 2>&1; then
   exit 1
 fi
 
-ACCOUNT_ID=$(npx wrangler whoami 2>/dev/null | grep -oE '[0-9a-f]{32}' | head -1)
-if [ -z "$ACCOUNT_ID" ]; then
-  echo "Could not parse account id from wrangler whoami" >&2
-  exit 1
-fi
+# All resources live on the OIML SMART account (owns the oimlsmart.org zone).
+ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-06cad8ae9a017c856ab496c6bca9a9d8}"
+export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"
 echo "account: $ACCOUNT_ID"
 echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" > .env
 
@@ -31,13 +29,16 @@ fi
 # --- KV namespace ---
 KV_ID=$(npx wrangler kv namespace list 2>/dev/null | python3 -c "
 import json,sys
-for ns in json.load(sys.stdin):
-    if ns['title'].endswith('rag-public-cache'):
-        print(ns['id']); break
+t = sys.stdin.read(); i = t.find('[')
+names = json.loads(t[i:]) if i >= 0 else []
+print(next((n['id'] for n in names if n['title'] in ('CACHE', 'rag-public-CACHE')), ''))
 ")
 if [ -z "$KV_ID" ]; then
-  OUT=$(npx wrangler kv namespace create CACHE 2>&1 | grep -oE '[0-9a-f]{32}' | head -1)
-  KV_ID=$OUT
+  KV_ID=$(cd workers/worker_public && npx wrangler kv namespace create CACHE 2>&1 | grep -oE '[0-9a-f]{32}' | head -1) || true
+fi
+if [ -z "$KV_ID" ]; then
+  echo "kv namespace creation failed" >&2
+  exit 1
 fi
 echo "kv: $KV_ID"
 sed -i '' "s/KV_ID_PLACEHOLDER/$KV_ID/" "$TOML"
@@ -45,9 +46,9 @@ sed -i '' "s/KV_ID_PLACEHOLDER/$KV_ID/" "$TOML"
 # --- D1 database ---
 D1_ID=$(npx wrangler d1 list --json 2>/dev/null | python3 -c "
 import json,sys
-for db in json.load(sys.stdin):
-    if db['name'] == 'rag-public':
-        print(db['uuid']); break
+t = sys.stdin.read(); i = t.find('[')
+dbs = json.loads(t[i:]) if i >= 0 else []
+print(next((d['uuid'] for d in dbs if d['name'] == 'rag-public'), ''))
 ")
 if [ -z "$D1_ID" ]; then
   D1_ID=$(npx wrangler d1 create rag-public 2>&1 | grep -oE '[0-9a-f]{32}' | head -1)

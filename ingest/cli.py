@@ -87,15 +87,22 @@ def embed(limit: int | None) -> None:
     print(f"embedding {len(todo)} chunks ({len(done)} already done)")
 
     batch = 50
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def run_batch(group):
+        return group, cf.embed([c["text"] for c in group])
+
+    batches = [todo[i : i + batch] for i in range(0, len(todo), batch)]
     with EMBED_PATH.open("a", encoding="utf-8") as out:
-        for i in range(0, len(todo), batch):
-            group = todo[i : i + batch]
-            vecs = cf.embed([c["text"] for c in group])
-            for c, v in zip(group, vecs):
-                out.write(json.dumps({"id": c["id"], "values": v}) + "\n")
-            out.flush()
-            done_n = min(i + batch, len(todo))
-            print(f"  {done_n}/{len(todo)}", flush=True)
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            futs = [ex.submit(run_batch, g) for g in batches]
+            for n, fut in enumerate(as_completed(futs), 1):
+                group, vecs = fut.result()
+                for c, v in zip(group, vecs):
+                    out.write(json.dumps({"id": c["id"], "values": v}) + "\n")
+                out.flush()
+                if n % 20 == 0 or n == len(batches):
+                    print(f"  batches {n}/{len(batches)} ({len(done) + n * batch} chunks)", flush=True)
     print(f"embeddings at {EMBED_PATH}")
 
 
