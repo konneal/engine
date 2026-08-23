@@ -9,9 +9,11 @@ type AnyAi = { run: (model: string, body: unknown) => Promise<unknown> };
 
 let embedShapeOrder: string[] | null = null;
 const EMBED_SHAPES: Record<string, (t: string) => unknown> = {
+  // "text" first: the verified request shape for qwen3-embedding-0.6b —
+  // every wrong-shape attempt also burns AI rate budget.
+  text: (t) => ({ text: [t] }),
   "input.input": (t) => ({ input: { input: [t] } }),
   array: (t) => ({ input: [t] }),
-  text: (t) => ({ text: [t] }),
 };
 
 function extractVec(res: unknown): number[] | null {
@@ -26,18 +28,25 @@ function extractVec(res: unknown): number[] | null {
   return null;
 }
 
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export async function embed(ai: AnyAi, model: string, text: string): Promise<number[]> {
   const names = embedShapeOrder ?? Object.keys(EMBED_SHAPES);
   for (const name of names) {
-    try {
-      const res = await ai.run(model, EMBED_SHAPES[name](text));
-      const vec = extractVec(res);
-      if (vec && vec.length > 0) {
-        embedShapeOrder = [name, ...names.filter((n) => n !== name)];
-        return vec;
+    // Transient failures (capacity/rate limits shared with ingest) get a
+    // short retry ladder on the same shape before moving on.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await ai.run(model, EMBED_SHAPES[name](text));
+        const vec = extractVec(res);
+        if (vec && vec.length > 0) {
+          embedShapeOrder = [name, ...names.filter((n) => n !== name)];
+          return vec;
+        }
+      } catch {
+        // retry same shape, then fall through to the next shape
       }
-    } catch {
-      // try next shape
+      if (attempt < 2) await delay(250 * (attempt + 1));
     }
   }
   throw new Error(`embedding failed for all request shapes (${model})`);

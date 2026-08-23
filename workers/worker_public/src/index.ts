@@ -6,6 +6,7 @@ export interface Env {
   VECTORIZE: any;
   CACHE: KVNamespace;
   DB: D1Database;
+  ASSETS: Fetcher;
   INDEX_VERSION: string;
   ANON_DAY_ASK: string;
   ANON_DAY_SEARCH: string;
@@ -217,7 +218,14 @@ async function handleAsk(
     return json({ ...cached.value, cached: true, quota });
   }
 
-  const { hits } = await retrieve(env, q.query);
+  let retrieved;
+  try {
+    retrieved = await retrieve(env, q.query);
+  } catch {
+    telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q.query), q.lang);
+    return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
+  }
+  const { hits } = retrieved;
   if (hits.length === 0) {
     const answer = "I don't have information on this in the indexed OIML publications.";
     const out = { answer, citations: [], model: MODELS.anon, query_hash: await sha256Hex(q.query) };
@@ -304,7 +312,13 @@ async function handleSearch(
     return err(429, "quota_exceeded", `Daily search limit reached (${quota.limit}). Try again tomorrow.`);
   }
 
-  const { hits, filters } = await retrieve(env, q.query);
+  let retrieved;
+  try {
+    retrieved = await retrieve(env, q.query);
+  } catch {
+    return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
+  }
+  const { hits, filters } = retrieved;
   const results = hits.map((h: Hit) => ({
     doc_id: h.metadata.doc_id,
     docidentifier: h.metadata.docidentifier,
@@ -354,6 +368,24 @@ export default {
     const cors = corsHeaders(req);
 
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+
+    // HTML pages are served through the worker with must-revalidate so a
+    // deploy can never leave the edge serving HTML that references deleted
+    // fingerprinted assets.
+    if (req.method === "GET" && (path === "/" || path === "/api/" || path === "/index.html")) {
+      const target = new URL(path === "/index.html" ? "/" : path, url);
+      const asset = await env.ASSETS.fetch(new Request(target, { method: "GET" }));
+      if (asset.status === 200) {
+        return new Response(asset.body, {
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "public, max-age=0, must-revalidate",
+            ...cors,
+          },
+        });
+      }
+      return err(404, "not_found", "Page not found");
+    }
 
     if (req.method === "GET" && path === "/health") {
       return json({ ok: true, service: "rag-public", index_version: env.INDEX_VERSION, ...cors });
