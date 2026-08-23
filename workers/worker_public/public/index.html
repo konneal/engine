@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OIML Publications Assistant</title>
+  <meta name="description" content="Ask questions about OIML publications (Recommendations, Documents, Basic publications, Guides) with clause-level citations." />
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>⚖️</text></svg>" />
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="mark">⚖</span>
+      <div>
+        <h1>OIML Publications Assistant</h1>
+        <p>Legal metrology Q&amp;A over OIML R&nbsp;·&nbsp;D&nbsp;·&nbsp;B&nbsp;·&nbsp;G&nbsp;·&nbsp;E publications, with clause-level citations</p>
+      </div>
+    </div>
+    <label class="lang">
+      Answer language
+      <select id="lang">
+        <option value="">Auto</option>
+        <option value="en">English</option>
+        <option value="fr">Français</option>
+        <option value="de">Deutsch</option>
+        <option value="es">Español</option>
+        <option value="ar">العربية</option>
+        <option value="pl">Polski</option>
+      </select>
+    </label>
+  </header>
+
+  <main id="chat" aria-live="polite">
+    <div class="notice">AI-generated answers — always verify against the cited source clauses.</div>
+  </main>
+
+  <footer>
+    <form id="askform">
+      <input id="q" type="text" autocomplete="off" placeholder="e.g. What is the MPE for class III scales at 500 g according to R 76?" />
+      <button type="submit" id="send">Ask</button>
+    </form>
+    <div id="statusline"><span id="quota"></span></div>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

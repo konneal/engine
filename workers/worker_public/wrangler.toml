@@ -1,0 +1,37 @@
+name = "rag-public"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+
+[assets]
+directory = "./public"
+
+[ai]
+binding = "AI"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "idx_oiml_public"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "KV_ID_PLACEHOLDER"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "rag-public"
+database_id = "D1_ID_PLACEHOLDER"
+
+[vars]
+INDEX_VERSION = "public-v1"
+ANON_DAY_ASK = "20"
+ANON_DAY_SEARCH = "50"
+KEY_DAY_ASK_DEFAULT = "2000"
+ANON_DAY_HARD_CAP = "5000"
+
+[observability]
+enabled = true
+
+# Route: uncomment after confirming the oimlsmart.org zone is on this account.
+# [routes]
+# pattern = "ai.oimlsmart.org"
+# custom_domain = true
