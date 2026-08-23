@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
+
+from bs4 import BeautifulSoup
 
 from .config import CLEAN_DIR, DIRTY_DIR, SHELL_WORD_THRESHOLD
 from .models import DocRecord, Section
@@ -27,6 +30,16 @@ LANG_FROM_SLUG = [
     ("-pol", "pl"), ("-pl", "pl"),
     ("-eng", "en"), ("-en", "en"), ("-e", "en"),
 ]
+ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍﻿"), None)
+BLOCK_ATTR_RE = re.compile(r"^\[[^[\]]*\]$")
+SET_ATTR_RE = re.compile(r"^\{set:[^}]+\}$")
+ANCHOR_RE = re.compile(r"^\[\[[\w.:-]+\]\]$")
+TABLE_ROW_RE = re.compile(r"^(?:[v^<>]|[0-9.]+\+?)+\s*\|(?!\|)")
+CELL_MARKER_RE = re.compile(r"^[v^<>\d.+\s]*$")
+BOILERPLATE_RE = re.compile(
+    r"© OIML|rue Turgot|Telephone:|Fax:|Tel:|ISBN|Bureau International de Métrologie Légale \d|"
+    r"^\(draft |^Date: |^TC \d|^Second edition|^First edition|^Edition |org.oiml"
+)
 
 
 def parse_header(adoc: str) -> tuple[str, dict[str, str]]:
@@ -76,15 +89,123 @@ def classify_identifier(title: str, attrs: dict[str, str], slug: str) -> tuple[s
 
 
 def clean_body(text: str) -> str:
-    lines = []
+    """Adoc → retrievable text: entities decoded, zero-width junk gone,
+    block attributes and include/comment noise dropped, |=== tables
+    flattened to readable rows (normative tables must stay retrievable)."""
+    text = html.unescape(text)
+    text = text.translate(ZERO_WIDTH)
+    out: list[str] = []
+    in_table = False
     for line in text.splitlines():
         s = line.strip()
         if s.startswith("include::") or s.startswith("//"):
             continue
-        lines.append(line)
-    out = "\n".join(lines)
-    out = re.sub(r"\n{3,}", "\n\n", out).strip()
-    return out
+        if SET_ATTR_RE.match(s) or BLOCK_ATTR_RE.match(s) or ANCHOR_RE.match(s):
+            continue
+        is_delim = s.replace("=", "").strip() == "|" and len(s.replace(" ", "")) >= 3
+        if is_delim:
+            in_table = not in_table
+            continue
+        if in_table or s.startswith("|") or TABLE_ROW_RE.match(s):
+            cells = [c.strip() for c in s.split("|") if c.strip()]
+            cells = [c for c in cells if not CELL_MARKER_RE.match(c)]
+            if cells:
+                out.append(" | ".join(cells))
+            continue
+        if s == "+":
+            continue
+        out.append(line.rstrip())
+    body = "\n".join(out)
+    body = re.sub(r"\n{3,}", "\n\n", body).strip()
+    return body
+
+
+HEADING_NUM_RE = re.compile(r"^(\d+(?:\.\d+)*)\.?\s")
+
+
+def _html_section_anchor(el) -> tuple[str, str]:
+    """Anchor + title from a rendered heading. The clause number in the
+    heading text wins (it matches citation practice); the element id is the
+    fallback."""
+    title = el.get_text(" ", strip=True)
+    title = re.sub(r"\s+", " ", title)
+    m = HEADING_NUM_RE.match(title)
+    if m:
+        return m.group(1), title
+    el_id = el.get("id") or ""
+    return el_id, title
+
+
+def _table_text(tbl) -> str:
+    cap = tbl.find("caption")
+    cap_text = re.sub(r"\s+", " ", cap.get_text(" ", strip=True)) if cap else ""
+    rows = []
+    for tr in tbl.find_all("tr"):
+        cells = [re.sub(r"\s+", " ", c.get_text(" ", strip=True)) for c in tr.find_all(["th", "td"])]
+        cells = [c for c in cells if c]
+        if cells:
+            rows.append(" | ".join(cells))
+    out = (f"Table — {cap_text}\n" if cap_text else "") + "\n".join(rows)
+    return out.strip()
+
+
+def extract_html_sections(path: Path) -> list[Section]:
+    """Extract retrievable sections from the COMPILED Metanorma HTML —
+    rendered tables (caption + rows), anchored clause headings, paragraphs
+    and lists. This is the preferred source: the render already resolved
+    all AsciiDoc syntax."""
+    soup = BeautifulSoup(path.read_text(encoding="utf-8", errors="replace"), "html.parser")
+    for tag in soup(["script", "style", "nav"]):
+        tag.decompose()
+    body = soup.body or soup
+
+    sections: list[Section] = []
+    cur_anchor, cur_title = "", ""
+    buf: list[str] = []
+
+    def flush():
+        text = re.sub(r"\n{3,}", "\n\n", "\n".join(b for b in buf if b)).strip()
+        if text:
+            title = cur_title
+            lines = text.split("\n")
+            # numbered term-entries (title "3.1.1"): the term name leads the body
+            if re.fullmatch(r"[\d.]+", title) and " | " in lines[0]:
+                title = f"{title} {lines[0].split(' | ')[0]}"
+            sections.append(Section(anchor=cur_anchor, title=title, text=text, source_file="html"))
+        buf.clear()
+
+    for el in body.find_all(["h2", "h3", "h4", "h5", "p", "li", "table", "pre"]):
+        # skip anything nested inside an already-captured container
+        if el.name != "table" and el.find_parent("table"):
+            continue
+        if el.name not in ("li",) and el.find_parent("li"):
+            continue
+        if el.name == "pre" and el.find_parent("pre"):
+            continue
+        if el.name in ("h2", "h3", "h4", "h5"):
+            flush()
+            cur_anchor, cur_title = _html_section_anchor(el)
+            continue
+        if el.name == "table":
+            t = _table_text(el)
+            if t:
+                buf.append(t)
+            continue
+        if el.name == "li":
+            t = re.sub(r"[ \t]+", " ", el.get_text(" ", strip=True))
+            if t:
+                buf.append(f"- {t}")
+            continue
+        if el.name == "pre":
+            t = el.get_text("\n", strip=True)
+            if t:
+                buf.append(t)
+            continue
+        t = el.get_text(" ", strip=True)
+        if t and not BOILERPLATE_RE.search(t):
+            buf.append(re.sub(r"[ \t]+", " ", t))
+    flush()
+    return sections
 
 
 def parse_sections(sections_dir: Path, fallback_adoc: str | None) -> list[Section]:
@@ -126,9 +247,27 @@ def parse_doc(doc_root: Path, corpus: str, slug: str) -> DocRecord | None:
     adoc = adoc_path.read_text(encoding="utf-8", errors="replace")
     title, attrs = parse_header(adoc)
     docidentifier, doctype, doc_number = classify_identifier(title, attrs, slug)
-    edition = attrs.get("edition", "").strip() or edition_from_slug(slug)
+    edition = attrs.get("edition", "").strip()
+    year_in_id = re.search(r":(\d{4})", docidentifier)
+    if year_in_id:
+        edition = year_in_id.group(1)
+    elif not re.fullmatch(r"(19|20)\d{2}", edition):
+        # part/edition numbers like "2" are not years — never render as ":2"
+        edition = edition_from_slug(slug)
     language = attrs.get("language", "").strip() or language_from_slug(slug)
-    sections = parse_sections(metanorma_dir / "sections", adoc)
+    html_path = (
+        metanorma_dir / "document.html"
+        if corpus == "clean"
+        else doc_root / "verify" / "document.html"
+    )
+    sections: list[Section] = []
+    if html_path.is_file():
+        try:
+            sections = extract_html_sections(html_path)
+        except Exception as e:  # noqa: BLE001 — fall back to the adoc sections
+            print(f"  ! html extract error {slug}: {e}")
+    if not sections:
+        sections = parse_sections(metanorma_dir / "sections", adoc)
     word_count = sum(len(s.text.split()) for s in sections)
     tier = "curated" if corpus == "clean" else ("shell" if word_count < SHELL_WORD_THRESHOLD else "ocr-clean")
     return DocRecord(

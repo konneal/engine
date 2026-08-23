@@ -1,6 +1,7 @@
 name = "rag-public"
 main = "src/index.ts"
 compatibility_date = "2026-08-01"
+workers_dev = true
 
 # Route: custom domain on the oimlsmart.org zone (OIML SMART account).
 routes = [
@@ -9,7 +10,7 @@ routes = [
 
 
 [assets]
-directory = "./public"
+directory = "../../site/dist"
 
 [ai]
 binding = "AI"
