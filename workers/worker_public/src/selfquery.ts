@@ -25,10 +25,17 @@ const DOC_RE_OIML = /\boiml\s+([rbdge])\s*(\d{1,3})(?:-(\d{1,2}))?\b/i;
 const DOC_RE_SPACE = /\b([rbdge])\s+(\d{1,3})(?:-(\d{1,2}))?\b/i;
 const EDITION_RE = /\b(19[5-9]\d|20[0-4]\d)\b/;
 
+// "how do I get a device certified to R 60" asks about the PROCESS (the
+// OIML-CS, B-series) — a doc filter would hide the answer documents and
+// the model honestly refuses. Process intent drops the filter; relevance
+// still surfaces the named document's content where that IS the answer.
+export const PROCESS_INTENT_RE =
+  /\b(certif\w*|issuing authorit\w*|\bapply\b|application|applicant|type approval|get\b|obtain|compliance|comply|conformity assessment|registration|recognit\w*)\b/i;
+
 export function extractFilters(query: string): QueryFilters {
   const f: QueryFilters = {};
   const dm = query.match(DOC_RE_OIML) ?? query.match(DOC_RE_SPACE);
-  if (dm) {
+  if (dm && !PROCESS_INTENT_RE.test(query)) {
     f.doctype = dm[1].toUpperCase();
     f.doc_number = dm[2];
   }

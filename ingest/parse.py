@@ -30,6 +30,7 @@ LANG_FROM_SLUG = [
     ("-srp", "sr"), ("-sr", "sr"),
     ("-pol", "pl"), ("-pl", "pl"),
     ("-eng", "en"), ("-en", "en"), ("-e", "en"),
+    ("-zho", "zh"), ("-chi", "zh"), ("-cht", "zh"), ("-zh", "zh"),
 ]
 ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍﻿"), None)
 BLOCK_ATTR_RE = re.compile(r"^\[[^[\]]*\]$")

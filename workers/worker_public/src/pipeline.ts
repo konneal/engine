@@ -1,6 +1,6 @@
 import { embed, rerank } from "./ai";
 import { LIMITS, MODELS } from "./config";
-import { extractFilters, toVectorizeFilter, QueryFilters } from "./selfquery";
+import { extractFilters, toVectorizeFilter, QueryFilters, PROCESS_INTENT_RE } from "./selfquery";
 
 export interface ChunkMeta {
   doc_id: string;
@@ -42,9 +42,17 @@ export function retrievalQuery(query: string, prev?: string): string {
   return query;
 }
 
+// colloquial process questions ("how do I get a device certified to R 60")
+// share almost no vocabulary with the B-series prose that answers them —
+// expand the retrieval query with the corpus's own terms so the window
+// contains the certification-system documents at all
+const PROCESS_EXPANSION = " OIML Certification System OIML-CS issuing authority application type evaluation certificate";
+
 export async function retrieve(env: any, query: string, opts: { prev?: string } = {}): Promise<Retrieved> {
   const filters = extractFilters(query);
-  const vector = await embed(env.AI, MODELS.embed, retrievalQuery(query, opts.prev));
+  let rq = retrievalQuery(query, opts.prev);
+  if (PROCESS_INTENT_RE.test(query)) rq += PROCESS_EXPANSION;
+  const vector = await embed(env.AI, MODELS.embed, rq);
   const q: any = { topK: LIMITS.retrieveK, returnMetadata: "all" };
   const filter = toVectorizeFilter(filters);
   if (filter) q.filter = filter;
@@ -198,7 +206,7 @@ export interface HistoryTurn {
   content: string;
 }
 
-export function buildMessages(query: string, hits: Hit[], lang?: string, history: HistoryTurn[] = []) {
+export function buildMessages(query: string, hits: Hit[], lang?: string, history: HistoryTurn[] = [], retrievalNote?: string) {
   const context = hits
     .map((h, i) => {
       const st = h.metadata.status === "withdrawn" || h.metadata.status === "superseded" ? ` [${h.metadata.status}]` : "";
@@ -210,12 +218,14 @@ export function buildMessages(query: string, hits: Hit[], lang?: string, history
   const system = [
     "You answer questions about OIML publications (legal metrology: Recommendations, Documents, Basic publications, Guides).",
     "Use ONLY the numbered context passages provided. Never use outside knowledge for substantive claims.",
-    "Cite every claim inline with the passage label, e.g. [OIML R 87:2004 §3.2]. Cite only provided passages.",
+    "Cite every claim inline with the passage label as plain text in square brackets, e.g. [OIML R 87:2004 §3.2] — never as markdown links, never invent URLs. Cite only provided passages.",
     "Quote normative values exactly (MPE values, accuracy classes, limits, edition-specific wording) — do not round, convert or paraphrase them.",
     "For definitions, quote the source definition verbatim.",
     "When passages from several editions of the same document appear, answer from the most recent edition unless the question names an edition; say which edition you used.",
     "Passages carry a status (in-force, superseded, withdrawn). Prefer in-force editions for normative claims; if you must cite a superseded or withdrawn edition, say so explicitly.",
-    "If the context does not contain the answer, reply with ONLY this exact sentence and nothing else: I don't have information on this in the indexed OIML publications. — never invent content.",
+    "Synthesize practical answers from the passages: definitions, procedures and rules across passages answer the question even when no single passage states the answer verbatim — cite each passage you draw on.",
+    "MANDATORY: when the question asks how to do something (get certified, apply, comply, register, test) and the passages describe the governing system or procedure, ALWAYS answer with that procedure citing the governing documents. Refusing such a question because the passages do not name the specific publication is WRONG — the publication sets technical requirements; the HOW is governed by the certification-system documents in the passages.",
+    "Refuse (with ONLY this exact sentence: I don't have information on this in the indexed OIML publications.) only when NO passage relates to the question's topic — never invent content.",
     "Be concise and precise. Answer in the question's language" + (lang ? ` (explicitly requested: ${lang})` : "") + ".",
   ].join(" ");
 
@@ -228,6 +238,7 @@ export function buildMessages(query: string, hits: Hit[], lang?: string, history
 
   return [
     { role: "system", content: systemWithHistory },
+    ...(retrievalNote ? [{ role: "system", content: retrievalNote }] : []),
     ...history.map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: `Question: ${query}\n\nContext passages:\n${context}` },
   ];

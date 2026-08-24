@@ -44,7 +44,7 @@ async function runCase(c) {
   const cites = body.citations ?? [];
   const citeText = cites.map((x) => `${x.docidentifier ?? ""} ${x.doc_id ?? ""}`).join(" ");
 
-  const isRefusal = answer.trim() === REFUSAL;
+  const isRefusal = answer.trim().startsWith(REFUSAL); // sentence first; a short why may follow
   if (c.expect.refusal) {
     isRefusal ? pass("refusal exact") : fail(`expected refusal, got: ${answer.slice(0, 100)}`);
   } else if (isRefusal && c.expect.allow_refusal) {

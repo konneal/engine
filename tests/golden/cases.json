@@ -147,5 +147,15 @@
       "citation_all": "OIML",
       "answer_none": "idx_iso|smartcab"
     }
+  },
+  {
+    "id": "certification-process",
+    "query": "how can I get a device certified to R 60?",
+    "expect": {
+      "answer_any": [
+        "issuing authorit|Issuing Authorit|OIML-CS|application"
+      ],
+      "citation_any": "B ?(3|18|20|11)|OIML-CS|PD-05|18"
+    }
   }
 ]

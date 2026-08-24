@@ -3,6 +3,7 @@ import { buildMessages, citations, retrieve, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { INTERNAL_ROLES } from "./auth";
+import { PROCESS_INTENT_RE } from "./selfquery";
 
 export interface Env {
   AI: any;
@@ -276,7 +277,15 @@ async function handleAsk(
     return json({ ...out, ...(exempt ? {} : { quota }) });
   }
 
-  const messages = buildMessages(q.query, hits, q.lang, history);
+  const messages = buildMessages(
+    q.query,
+    hits,
+    q.lang,
+    history,
+    PROCESS_INTENT_RE.test(q.query)
+      ? "Retrieval note: these passages come from the OIML Certification System documents because they govern certification/application procedures for OIML publications."
+      : undefined,
+  );
   const queryHash = await sha256Hex(q.query);
   const cites = citations(hits);
 
