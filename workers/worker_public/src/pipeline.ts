@@ -14,6 +14,8 @@ export interface ChunkMeta {
   tier: string;
   corpus: string;
   text_ref: string;
+  status?: string;
+  superseded_by?: string;
 }
 
 export interface Hit {
@@ -199,7 +201,8 @@ export interface HistoryTurn {
 export function buildMessages(query: string, hits: Hit[], lang?: string, history: HistoryTurn[] = []) {
   const context = hits
     .map((h, i) => {
-      const label = `${h.metadata.docidentifier || h.metadata.doc_id}:${h.metadata.edition || ""} §${h.metadata.clause_anchor || ""}`.replace(/(:|§)+$/g, "");
+      const st = h.metadata.status === "withdrawn" || h.metadata.status === "superseded" ? ` [${h.metadata.status}]` : "";
+      const label = `${h.metadata.docidentifier || h.metadata.doc_id}:${h.metadata.edition || ""} §${h.metadata.clause_anchor || ""}${st}`.replace(/(:|§)+$/g, "");
       return `[${i + 1}] ${label} ${h.metadata.clause_title ? "— " + h.metadata.clause_title : ""}\n${h.text}`;
     })
     .join("\n\n");
@@ -211,6 +214,7 @@ export function buildMessages(query: string, hits: Hit[], lang?: string, history
     "Quote normative values exactly (MPE values, accuracy classes, limits, edition-specific wording) — do not round, convert or paraphrase them.",
     "For definitions, quote the source definition verbatim.",
     "When passages from several editions of the same document appear, answer from the most recent edition unless the question names an edition; say which edition you used.",
+    "Passages carry a status (in-force, superseded, withdrawn). Prefer in-force editions for normative claims; if you must cite a superseded or withdrawn edition, say so explicitly.",
     "If the context does not contain the answer, reply with ONLY this exact sentence and nothing else: I don't have information on this in the indexed OIML publications. — never invent content.",
     "Be concise and precise. Answer in the question's language" + (lang ? ` (explicitly requested: ${lang})` : "") + ".",
   ].join(" ");
@@ -230,14 +234,19 @@ export function buildMessages(query: string, hits: Hit[], lang?: string, history
 }
 
 export function citations(hits: Hit[]) {
-  return hits.map((h) => ({
-    doc_id: h.metadata.doc_id,
-    docidentifier: h.metadata.docidentifier,
-    edition: h.metadata.edition,
-    language: h.metadata.language,
-    clause_anchor: h.metadata.clause_anchor,
-    clause_title: h.metadata.clause_title,
-    snippet: h.text.slice(0, 400),
-    score: h.rerank_score ?? h.score,
-  }));
+  const rank = (s?: string) => (s === "in-force" || s === "joint" ? 0 : s === "unknown" || !s ? 1 : 2);
+  return [...hits]
+    .map((h) => ({
+      doc_id: h.metadata.doc_id,
+      docidentifier: h.metadata.docidentifier,
+      edition: h.metadata.edition,
+      language: h.metadata.language,
+      clause_anchor: h.metadata.clause_anchor,
+      clause_title: h.metadata.clause_title,
+      status: h.metadata.status ?? "unknown",
+      superseded_by: h.metadata.superseded_by || undefined,
+      snippet: h.text.slice(0, 400),
+      score: h.rerank_score ?? h.score,
+    }))
+    .sort((a, b) => rank(a.status) - rank(b.status)); // in-force first, withdrawn last
 }

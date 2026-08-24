@@ -385,6 +385,8 @@ async function handleSearch(
     language: h.metadata.language,
     clause_anchor: h.metadata.clause_anchor,
     clause_title: h.metadata.clause_title,
+    status: h.metadata.status ?? "unknown",
+    superseded_by: h.metadata.superseded_by || undefined,
     text: h.text,
     score: h.rerank_score ?? h.score,
   }));

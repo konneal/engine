@@ -123,6 +123,17 @@ window.fetch = async (url, opts = {}) => {
           clause_anchor: "overview",
           clause_title: "Document overview",
           snippet: "Metrological regulation for load cells",
+          status: "in-force",
+        },
+        {
+          doc_id: "dirty:r60-2000-e",
+          docidentifier: "OIML R 60",
+          edition: "2000",
+          clause_anchor: "4.1.2",
+          clause_title: "4.1.2 Maximum number of verification intervals",
+          snippet: "§4.1.2 4.1.2 The maximum number of load cell verification intervals shall be within the following limits",
+          status: "superseded",
+          superseded_by: "OIML R 60:2017",
         },
       ],
       quota: { used: 1, limit: 20 },
@@ -172,6 +183,9 @@ check("empty state removed after asking", !$("empty"));
 check("user bubble rendered", chat.textContent.includes("What is R 60?"));
 check("assistant answer streamed fully", chat.textContent.includes("R 60 is the OIML Recommendation for load cells"), JSON.stringify(chat.textContent.slice(0, 200)));
 check("sources panel rendered", chat.textContent.includes("Sources") && chat.textContent.includes("OIML R 60-1"));
+check("superseded badge shown with successor", chat.textContent.includes("superseded") && chat.textContent.includes("OIML R 60:2017"));
+const dupCtx = (chat.textContent.match(/.{0,40}4\.1\.2\s*4\.1\.2.{0,40}/) || [""])[0];
+check("doubled clause numbers deduplicated", !chat.textContent.match(/4\.1\.2\s*4\.1\.2/), JSON.stringify(dupCtx));
 check("message actions rendered", [...chat.querySelectorAll("button")].some((b) => b.textContent === "Copy"));
 check("quota meter updated", $("quotameter").textContent.includes("1 / 20"));
 const askReq = asked.find((a) => a.url.includes("/api/ask"));

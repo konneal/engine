@@ -22,6 +22,8 @@ class DocRecord(BaseModel):
     language: str = "en"
     title: str = ""
     word_count: int = 0
+    status: str = "unknown"
+    superseded_by: str = ""
     sections: list[Section] = Field(default_factory=list)
 
     @property

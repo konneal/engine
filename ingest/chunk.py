@@ -83,6 +83,8 @@ def _overview_chunk(doc: DocRecord, ident: str) -> Chunk:
             "clause_title": "Document overview",
             "tier": doc.tier,
             "corpus": doc.corpus,
+            "status": doc.status,
+            "superseded_by": doc.superseded_by,
             "text_ref": f"{doc.corpus}/{doc.slug}#overview",
         },
     )
@@ -115,6 +117,8 @@ def chunk_doc(doc: DocRecord) -> list[Chunk]:
                         "clause_title": sec.title,
                         "tier": doc.tier,
                         "corpus": doc.corpus,
+                        "status": doc.status,
+                        "superseded_by": doc.superseded_by,
                         "text_ref": f"{doc.corpus}/{doc.slug}#{sec.source_file}",
                     },
                 )

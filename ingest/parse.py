@@ -7,6 +7,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 from .config import CLEAN_DIR, DIRTY_DIR, INGEST_LANGUAGES, SHELL_WORD_THRESHOLD
+from .status import status_for
 from .models import DocRecord, Section
 
 ATTR_RE = re.compile(r"^:([A-Za-z0-9_-]+):\s*(.*)$", re.M)
@@ -290,11 +291,15 @@ def parse_doc(doc_root: Path, corpus: str, slug: str) -> DocRecord | None:
         sections = parse_sections(metanorma_dir / "sections", adoc)
     word_count = sum(len(s.text.split()) for s in sections)
     tier = "curated" if corpus == "clean" else ("shell" if word_count < SHELL_WORD_THRESHOLD else "ocr-clean")
+    plain_ident = normalize_identifier(docidentifier or f"OIML {doctype} {doc_number}")
+    status_info = status_for(plain_ident, edition)
     return DocRecord(
         doc_id=f"{corpus}:{slug}",
         slug=slug,
         corpus=corpus,
         tier=tier,
+        status=status_info["status"],
+        superseded_by=status_info["superseded_by"],
         docidentifier=docidentifier,
         doctype=doctype,
         doc_number=doc_number,
