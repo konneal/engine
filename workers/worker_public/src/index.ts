@@ -133,6 +133,7 @@ async function generateStream(env: Env, messages: any[]): Promise<ReadableStream
       messages,
       stream: true,
       max_tokens: LIMITS.maxOutputTokens,
+      reasoning_effort: "low",
     });
     if (res && typeof res.getReader === "function") return res as ReadableStream<Uint8Array>;
     if (res && res.body && typeof res.body.getReader === "function") return res.body;
@@ -147,6 +148,7 @@ async function generateOnce(env: Env, messages: any[]): Promise<string | null> {
     const res: any = await env.AI.run(MODELS.anon, {
       messages,
       max_tokens: LIMITS.maxOutputTokens,
+      reasoning_effort: "low",
     });
     if (typeof res?.response === "string") return res.response;
     if (typeof res?.choices?.[0]?.message?.content === "string") return res.choices[0].message.content;

@@ -6,9 +6,9 @@ export const MODELS = {
 
 export const LIMITS = {
   maxInputChars: 1200,
-  maxOutputTokens: 768,
-  retrieveK: 20,
-  rerankKeep: 5,
+  maxOutputTokens: 3072, // qwen3-30b-a3b always reasons; 768 starved the answer entirely
+  retrieveK: 50, // Vectorize caps topK at 50 when returnMetadata=all
+  rerankKeep: 8,
   cacheTtlSec: 6 * 3600,
 } as const;
 

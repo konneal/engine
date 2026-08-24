@@ -5,16 +5,18 @@ export interface QueryFilters {
   language?: string;
 }
 
+// bare "de"/"en" are omitted: they appear as ordinary words in French
+// queries ("cellule de pesée", "en français") and would hijack the filter
 const LANGS: Record<string, string> = {
-  english: "en", en: "en", anglais: "en",
-  french: "fr", fr: "fr", francais: "fr", français: "fr",
-  german: "de", de: "de", deutsch: "de", allemand: "de",
-  arabic: "ar", ar: "ar", arabe: "ar",
-  spanish: "es", es: "es", espanol: "es", español: "es",
-  persian: "fa", farsi: "fa", fa: "fa",
-  ukrainian: "uk", uk: "uk",
-  serbian: "sr", sr: "sr",
-  polish: "pl", pl: "pl",
+  english: "en", anglais: "en",
+  french: "fr", francais: "fr", français: "fr",
+  german: "de", deutsch: "de", allemand: "de",
+  arabic: "ar", arabe: "ar",
+  spanish: "es", espanol: "es", español: "es",
+  persian: "fa", farsi: "fa",
+  ukrainian: "uk", ukrainien: "uk",
+  serbian: "sr", serbe: "sr",
+  polish: "pl", polonais: "pl",
 };
 
 const DOC_RE = /\b(?:oiml\s+)?([rbdge])\s?(\d{1,3})(-(\d{1,2}))?\b/i;

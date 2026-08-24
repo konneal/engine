@@ -31,7 +31,7 @@ database_name = "rag-public"
 database_id = "655cd63f-1826-4161-bfd1-90c584add4ce"
 
 [vars]
-INDEX_VERSION = "public-v2.1"
+INDEX_VERSION = "public-v2.17"
 ANON_DAY_ASK = "20"
 ANON_DAY_SEARCH = "50"
 KEY_DAY_ASK_DEFAULT = "2000"

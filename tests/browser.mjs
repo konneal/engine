@@ -84,7 +84,9 @@ const answer = await page.evaluate(() => {
   const last = bubbles[bubbles.length - 1];
   return { bubbles: bubbles.length, text: (last?.textContent || "").trim().slice(0, 80) };
 });
-if (answer.bubbles < 2 || !answer.text) fail.push(`suggestion click produced no answer (bubbles=${answer.bubbles}, text="${answer.text}")`);
+const quotaNotice = /daily (question )?limit|try again tomorrow/i.test(answer.text);
+if (answer.bubbles < 2 || (!answer.text && !quotaNotice)) fail.push(`suggestion click produced no answer (bubbles=${answer.bubbles}, text="${answer.text}")`);
+if (quotaNotice) log("suggestion click reached the API (anon quota for this IP is exhausted — notice rendered)");
 log(`suggestion answer: ${answer.bubbles} bubbles — ${answer.text.slice(0, 60)}`);
 
 await page.screenshot({ path: "artifacts/site-desktop.png", fullPage: false });

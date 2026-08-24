@@ -58,26 +58,52 @@ export async function rerank(
   query: string,
   texts: string[],
 ): Promise<number[] | null> {
+  // verified REST shape first: contexts are [{text}] objects; the binding
+  // may instead want plain strings — try both, then the legacy names
   const shapes: Array<unknown> = [
+    { query, contexts: texts.map((t) => ({ text: t })) },
+    { query, contexts: texts },
     { query, candidates: texts.map((t, i) => ({ id: String(i), text: t })) },
     { query, passages: texts },
-    { input: { query, passages: texts } },
   ];
+  let lastErr: unknown = null;
   for (const body of shapes) {
-    try {
-      const res = (await ai.run(model, body)) as any;
-      const raw = res?.data ?? res?.result?.data ?? res?.response;
-      if (!Array.isArray(raw)) continue;
-      const scores = raw.map((x: any) => {
-        const n = typeof x === "number" ? x : Number(x?.score ?? x?.relevance_score ?? NaN);
-        return Number.isFinite(n) ? n : NaN;
-      });
-      if (scores.length === texts.length && scores.some((s) => Number.isFinite(s))) {
-        return scores;
+    // one retry per shape: a transient capacity error must not silently
+    // degrade the pipeline to vector order
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = (await ai.run(model, body)) as any;
+        const raw = res?.data ?? res?.result?.data ?? res?.response;
+        if (!Array.isArray(raw)) {
+          lastErr = new Error(`rerank shape returned ${typeof raw}`);
+          break;
+        }
+        const scores: number[] = new Array(texts.length).fill(NaN);
+        raw.forEach((x: any, i: number) => {
+          if (typeof x === "number") {
+            scores[i] = x;
+            return;
+          }
+          // ids may arrive as numbers or numeric strings; anything else
+          // falls back to position — which misorders sorted-by-score
+          // responses, so only accept genuinely index-shaped ids
+          const rawId = x?.id;
+          const id =
+            Number.isInteger(rawId)
+              ? rawId
+              : /^\d+$/.test(String(rawId ?? ""))
+                ? Number(rawId)
+                : i;
+          const n = Number(x?.score ?? x?.relevance_score ?? NaN);
+          if (id >= 0 && id < scores.length) scores[id] = n;
+        });
+        if (scores.some((s) => Number.isFinite(s))) return scores;
+        lastErr = new Error("rerank scores unparseable");
+      } catch (e) {
+        lastErr = e;
       }
-    } catch {
-      // try next shape
     }
   }
+  console.error("rerank failed, using vector order:", String(lastErr));
   return null;
 }
