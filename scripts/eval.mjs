@@ -84,12 +84,74 @@ for (const c of cases) {
   console.log(`${r.ok ? "✓" : "✗"} ${r.id.padEnd(22)} ${r.ok ? "" : "\n    " + r.checks.filter((x) => x.startsWith("✗")).join("\n    ")}`);
 }
 
+// — faithfulness scoring (RAGAS-style, LLM-as-judge) —
+// The REST API call uses the same Workers AI model; the eval harness
+// runs outside a Worker, so we call directly.
+const { default: readFileSync2 } = await import("node:fs");
+const envText = readFileSync2(new URL("../.env", import.meta.url), "utf8");
+const CF_ACCOUNT = (envText.match(/^CLOUDFLARE_ACCOUNT_ID=(.+)$/m) ?? [])[1]?.trim();
+const CF_TOKEN = (envText.match(/^CLOUDFLARE_API_TOKEN=(.+)$/m) ?? [])[1]?.trim() ||
+  (() => {
+    // fall back to wrangler's stored token
+    try {
+      const toml = readFileSync2(
+        process.env.HOME + "/Library/Preferences/.wrangler/config/default.toml",
+        "utf8",
+      );
+      return (toml.match(/oauth_token\s*=\s*"([^"]+)"/) ?? [])[1];
+    } catch {
+      return null;
+    }
+  })();
+
+async function faithfulness(answer, passages) {
+  if (!answer || !passages?.length) return null;
+  const ctx = passages.slice(0, 6).map((p, i) => `[${i + 1}] ${(p.snippet || p.text || "").slice(0, 300)}`).join("\n");
+  try {
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT}/ai/run/@cf/deepseek-ai/deepseek-v4-flash`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${CF_TOKEN}` },
+        body: JSON.stringify({
+          messages: [
+            { role: "system", content: 'Judge if the answer is grounded in the passages. Reply ONLY: {"score": 0.0-1.0}' },
+            { role: "user", content: `Answer:\n${answer.slice(0, 1500)}\n\nPassages:\n${ctx}` },
+          ],
+          max_tokens: 100,
+          reasoning_effort: "low",
+        }),
+      },
+    );
+    const data = await res.json();
+    const text = data?.result?.response ?? data?.result?.choices?.[0]?.message?.content ?? "";
+    const m = text.match(/"score"\s*:\s*([\d.]+)/);
+    return m ? parseFloat(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+console.log("\n— faithfulness (LLM judge) —");
+for (const r of results) {
+  if (r.ok && r.answer && r.answer.length > 50) {
+    const score = await faithfulness(r.answer, r.citations ?? []);
+    if (score !== null) {
+      const mark = score >= 0.8 ? "✓" : score >= 0.5 ? "△" : "✗";
+      console.log(`  ${mark} ${r.id.padEnd(22)} faithfulness=${score.toFixed(2)}`);
+      r.faithfulness = score;
+    }
+  }
+}
+
 const passed = results.filter((r) => r.ok).length;
 const rate = passed / results.length;
 mkdirSync(new URL("../artifacts/", import.meta.url), { recursive: true });
+const faithScores = results.filter((r) => r.faithfulness !== undefined).map((r) => r.faithfulness);
+const avgFaith = faithScores.length ? (faithScores.reduce((a, b) => a + b, 0) / faithScores.length).toFixed(2) : null;
 writeFileSync(
   new URL("../artifacts/eval-report.json", import.meta.url),
-  JSON.stringify({ base: BASE, at: new Date().toISOString(), passed, total: results.length, rate, results }, null, 1),
+  JSON.stringify({ base: BASE, at: new Date().toISOString(), passed, total: results.length, rate, avg_faithfulness: avgFaith, results }, null, 1),
 );
-console.log(`\ngolden eval: ${passed}/${results.length} (${(rate * 100).toFixed(0)}%) — threshold ${(THRESHOLD * 100).toFixed(0)}%`);
+console.log(`\ngolden eval: ${passed}/${results.length} (${(rate * 100).toFixed(0)}%)${avgFaith ? ` · faithfulness ${avgFaith}` : ""} — threshold ${(THRESHOLD * 100).toFixed(0)}%`);
 process.exit(rate >= THRESHOLD ? 0 : 1);

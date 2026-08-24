@@ -1,6 +1,7 @@
 import { embed, rerank } from "./ai";
 import { LIMITS, MODELS } from "./config";
 import { QueryFilters, toVectorizeFilter, extractFilters, PROCESS_INTENT_RE } from "./selfquery";
+import { keywordRank, rrfFuse } from "./hybrid";
 import { QueryUnderstanding } from "./understand";
 
 export interface ChunkMeta {
@@ -84,7 +85,7 @@ export async function retrieve(
     matches = res.matches ?? [];
   }
 
-  const hits: Hit[] = matches.map((m) => ({
+  let hits: Hit[] = matches.map((m) => ({
     id: m.id,
     score: m.score,
     metadata: (m.metadata ?? {}) as ChunkMeta,
@@ -111,6 +112,7 @@ export async function retrieve(
   hits.sort((a, b) => b.score - a.score);
 
   if (hits.length > 1) {
+    // 1. cross-encoder rerank (semantic precision)
     try {
       const scores = await rerank(env.AI, MODELS.rerank, query, hits.map((h) => h.text));
       if (scores) {
@@ -119,6 +121,16 @@ export async function retrieve(
       }
     } catch {
       // vector order is the fallback, by design
+    }
+
+    // 2. keyword (lexical) ranking — catches exact terms dense embeddings
+    //    miss (part numbers, "n_LC", defined terms)
+    const keywordRanked = keywordRank(rq, hits);
+
+    // 3. RRF fusion of dense+rerank ranking with keyword ranking
+    //    (only when keyword actually found something)
+    if (keywordRanked.length > 0) {
+      hits = rrfFuse(hits, keywordRanked, LIMITS.retrieveK);
     }
   }
 
