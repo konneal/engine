@@ -70,6 +70,8 @@ const dom = new JSDOM(html, {
       window.matchMedia ||
       ((q) => ({ matches: false, media: q, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} }));
     window.ResizeObserver = window.ResizeObserver || class { observe() {} unobserve() {} disconnect() {} };
+    window.URL.createObjectURL = window.URL.createObjectURL || (() => "blob:stub");
+    window.URL.revokeObjectURL = window.URL.revokeObjectURL || (() => {});
   },
 });
 const { window } = dom;
@@ -131,6 +133,12 @@ window.fetch = async (url, opts = {}) => {
   ]);
 };
 
+const exported = [];
+const realCreateObjectURL = (w) => w.URL.createObjectURL;
+window.URL.createObjectURL = (blob) => {
+  exported.push(blob);
+  return "blob:stub";
+};
 window.prompt = () => "Renamed chat";
 window.confirm = () => true;
 
@@ -226,6 +234,32 @@ regen.dispatchEvent(new window.Event("click", { bubbles: true }));
 await new Promise((r) => setTimeout(r, 250));
 const freshReq = asked.filter((a) => a.url.includes("/api/ask") && a.body.fresh === true);
 check("regenerate asks with fresh=true", freshReq.length >= 1);
+
+// — fork: branch the conversation from the first assistant message —
+const forkBtn = [...chat.querySelectorAll("button")].find((b) => b.textContent === "Fork");
+check("fork action available on assistant messages", !!forkBtn);
+const convCountBeforeFork = JSON.parse(window.localStorage.getItem("rag.chats.v1") ?? "[]").length;
+forkBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 80));
+const convsAfterFork = JSON.parse(window.localStorage.getItem("rag.chats.v1") ?? "[]");
+check("fork creates a copied conversation", convsAfterFork.length === convCountBeforeFork + 1);
+check("fork is active and carries the thread", chat.textContent.includes("Recommendation for load cells"));
+check("fork title marks the branch", convsAfterFork.at(-1).title.includes("(fork)"));
+
+// — export —
+$("exportmd").dispatchEvent(new window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 60));
+check("markdown export produces a download", exported.length >= 1);
+$("exportjson").dispatchEvent(new window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 60));
+check("json export produces a download", exported.length >= 2);
+
+// — edit: re-ask from a user message —
+const editBtn = [...chat.querySelectorAll(".user-acts button")].find((b) => b.textContent === "Edit");
+check("edit action available on user messages", !!editBtn);
+editBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 60));
+check("edit loads the question into the composer", input.value.trim().length > 0);
 
 // — refusal path —
 input.value = "How do I make lasagna?";
