@@ -184,6 +184,12 @@ check("user bubble rendered", chat.textContent.includes("What is R 60?"));
 check("assistant answer streamed fully", chat.textContent.includes("R 60 is the OIML Recommendation for load cells"), JSON.stringify(chat.textContent.slice(0, 200)));
 check("sources panel rendered", chat.textContent.includes("Sources") && chat.textContent.includes("OIML R 60-1"));
 check("superseded badge shown with successor", chat.textContent.includes("superseded") && chat.textContent.includes("OIML R 60:2017"));
+check("source chips collapsed by default", chat.querySelectorAll(".src-card.hidden").length === 2);
+const firstChip = chat.querySelector(".src-chip");
+firstChip.dispatchEvent(new window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 50));
+check("source chip expands its card", chat.querySelectorAll(".src-card.hidden").length === 1);
+check("inline citation links rendered", chat.querySelector(".cite-ref") !== null);
 const dupCtx = (chat.textContent.match(/.{0,40}4\.1\.2\s*4\.1\.2.{0,40}/) || [""])[0];
 check("doubled clause numbers deduplicated", !chat.textContent.match(/4\.1\.2\s*4\.1\.2/), JSON.stringify(dupCtx));
 check("message actions rendered", [...chat.querySelectorAll("button")].some((b) => b.textContent === "Copy"));
@@ -248,6 +254,7 @@ regen.dispatchEvent(new window.Event("click", { bubbles: true }));
 await new Promise((r) => setTimeout(r, 250));
 const freshReq = asked.filter((a) => a.url.includes("/api/ask") && a.body.fresh === true);
 check("regenerate asks with fresh=true", freshReq.length >= 1);
+check("regenerate keeps a single user bubble", [...chat.querySelectorAll(".user-bubble")].filter((b) => b.textContent.includes("xss probe")).length === 1);
 
 // — fork: branch the conversation from the first assistant message —
 const forkBtn = [...chat.querySelectorAll("button")].find((b) => b.textContent === "Fork");
@@ -269,11 +276,20 @@ await new Promise((r) => setTimeout(r, 60));
 check("json export produces a download", exported.length >= 2);
 
 // — edit: re-ask from a user message —
+const userBubblesBefore = chat.querySelectorAll(".user-bubble").length;
 const editBtn = [...chat.querySelectorAll(".user-acts button")].find((b) => b.textContent === "Edit");
 check("edit action available on user messages", !!editBtn);
 editBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
 await new Promise((r) => setTimeout(r, 60));
-check("edit loads the question into the composer", input.value.trim().length > 0);
+const editBox = chat.querySelector(".edit-box textarea");
+check("inline editor opens with the question", !!editBox && editBox.value.trim().length > 0);
+const resendBtn = chat.querySelector(".edit-actions .primary");
+check("re-send action offered", !!resendBtn && resendBtn.textContent.includes("Re-send"));
+resendBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
+await new Promise((r) => setTimeout(r, 250));
+check("re-send wipes the tail and re-asks in place", chat.querySelectorAll(".user-bubble").length === userBubblesBefore);
+const reuseReq = asked.filter((a) => a.url.includes("/api/ask") && a.body.reuse_user_sentinel !== undefined);
+check("re-send does not duplicate the question server-side", asked.some((a) => a.body.fresh === true));
 
 // — refusal path —
 input.value = "How do I make lasagna?";
