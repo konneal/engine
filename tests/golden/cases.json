@@ -157,5 +157,14 @@
       ],
       "citation_any": "B ?(3|18|20|11)|OIML-CS|PD-05|18"
     }
+  },
+  {
+    "id": "r60-test-report-forms",
+    "query": "How many test report forms are in r60?",
+    "expect": {
+      "allow_refusal": true,
+      "answer_any": "[Ff]orm|test report",
+      "citation_any": "R 60"
+    }
   }
 ]

@@ -23,6 +23,9 @@ const LANGS: Record<string, string> = {
 // letter+number ("E2", "M1") is an accuracy class, never a document
 const DOC_RE_OIML = /\boiml\s+([rbdge])\s*(\d{1,3})(?:-(\d{1,2}))?\b/i;
 const DOC_RE_SPACE = /\b([rbdge])\s+(\d{1,3})(?:-(\d{1,2}))?\b/i;
+// glued lowercase ("r60", "b11") — users type doc refs lowercase; accuracy
+// classes (E2, M1) are written uppercase, so this is unambiguous
+const DOC_RE_GLUED_LOWER = /\b([rbdge])(\d{1,3})(?:-(\d{1,2}))?\b/;
 const EDITION_RE = /\b(19[5-9]\d|20[0-4]\d)\b/;
 
 // "how do I get a device certified to R 60" asks about the PROCESS (the
@@ -34,7 +37,7 @@ export const PROCESS_INTENT_RE =
 
 export function extractFilters(query: string): QueryFilters {
   const f: QueryFilters = {};
-  const dm = query.match(DOC_RE_OIML) ?? query.match(DOC_RE_SPACE);
+  const dm = query.match(DOC_RE_OIML) ?? query.match(DOC_RE_SPACE) ?? query.match(DOC_RE_GLUED_LOWER);
   if (dm && !PROCESS_INTENT_RE.test(query)) {
     f.doctype = dm[1].toUpperCase();
     f.doc_number = dm[2];
