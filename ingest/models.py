@@ -24,6 +24,7 @@ class DocRecord(BaseModel):
     word_count: int = 0
     status: str = "unknown"
     superseded_by: str = ""
+    family_members: list[str] = Field(default_factory=list)
     sections: list[Section] = Field(default_factory=list)
 
     @property

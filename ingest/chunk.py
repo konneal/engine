@@ -65,6 +65,8 @@ def _overview_chunk(doc: DocRecord, ident: str) -> Chunk:
     ]
     for s in overview[:3]:
         parts.append(f"{s.title}: {s.text[:900]}")
+    if doc.family_members:
+        parts.append("Document family — " + doc.docidentifier + " comprises:\n" + "\n".join(f"- {m}" for m in doc.family_members))
     text = "\n\n".join(parts)
     return Chunk(
         id=chunk_id_for(doc.doc_id, "overview", 0, text),

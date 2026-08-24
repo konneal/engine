@@ -261,7 +261,36 @@ def parse_sections(sections_dir: Path, fallback_adoc: str | None) -> list[Sectio
     return sections
 
 
-def parse_doc(doc_root: Path, corpus: str, slug: str) -> DocRecord | None:
+def _collection_identities(parent_root: Path) -> dict[str, str]:
+    """Clean collections declare part identities in collection.yml
+    (manifest.docref.identifier ↔ fileref subdirectory) — the subdocument
+    adocs sometimes carry wrong or missing identifiers (r060/a declares
+    the BASE id). The manifest is the authority."""
+    manifest = parent_root / "collection.yml"
+    if not manifest.is_file():
+        return {}
+    try:
+        import yaml
+
+        data = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+        out: dict[str, str] = {}
+        for ref in (data.get("manifest") or {}).get("docref") or []:
+            subdir = str(ref.get("fileref", "")).split("/")[0]
+            ident = str(ref.get("identifier", "")).strip()
+            if subdir and ident:
+                m = re.match(r"([A-Za-z]+)[-_]?(\d+)(?:[-_]?(\d+|annex-[A-Za-z]+))?", ident)
+                if m:
+                    series, num, part = m.group(1).upper(), str(int(m.group(2))), (m.group(3) or "").strip()
+                    if part.startswith("annex-"):
+                        part = "Annexe " + part.split("-", 1)[1].upper()
+                    ident = f"OIML {series} {num}" + (f"-{part}" if part else "")
+                out[subdir] = ident
+        return out
+    except Exception:
+        return {}
+
+
+def parse_doc(doc_root: Path, corpus: str, slug: str, ident_override: str | None = None) -> DocRecord | None:
     metanorma_dir = doc_root if corpus == "clean" else doc_root / "metanorma"
     adoc_path = metanorma_dir / "document.adoc"
     if not adoc_path.is_file():
@@ -269,6 +298,8 @@ def parse_doc(doc_root: Path, corpus: str, slug: str) -> DocRecord | None:
     adoc = adoc_path.read_text(encoding="utf-8", errors="replace")
     title, attrs = parse_header(adoc)
     docidentifier, doctype, doc_number = classify_identifier(title, attrs, slug)
+    if ident_override:
+        docidentifier, doctype, doc_number = classify_identifier(title, {**attrs, "docidentifier": ident_override}, slug)
     edition = attrs.get("edition", "").strip()
     year_in_id = re.search(r":(\d{4})", docidentifier)
     if year_in_id:
@@ -328,10 +359,12 @@ def load_corpus(corpus: str) -> list[DocRecord]:
                 if p.is_dir() and not p.name.startswith(".") and p.name != "templates"
                 and (p / "document.adoc").is_file()
             )
+        identities = _collection_identities(doc_root) if corpus == "clean" else {}
         for part_root in roots:
             slug = doc_root.name if part_root is doc_root else f"{doc_root.name}/{part_root.name}"
             try:
-                rec = parse_doc(part_root, corpus, slug)
+                override = identities.get(part_root.name)
+                rec = parse_doc(part_root, corpus, slug, ident_override=override)
             except Exception as e:  # noqa: BLE001 — one bad doc must not stop the run
                 print(f"  ! parse error {slug}: {e}")
                 continue

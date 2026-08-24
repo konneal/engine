@@ -96,6 +96,18 @@ export async function retrieve(
   for (const h of hits) {
     if (h.metadata.clause_anchor === "overview") h.score *= 0.85;
   }
+  // family chunks carry the multi-part structure (which parts/annexes
+  // exist) — they must reach the model for 'what is R 60' / 'how many
+  // parts' queries. Vector similarity alone won't rank them because
+  // they're short structural summaries competing with content-heavy
+  // clause text. Boost them decisively for doc-scoped queries.
+  if (filter?.doc_number) {
+    for (const h of hits) {
+      if (h.metadata.clause_anchor === "family") {
+        h.score = Math.max(h.score, ...hits.map((x) => x.score)) + 1;
+      }
+    }
+  }
   hits.sort((a, b) => b.score - a.score);
 
   if (hits.length > 1) {
@@ -160,7 +172,8 @@ export async function retrieve(
     // a doc-number query matches every part (R 60-1/-2/Annexe A) — without
     // a global overview cap their near-identical overviews crowd out the
     // definition and clause chunks the answer needs
-    if (isOverview && overviews >= 2) continue;
+    const ovCap = filters.doc_number ? 6 : 2; // part overviews of the queried family are signal, not noise
+    if (isOverview && overviews >= ovCap) continue;
     const key = `${h.metadata.docidentifier}|${h.metadata.language}`;
     const n = perDoc.get(key) ?? 0;
     const cap = isOverview ? 1 : filters.doc_number ? 3 : 2;
