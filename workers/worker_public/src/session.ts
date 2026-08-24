@@ -7,6 +7,7 @@ export interface SessionClaims {
   name?: string;
   email?: string;
   roles: string[];
+  iat: number;
   exp: number;
 }
 
@@ -28,8 +29,8 @@ async function hmac(secret: string, data: string): Promise<string> {
     .replace(/=+$/, "");
 }
 
-export async function mintSessionCookie(secret: string, claims: Omit<SessionClaims, "exp">): Promise<string> {
-  const full: SessionClaims = { ...claims, exp: Date.now() + SESSION_TTL_SEC * 1000 };
+export async function mintSessionCookie(secret: string, claims: Omit<SessionClaims, "exp" | "iat">): Promise<string> {
+  const full: SessionClaims = { ...claims, iat: Date.now(), exp: Date.now() + SESSION_TTL_SEC * 1000 };
   const payload = btoa(JSON.stringify(full))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")

@@ -33,6 +33,14 @@ export function authErrorText(reason: string): string {
   return PLAIN_LANGUAGE[reason] ?? "Sign-in failed. Please try again.";
 }
 
+// Tier mapping, declared per docs/identity-onboarding-rag.md §11:
+//   member tier  — ANY valid session (the public service's anti-abuse
+//                  courtesy; no role bound)
+//   internal     — the bounded estate set below, when the ISO corpus
+//                  tier ships (the OP can bound the policy's role
+//                  allowlist to exactly this set then)
+export const INTERNAL_ROLES = ["mc_member", "rc_member", "executive_secretary", "admin"];
+
 export interface AuthConfig {
   issuer: string;
   clientId: string;
@@ -69,7 +77,7 @@ export async function handleLogin(env: any, req: Request): Promise<Response> {
     const url = buildAuthorizationUrl(meta, {
       clientId: cfg.clientId,
       redirectUri: cfg.redirectUri,
-      scopes: "openid profile email",
+      scopes: "openid profile email roles",
       state,
       nonce,
       codeChallenge: pkce.challenge,
@@ -84,6 +92,21 @@ export async function handleCallback(env: any, req: Request): Promise<Response> 
   const cfg = authConfig(env);
   if (!cfg) return redirectWithError("not_configured");
   const url = new URL(req.url);
+  const opError = url.searchParams.get("error");
+  if (opError) {
+    // the OP redirected back with its own failure (user denied consent,
+    // session expired at the OP, …) — fail closed, in plain language
+    const msg =
+      opError === "access_denied"
+        ? "Sign-in was cancelled."
+        : opError === "temporarily_unavailable"
+          ? "The sign-in service is busy. Please try again in a moment."
+          : "The sign-in service reported a problem. Please try again.";
+    return new Response(null, {
+      status: 302,
+      headers: { location: `/?auth_error=${encodeURIComponent(opError)}&auth_msg=${encodeURIComponent(msg)}` },
+    });
+  }
   const code = url.searchParams.get("code") ?? "";
   const state = url.searchParams.get("state") ?? "";
   if (!code || !state) return redirectWithError("state");
@@ -128,6 +151,17 @@ export async function sessionFrom(req: Request, env: any): Promise<SessionClaims
 export async function handleMe(env: any, req: Request): Promise<Response> {
   const cfg = authConfig(env);
   const session = cfg ? await readSession(req, cfg.sessionSecret) : null;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  // sliding renewal: a session older than a day re-mints on sight, so
+  // active users never hit the 7-day wall mid-conversation
+  if (session && cfg && Date.now() - session.iat > 24 * 3600 * 1000) {
+    headers["set-cookie"] = await mintSessionCookie(cfg.sessionSecret, {
+      sub: session.sub,
+      name: session.name,
+      email: session.email,
+      roles: session.roles,
+    });
+  }
   return new Response(
     JSON.stringify({
       authenticated: !!session,
@@ -137,7 +171,7 @@ export async function handleMe(env: any, req: Request): Promise<Response> {
       tier: session ? "member" : "anon",
       sign_in_available: !!cfg,
     }),
-    { headers: { "content-type": "application/json" } },
+    { headers },
   );
 }
 
