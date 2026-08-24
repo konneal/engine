@@ -1,5 +1,6 @@
 import { LIMITS, MODELS, num, sha256Hex, today } from "./config";
 import { buildMessages, citations, retrieve, Hit } from "./pipeline";
+import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 
 export interface Env {
   AI: any;
@@ -13,6 +14,13 @@ export interface Env {
   KEY_DAY_ASK_DEFAULT: string;
   ANON_DAY_HARD_CAP: string;
   ADMIN_TOKEN?: string;
+  MEMBER_DAY_ASK?: string;
+  EXEMPT_IPS?: string;
+  OIDC_ISSUER?: string;
+  OIDC_CLIENT_ID?: string;
+  OIDC_CLIENT_SECRET?: string;
+  OIDC_REDIRECT_URI?: string;
+  SESSION_SECRET?: string;
 }
 
 const json = (body: unknown, status = 200, extra: Record<string, string> = {}) =>
@@ -47,6 +55,19 @@ async function kvIncr(cache: KVNamespace, key: string): Promise<number> {
 
 function clientIp(req: Request): string {
   return req.headers.get("cf-connecting-ip") ?? "unknown";
+}
+
+// operator-exempt IPs (env list, KV sys:exempt_ips override for runtime
+// edits) bypass the anon quota — the KV read is cached briefly per isolate
+let exemptCache: { at: number; ips: Set<string> } | null = null;
+async function isExemptIp(env: Env, ip: string): Promise<boolean> {
+  if (((env.EXEMPT_IPS ?? "") + "").split(",").map((s) => s.trim()).includes(ip)) return true;
+  const now = Date.now();
+  if (!exemptCache || now - exemptCache.at > 60_000) {
+    const kv = (await env.CACHE.get("sys:exempt_ips")) ?? "";
+    exemptCache = { at: now, ips: new Set(kv.split(/[\s,]+/).filter(Boolean)) };
+  }
+  return exemptCache.ips.has(ip);
 }
 
 async function checkQuota(
@@ -127,9 +148,9 @@ function telemetry(
   );
 }
 
-async function generateStream(env: Env, messages: any[]): Promise<ReadableStream<Uint8Array> | null> {
+async function generateStream(env: Env, model: string, messages: any[]): Promise<ReadableStream<Uint8Array> | null> {
   try {
-    const res: any = await env.AI.run(MODELS.anon, {
+    const res: any = await env.AI.run(model, {
       messages,
       stream: true,
       max_tokens: LIMITS.maxOutputTokens,
@@ -143,9 +164,9 @@ async function generateStream(env: Env, messages: any[]): Promise<ReadableStream
   }
 }
 
-async function generateOnce(env: Env, messages: any[]): Promise<string | null> {
+async function generateOnce(env: Env, model: string, messages: any[]): Promise<string | null> {
   try {
-    const res: any = await env.AI.run(MODELS.anon, {
+    const res: any = await env.AI.run(model, {
       messages,
       max_tokens: LIMITS.maxOutputTokens,
       reasoning_effort: "low",
@@ -191,29 +212,33 @@ async function handleAsk(
   env: Env,
   ctx: ExecutionContext,
   req: Request,
-  tier: "anon" | "key",
+  tier: "anon" | "key" | "member",
   key: ApiKey | null,
 ): Promise<Response> {
   const body = await readJson(req);
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
 
-  const limit = tier === "key" ? key!.day_limit : num(env as any, "ANON_DAY_ASK", 20);
-  const bucketId = tier === "key" ? `key:${key!.id}` : clientIp(req);
+  const member = tier === "member" ? await sessionFrom(req, env as any) : null;
+  const exempt = tier === "anon" ? await isExemptIp(env, clientIp(req)) : false;
+  const limit =
+    tier === "key" ? key!.day_limit : tier === "member" || member ? num(env as any, "MEMBER_DAY_ASK", 300) : num(env as any, "ANON_DAY_ASK", 20);
+  const bucketId = tier === "key" ? `key:${key!.id}` : member ? `sub:${member.sub}` : clientIp(req);
   const quota = await checkQuota(env, "ask", bucketId, limit);
-  if (!quota.ok) {
+  if (!quota.ok && !exempt) {
     return err(429, "quota_exceeded", `Daily question limit reached (${quota.limit}). Try again tomorrow.`);
   }
 
   const hardCap = num(env as any, "ANON_DAY_HARD_CAP", 5000);
-  if (tier === "anon" && quota.used > hardCap) {
+  if (tier === "anon" && !exempt && quota.used > hardCap) {
     return err(503, "generation_disabled", "Generation is temporarily paused; search remains available.");
   }
   if ((await env.CACHE.get("sys:generation")) === "off") {
     return err(503, "generation_disabled", "Generation is temporarily paused; search remains available.");
   }
 
-  const ns = tier === "key" ? `k:${key!.id}` : "anon";
+  const ns = tier === "key" ? `k:${key!.id}` : member ? `m:${member.sub}` : "anon";
+  const model = member ? MODELS.member : MODELS.anon;
   const cached = await cacheGet(env, ns, q.query, q.lang);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
   if (cached) {
@@ -235,9 +260,9 @@ async function handleAsk(
   const { hits } = retrieved;
   if (hits.length === 0) {
     const answer = "I don't have information on this in the indexed OIML publications.";
-    const out = { answer, citations: [], model: MODELS.anon, query_hash: await sha256Hex(q.query) };
-    telemetry(env, ctx, tier, "ask", MODELS.anon, true, answer.length, out.query_hash, q.lang);
-    return json({ ...out, quota });
+    const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query) };
+    telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang);
+    return json({ ...out, ...(exempt ? {} : { quota }) });
   }
 
   const messages = buildMessages(q.query, hits, q.lang);
@@ -245,13 +270,13 @@ async function handleAsk(
   const cites = citations(hits);
 
   if (wantsStream) {
-    const stream = await generateStream(env, messages);
+    const stream = await generateStream(env, model, messages);
     if (stream) {
       const encoder = new TextEncoder();
       const sse = new ReadableStream({
         async start(controller) {
           const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-          send({ type: "citations", citations: cites, quota });
+          send({ type: "citations", citations: cites, ...(exempt ? {} : { quota }) });
           let full = "";
           try {
             for await (const tok of sseTokens(stream)) {
@@ -261,11 +286,11 @@ async function handleAsk(
           } catch {
             // stream ended prematurely — deliver what we have
           }
-          send({ type: "done", model: MODELS.anon, query_hash: queryHash });
-          telemetry(env, ctx, tier, "ask", MODELS.anon, true, full.length, queryHash, q.lang);
+          send({ type: "done", model, query_hash: queryHash });
+          telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
           if (full.length > 0) {
             ctx.waitUntil(
-              env.CACHE.put(await cacheKey(env, ns, q.query, q.lang), JSON.stringify({ answer: full, citations: cites, model: MODELS.anon, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
+              env.CACHE.put(await cacheKey(env, ns, q.query, q.lang), JSON.stringify({ answer: full, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
           }
           controller.close();
@@ -282,16 +307,16 @@ async function handleAsk(
     }
   }
 
-  const answer = await generateOnce(env, messages);
+  const answer = await generateOnce(env, model, messages);
   if (answer === null) {
-    telemetry(env, ctx, tier, "ask", MODELS.anon, false, 0, queryHash, q.lang);
+    telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
   const out = { answer, citations: cites, model: MODELS.anon, query_hash: queryHash };
   const ck = await cacheKey(env, ns, q.query, q.lang);
   ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
-  telemetry(env, ctx, tier, "ask", MODELS.anon, true, answer.length, queryHash, q.lang);
-  return json({ ...out, quota, ...corsHeaders(req) });
+  telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
+  return json({ ...out, ...(exempt ? {} : { quota }), ...corsHeaders(req) });
 }
 
 function sseResponse(events: unknown[], cors: Record<string, string>): Response {
@@ -317,17 +342,19 @@ async function handleSearch(
   env: Env,
   ctx: ExecutionContext,
   req: Request,
-  tier: "anon" | "key",
+  tier: "anon" | "key" | "member",
   key: ApiKey | null,
 ): Promise<Response> {
   const body = await readJson(req);
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
 
-  const limit = tier === "key" ? Number.MAX_SAFE_INTEGER : num(env as any, "ANON_DAY_SEARCH", 50);
-  const bucketId = tier === "key" ? `key:${key!.id}` : clientIp(req);
+  const member = tier === "member" ? await sessionFrom(req, env as any) : null;
+  const exempt = tier === "anon" ? await isExemptIp(env, clientIp(req)) : false;
+  const limit = tier === "key" || member ? Number.MAX_SAFE_INTEGER : num(env as any, "ANON_DAY_SEARCH", 50);
+  const bucketId = tier === "key" ? `key:${key!.id}` : member ? `sub:${member.sub}` : clientIp(req);
   const quota = await checkQuota(env, "search", bucketId, limit);
-  if (!quota.ok) {
+  if (!quota.ok && !exempt) {
     return err(429, "quota_exceeded", `Daily search limit reached (${quota.limit}). Try again tomorrow.`);
   }
 
@@ -406,6 +433,11 @@ export default {
       return err(404, "not_found", "Page not found");
     }
 
+    if (req.method === "GET" && (path === "/auth/login" || path === "/auth/login/")) return handleLogin(env as any, req);
+    if (req.method === "GET" && (path === "/auth/callback" || path === "/auth/callback/")) return handleCallback(env as any, req);
+    if (req.method === "GET" && (path === "/auth/me" || path === "/auth/me/")) return handleMe(env as any, req);
+    if ((req.method === "GET" || req.method === "POST") && (path === "/auth/logout" || path === "/auth/logout/")) return handleLogout(env as any, req);
+
     if (req.method === "GET" && path === "/health") {
       return json({ ok: true, service: "rag-public", index_version: env.INDEX_VERSION, ...cors });
     }
@@ -417,7 +449,10 @@ export default {
         key = await authenticate(env, req);
         if (!key) return err(401, "unauthorized", "Provide a valid API key: Authorization: Bearer oiml_...");
       }
-      return handleAsk(env, ctx, req, isApi ? "key" : "anon", key);
+      // a valid RAG session cookie upgrades the browser tier to member
+      let tier: "anon" | "key" | "member" = isApi ? "key" : "anon";
+      if (!isApi && env.SESSION_SECRET && (await sessionFrom(req, env as any))) tier = "member";
+      return handleAsk(env, ctx, req, tier, key);
     }
 
     if (req.method === "POST" && (path === "/api/search" || path === "/v1/search")) {
@@ -427,7 +462,9 @@ export default {
         key = await authenticate(env, req);
         if (!key) return err(401, "unauthorized", "Provide a valid API key: Authorization: Bearer oiml_...");
       }
-      return handleSearch(env, ctx, req, isApi ? "key" : "anon", key);
+      let stier: "anon" | "key" | "member" = isApi ? "key" : "anon";
+      if (!isApi && env.SESSION_SECRET && (await sessionFrom(req, env as any))) stier = "member";
+      return handleSearch(env, ctx, req, stier, key);
     }
 
     if (req.method === "POST" && path === "/api/feedback") {

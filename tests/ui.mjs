@@ -129,7 +129,8 @@ check("assistant answer streamed fully", text.includes("R 60 is the OIML Recomme
 check("citations panel rendered with source", text.includes("OIML R 60-1") && text.includes("Overview"));
 check("feedback buttons rendered", chat.querySelectorAll("button").length >= 2);
 check("quota line updated", document.getElementById("statusline").textContent.includes("1 / 20"));
-check("request went to /api/ask with stream", asked[0]?.url.includes("/api/ask") && asked[0]?.body.stream === true);
+const askReq = asked.find((a) => a.url.includes("/api/ask"));
+check("request went to /api/ask with stream", !!askReq && askReq.body.stream === true);
 
 // — suggestion chip (reference captured before empty state removal) —
 chip.dispatchEvent(new window.Event("click", { bubbles: true }));

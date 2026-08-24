@@ -2,6 +2,7 @@ export const MODELS = {
   embed: "@cf/qwen/qwen3-embedding-0.6b",
   rerank: "@cf/baai/bge-reranker-base",
   anon: "@cf/qwen/qwen3-30b-a3b-fp8",
+  member: "@cf/qwen/qwen3.8-27b", // Standard QA tier for signed-in members
 } as const;
 
 export const LIMITS = {

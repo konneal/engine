@@ -13,7 +13,8 @@ page.on("console", (m) => {
 page.on("pageerror", (e) => errors.push(`pageerror: ${e.message.slice(0, 200)}`));
 page.on("requestfailed", (r) => errors.push(`reqfail: ${r.url().slice(0, 120)} ${r.failure()?.errorText}`));
 
-await page.goto("https://ai.oimlsmart.org/", { waitUntil: "networkidle", timeout: 60000 });
+await page.goto("https://ai.oimlsmart.org/", { waitUntil: "load", timeout: 60000 });
+await page.waitForTimeout(2500);
 
 const header = await page.evaluate(() => {
   const h = document.querySelector("header");
@@ -78,12 +79,17 @@ await page.click("button.suggestion");
 await page
   .waitForSelector("#chat .rounded-bl-sm", { timeout: 30000 })
   .catch(() => null);
-await page.waitForTimeout(1500);
-const answer = await page.evaluate(() => {
-  const bubbles = [...document.querySelectorAll("#chat > div")];
-  const last = bubbles[bubbles.length - 1];
-  return { bubbles: bubbles.length, text: (last?.textContent || "").trim().slice(0, 80) };
-});
+// a fresh (uncached) answer takes seconds to stream — poll for text
+let answer = { bubbles: 0, text: "" };
+for (let i = 0; i < 15; i++) {
+  answer = await page.evaluate(() => {
+    const bubbles = [...document.querySelectorAll("#chat > div")];
+    const last = bubbles[bubbles.length - 1];
+    return { bubbles: bubbles.length, text: (last?.textContent || "").trim().slice(0, 80) };
+  });
+  if (answer.text && answer.text !== "…" && !/^\s*$/.test(answer.text)) break;
+  await page.waitForTimeout(2000);
+}
 const quotaNotice = /daily (question )?limit|try again tomorrow/i.test(answer.text);
 if (answer.bubbles < 2 || (!answer.text && !quotaNotice)) fail.push(`suggestion click produced no answer (bubbles=${answer.bubbles}, text="${answer.text}")`);
 if (quotaNotice) log("suggestion click reached the API (anon quota for this IP is exhausted — notice rendered)");

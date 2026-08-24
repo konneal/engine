@@ -36,6 +36,12 @@ ANON_DAY_ASK = "20"
 ANON_DAY_SEARCH = "50"
 KEY_DAY_ASK_DEFAULT = "2000"
 ANON_DAY_HARD_CAP = "5000"
+MEMBER_DAY_ASK = "300"
+EXEMPT_IPS = "218.188.43.254"
+OIDC_ISSUER = "https://id.oimlsmart.org"
+OIDC_REDIRECT_URI = "https://ai.oimlsmart.org/auth/callback"
+# OIDC_CLIENT_ID stays unset until the client is registered on the OP
+# (id.oimlsmart.org/op/admin) — sign-in then flips on without redeploying code
 
 [observability]
 enabled = true
