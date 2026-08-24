@@ -3,6 +3,7 @@ export const MODELS = {
   rerank: "@cf/baai/bge-reranker-base",
   anon: "@cf/qwen/qwen3-30b-a3b-fp8",
   member: "@cf/qwen/qwen3.8-27b", // Standard QA tier for signed-in members
+  grader: "@cf/deepseek-ai/deepseek-v4-flash", // CRAG retrieval grader (cached input is near-free)
 } as const;
 
 export const LIMITS = {

@@ -1,6 +1,7 @@
 import { embed, rerank } from "./ai";
 import { LIMITS, MODELS } from "./config";
-import { extractFilters, toVectorizeFilter, QueryFilters, PROCESS_INTENT_RE } from "./selfquery";
+import { QueryFilters, toVectorizeFilter, extractFilters, PROCESS_INTENT_RE } from "./selfquery";
+import { QueryUnderstanding } from "./understand";
 
 export interface ChunkMeta {
   doc_id: string;
@@ -48,13 +49,25 @@ export function retrievalQuery(query: string, prev?: string): string {
 // contains the certification-system documents at all
 const PROCESS_EXPANSION = " OIML Certification System OIML-CS issuing authority application type evaluation certificate";
 
-export async function retrieve(env: any, query: string, opts: { prev?: string } = {}): Promise<Retrieved> {
-  const filters = extractFilters(query);
-  let rq = retrievalQuery(query, opts.prev);
-  if (PROCESS_INTENT_RE.test(query)) rq += PROCESS_EXPANSION;
+export async function retrieve(
+  env: any,
+  query: string,
+  opts: { prev?: string; understanding?: QueryUnderstanding | null; queryOverride?: string } = {},
+): Promise<Retrieved> {
+  const u = opts.understanding ?? null;
+  // UNION of signals: deterministic regexes are the floor (tested, zero
+  // latency); the LLM understanding layers on top for what regexes cannot
+  // see (creative phrasings, context rewriting). Both contribute.
+  const rf = extractFilters(query);
+  const filters: QueryFilters =
+    u && !u.process_intent && u.doc_number
+      ? { doc_number: u.doc_number, ...(u.edition ? { edition: u.edition } : {}) }
+      : rf;
+  const filter = toVectorizeFilter(filters);
+  let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || retrievalQuery(query, opts.prev);
+  if (u?.process_intent || PROCESS_INTENT_RE.test(query)) rq += PROCESS_EXPANSION;
   const vector = await embed(env.AI, MODELS.embed, rq);
   const q: any = { topK: LIMITS.retrieveK, returnMetadata: "all" };
-  const filter = toVectorizeFilter(filters);
   if (filter) q.filter = filter;
 
   let matches: any[] = [];
@@ -97,65 +110,25 @@ export async function retrieve(env: any, query: string, opts: { prev?: string } 
     }
   }
 
-  // Exact term lookup: definition questions ("what is a load cell") target a
-  // term entry whose clause_title IS the term — a decisive nudge when it
-  // exists, no effect otherwise. Lexically identical headers on every chunk
-  // of the same publication make the reranker alone unreliable here.
-  {
-    const dm = query.match(
-      /^(?:what is|what are|what's|define|definition of|qu'est-ce que(?: le | la | les | l'|un |une )?|qu'est-ce qu'(?:un |une )?|was ist|qué es(?: un | una | el | la )?)\s+(.+?)[?]*\s*$/i,
-    );
-    if (dm) {
-      let term = (dm[1] ?? "").trim().toLowerCase();
-      // drop qualifier tails: "a load cell according to OIML R 60" → "load cell"
-      term = term.split(/,| according to | per | dans | dans le | dans la | selon | d'après | in | of the /)[0];
-      term = term.replace(/^(?:a|an|the|un|une|le|la|les|l')\s+/, "").replace(/[.,;:!?]+$/, "");
-      if (term.length >= 3) {
-        const scored = hits.map((h) => h.rerank_score ?? h.score);
-        const spread = Math.max(...scored) - Math.min(...scored);
-        if (spread > 0) {
-          // term entries may carry a bare clause number as title with the
-          // term name at the head of the body — match both
-          const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const termRe = new RegExp(`(^|[^a-zà-ÿ])${esc}([^a-zà-ÿ]|$)`);
-          for (const h of hits) {
-            // skip the header line — it names the publication, so for R 60
-            // it contains "load cell" and would match every chunk
-            const body = h.text.split("\n").slice(1).join(" ").slice(0, 200);
-            const hay = `${h.metadata.clause_title || ""} ${body}`.toLowerCase();
-            if (termRe.test(hay)) {
-              h.rerank_score = (h.rerank_score ?? h.score) + spread * 1.5;
-            }
-          }
-          hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
-        }
-      }
-    }
-  }
-
-  // Language nudge: an English question should not lose its slots to French
-  // duplicates when both exist (and vice versa) — tie-break magnitude only.
-  {
-    const qLang = /ñ/i.test(query)
-      ? "es"
-      : /ß/i.test(query) || /[äöü]/i.test(query)
-        ? "de"
-        : /[àâçéèêëîïôùûüœ]|qu'|d'un|d'une/i.test(query)
-          ? "fr"
-          : "en";
+  // Exact term lookup: the understanding names the term; clause chunks
+  // whose head IS the term get a decisive nudge (publication headers
+  // contain the title words, so the reranker alone is unreliable here)
+  if (u?.term) {
     const scored = hits.map((h) => h.rerank_score ?? h.score);
     const spread = Math.max(...scored) - Math.min(...scored);
     if (spread > 0) {
+      const esc = u.term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const termRe = new RegExp(`(^|[^a-z])${esc}([^a-z]|$)`, "i");
       for (const h of hits) {
-        if (h.metadata.language === qLang) {
-          h.rerank_score = (h.rerank_score ?? h.score) + spread * 0.15;
-        }
+        const body = h.text.split("\n").slice(1).join(" ").slice(0, 200);
+        const hay = `${h.metadata.clause_title || ""} ${body}`.toLowerCase();
+        if (termRe.test(hay)) h.rerank_score = (h.rerank_score ?? h.score) + spread * 1.5;
       }
       hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
     }
   }
 
-  // Edition recency: when the query does not pin an edition, newer editions
+// Edition recency: when the query does not pin an edition, newer editions
   // get a tie-break nudge so stale duplicate chunks don't crowd out current
   // ones. Scaled to the live score spread — rerank scores cluster within
   // ~0.001, so any fixed-magnitude boost would reorder everything.

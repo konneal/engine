@@ -3,7 +3,8 @@ import { buildMessages, citations, retrieve, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { INTERNAL_ROLES } from "./auth";
-import { PROCESS_INTENT_RE } from "./selfquery";
+import { understandQuery } from "./understand";
+import { gradeRetrieval } from "./grader";
 
 export interface Env {
   AI: any;
@@ -263,8 +264,18 @@ async function handleAsk(
     return json({ ...cached.value, cached: true, quota });
   }
 
+  const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history);
   try {
-    retrieved = await retrieve(env, q.query, { prev });
+    retrieved = await retrieve(env, q.query, { prev, understanding });
+    // CRAG: grade the passages; a weak grade earns ONE corrective
+    // re-retrieval with the document identifier made explicit
+    const grade = await gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text));
+    if (grade === "weak" && understanding?.docidentifier) {
+      const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden });
+      const grade2 = await gradeRetrieval(env.AI, MODELS.grader, q.query, second.hits.map((h: Hit) => h.text));
+      if (grade2 === "good") retrieved = second; // corrective retry must be strictly better
+    }
   } catch {
     telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q.query), q.lang);
     return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
@@ -282,7 +293,7 @@ async function handleAsk(
     hits,
     q.lang,
     history,
-    PROCESS_INTENT_RE.test(q.query)
+    understanding?.process_intent
       ? "Retrieval note: these passages come from the OIML Certification System documents because they govern certification/application procedures for OIML publications."
       : undefined,
   );
@@ -380,9 +391,10 @@ async function handleSearch(
     return err(429, "quota_exceeded", `Daily search limit reached (${quota.limit}). Try again tomorrow.`);
   }
 
+  const understanding = await understandQuery(env.AI, MODELS.anon, q.query, []);
   let retrieved;
   try {
-    retrieved = await retrieve(env, q.query);
+    retrieved = await retrieve(env, q.query, { understanding });
   } catch {
     return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
   }
