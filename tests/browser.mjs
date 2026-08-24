@@ -64,13 +64,35 @@ if (layout.navMenu?.display !== "flex") fail.push("nav-menu not laid out (displa
 if ((layout.heroTitle?.h ?? 0) < 30) fail.push("hero headline not rendered at display size");
 if ((layout.composer?.h ?? 0) < 40) fail.push("composer not visible");
 if (errors.length) fail.push(`console/network errors: ${errors.slice(0, 3).join("; ")}`);
-log(fail.length ? "browser e2e: FAIL\n  " + fail.join("\n  ") : "browser e2e: ALL PASS");
-process.exitCode = fail.length ? 1 : 0;
+
+const navCheck = await page.evaluate(() => {
+  const bad = [];
+  for (const a of document.querySelectorAll("header a[href^='/'], footer a[href^='/']")) {
+    bad.push(a.getAttribute("href"));
+  }
+  return bad;
+});
+if (navCheck.length) fail.push(`header/footer still hold root-relative links (404 here): ${navCheck.slice(0, 5).join(", ")}`);
+
+await page.click("button.suggestion");
+await page
+  .waitForSelector("#chat .rounded-bl-sm", { timeout: 30000 })
+  .catch(() => null);
+await page.waitForTimeout(1500);
+const answer = await page.evaluate(() => {
+  const bubbles = [...document.querySelectorAll("#chat > div")];
+  const last = bubbles[bubbles.length - 1];
+  return { bubbles: bubbles.length, text: (last?.textContent || "").trim().slice(0, 80) };
+});
+if (answer.bubbles < 2 || !answer.text) fail.push(`suggestion click produced no answer (bubbles=${answer.bubbles}, text="${answer.text}")`);
+log(`suggestion answer: ${answer.bubbles} bubbles — ${answer.text.slice(0, 60)}`);
 
 await page.screenshot({ path: "artifacts/site-desktop.png", fullPage: false });
 await page.setViewportSize({ width: 390, height: 844 });
 await page.goto("https://ai.oimlsmart.org/", { waitUntil: "networkidle" });
 await page.screenshot({ path: "artifacts/site-mobile.png" });
 
+log(fail.length ? "browser e2e: FAIL\n  " + fail.join("\n  ") : "browser e2e: ALL PASS");
+process.exitCode = fail.length ? 1 : 0;
 await browser.close();
 console.log(out.join("\n"));

@@ -213,8 +213,13 @@ async function handleAsk(
 
   const ns = tier === "key" ? `k:${key!.id}` : "anon";
   const cached = await cacheGet(env, ns, q.query, q.lang);
+  const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
   if (cached) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang);
+    if (wantsStream) {
+      // a cache hit must still speak SSE — the chat client parses a stream
+      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.anon, query_hash: cached.value.query_hash }], corsHeaders(req));
+    }
     return json({ ...cached.value, cached: true, quota });
   }
 
@@ -236,7 +241,6 @@ async function handleAsk(
   const messages = buildMessages(q.query, hits, q.lang);
   const queryHash = await sha256Hex(q.query);
   const cites = citations(hits);
-  const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (wantsStream) {
     const stream = await generateStream(env, messages);
@@ -286,6 +290,19 @@ async function handleAsk(
   ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   telemetry(env, ctx, tier, "ask", MODELS.anon, true, answer.length, queryHash, q.lang);
   return json({ ...out, quota, ...corsHeaders(req) });
+}
+
+function sseResponse(events: unknown[], cors: Record<string, string>): Response {
+  const encoder = new TextEncoder();
+  const body = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+  return new Response(encoder.encode(body), {
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      "x-accel-buffering": "no",
+      ...cors,
+    },
+  });
 }
 
 async function cacheKey(env: Env, ns: string, query: string, lang?: string) {

@@ -19,8 +19,10 @@ const html = rawHtml.replace(
   (full, attrs, body) => (body.includes("import(") ? "" : full),
 );
 const astroDir = new URL("../site/dist/_astro/", import.meta.url);
-const chatBundle = readdirSync(astroDir).find((f) =>
-  f.startsWith("index.astro_astro_type_script_index_0_lang."),
+const chatBundle = readdirSync(astroDir).find(
+  (f) =>
+    f.startsWith("index.astro_astro_type_script_index_") &&
+    readFileSync(new URL(f, astroDir), "utf8").includes('getElementById("chat")'),
 );
 if (!chatBundle) throw new Error("chat bundle not found in site/dist/_astro — run site:build");
 const chatCode = readFileSync(new URL(chatBundle, astroDir), "utf8");
