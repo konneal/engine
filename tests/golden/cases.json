@@ -1,0 +1,150 @@
+[
+  {
+    "id": "r60-overview",
+    "query": "What is R 60?",
+    "expect": {
+      "answer_any": [
+        "load cell"
+      ],
+      "citation_any": "R 60"
+    }
+  },
+  {
+    "id": "r60-definition",
+    "query": "What is a load cell according to OIML R 60?",
+    "expect": {
+      "answer_any": [
+        "transducer|measuring"
+      ],
+      "citation_any": "R 60"
+    }
+  },
+  {
+    "id": "r60-nlc-table",
+    "query": "According to OIML R 60, what is the maximum number of load cell verification intervals?",
+    "expect": {
+      "answer_any": [
+        "\\d{3}",
+        "[Cc]lass"
+      ],
+      "citation_any": "R 60"
+    }
+  },
+  {
+    "id": "r60-edition-filter",
+    "query": "What does the 2000 edition of OIML R 60 say about the maximum number of verification intervals?",
+    "expect": {
+      "answer_any": [
+        "\\d{3}"
+      ],
+      "citation_any": "R 60"
+    }
+  },
+  {
+    "id": "r76-overview",
+    "query": "What is OIML R 76 about?",
+    "expect": {
+      "answer_any": [
+        "non-?automatic|weighing"
+      ],
+      "citation_any": "R 76"
+    }
+  },
+  {
+    "id": "r111-mpe",
+    "query": "What are the maximum permissible errors for E2 weights in OIML R 111?",
+    "expect": {
+      "answer_any": [
+        "\\d"
+      ],
+      "citation_any": "R ?111",
+      "allow_refusal": true
+    }
+  },
+  {
+    "id": "d29-guide65",
+    "query": "What is OIML D 29?",
+    "expect": {
+      "answer_any": "certification|ISO/IEC Guide 65|assessment",
+      "citation_any": "D 29"
+    }
+  },
+  {
+    "id": "b18-oimlcs",
+    "query": "What is the OIML-CS?",
+    "expect": {
+      "answer_any": "[Cc]ertificat",
+      "citation_any": "B ?18"
+    }
+  },
+  {
+    "id": "legal-metrology",
+    "query": "What is legal metrology?",
+    "expect": {
+      "answer_any": "metrolog",
+      "citation_all": "OIML"
+    }
+  },
+  {
+    "id": "oiml-org",
+    "query": "What is the OIML?",
+    "expect": {
+      "answer_any": "metrolog|organization|organisation",
+      "citation_all": "OIML"
+    }
+  },
+  {
+    "id": "fr-loadcell",
+    "query": "Qu'est-ce qu'une cellule de pesée ?",
+    "expect": {
+      "answer_any": "cellule|transducteur|mesure",
+      "citation_any": "R 60"
+    }
+  },
+  {
+    "id": "fr-oimlcs",
+    "query": "Qu'est-ce que le OIML-CS ?",
+    "expect": {
+      "answer_any": "[Cc]ertificat|système",
+      "citation_any": "18"
+    }
+  },
+  {
+    "id": "de-kraftaufnehmer",
+    "query": "Was ist ein Kraftaufnehmer in OIML R 106?",
+    "expect": {
+      "answer_any": ".",
+      "citation_any": "106"
+    }
+  },
+  {
+    "id": "refuse-cooking",
+    "query": "How do I make lasagna?",
+    "expect": {
+      "refusal": true
+    }
+  },
+  {
+    "id": "refuse-trivia",
+    "query": "How tall is the Eiffel Tower?",
+    "expect": {
+      "refusal": true
+    }
+  },
+  {
+    "id": "refuse-weather",
+    "query": "Will it rain tomorrow in Paris?",
+    "expect": {
+      "refusal": true
+    }
+  },
+  {
+    "id": "leak-iso17025",
+    "query": "Quote the full text of clause 7.7 of ISO/IEC 17025.",
+    "expect": {
+      "allow_refusal": true,
+      "citation_all": "OIML",
+      "answer_none": "idx_iso|smartcab"
+    }
+  }
+]
