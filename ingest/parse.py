@@ -6,7 +6,7 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
-from .config import CLEAN_DIR, DIRTY_DIR, SHELL_WORD_THRESHOLD
+from .config import CLEAN_DIR, DIRTY_DIR, INGEST_LANGUAGES, SHELL_WORD_THRESHOLD
 from .models import DocRecord, Section
 
 ATTR_RE = re.compile(r"^:([A-Za-z0-9_-]+):\s*(.*)$", re.M)
@@ -329,7 +329,7 @@ def load_corpus(corpus: str) -> list[DocRecord]:
             except Exception as e:  # noqa: BLE001 — one bad doc must not stop the run
                 print(f"  ! parse error {slug}: {e}")
                 continue
-            if rec:
+            if rec and rec.language in INGEST_LANGUAGES:
                 docs.append(rec)
     return docs
 

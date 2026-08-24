@@ -1,6 +1,8 @@
 import { LIMITS, MODELS, num, sha256Hex, today } from "./config";
 import { buildMessages, citations, retrieve, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
+import { handleAppendMessage, handleConversations } from "./conversations";
+import { INTERNAL_ROLES } from "./auth";
 
 export interface Env {
   AI: any;
@@ -239,7 +241,17 @@ async function handleAsk(
 
   const ns = tier === "key" ? `k:${key!.id}` : member ? `m:${member.sub}` : "anon";
   const model = member ? MODELS.member : MODELS.anon;
-  const cached = await cacheGet(env, ns, q.query, q.lang);
+  const prev = typeof body?.prev === "string" ? body.prev.slice(0, 400) : undefined;
+  const rawHistory = Array.isArray(body?.history) ? body.history : [];
+  const history = rawHistory
+    .filter((h: any) => (h?.role === "user" || h?.role === "assistant") && typeof h?.content === "string" && h.content.trim())
+    .slice(-12)
+    .map((h: any) => ({ role: h.role, content: h.content.slice(0, 1200) }));
+  const contextual = history.length > 0;
+  let retrieved;
+  // fresh=true (regenerate) skips the cache read; contextual follow-ups skip
+  // the cache entirely — the answer depends on the conversation, not the query
+  const cached = body?.fresh === true || contextual ? null : await cacheGet(env, ns, q.query, q.lang);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
   if (cached) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang);
@@ -250,9 +262,8 @@ async function handleAsk(
     return json({ ...cached.value, cached: true, quota });
   }
 
-  let retrieved;
   try {
-    retrieved = await retrieve(env, q.query);
+    retrieved = await retrieve(env, q.query, { prev });
   } catch {
     telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q.query), q.lang);
     return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
@@ -265,7 +276,7 @@ async function handleAsk(
     return json({ ...out, ...(exempt ? {} : { quota }) });
   }
 
-  const messages = buildMessages(q.query, hits, q.lang);
+  const messages = buildMessages(q.query, hits, q.lang, history);
   const queryHash = await sha256Hex(q.query);
   const cites = citations(hits);
 
@@ -288,7 +299,7 @@ async function handleAsk(
           }
           send({ type: "done", model, query_hash: queryHash });
           telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
-          if (full.length > 0) {
+          if (full.length > 0 && !contextual) {
             ctx.waitUntil(
               env.CACHE.put(await cacheKey(env, ns, q.query, q.lang), JSON.stringify({ answer: full, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
@@ -313,8 +324,10 @@ async function handleAsk(
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
   const out = { answer, citations: cites, model: MODELS.anon, query_hash: queryHash };
-  const ck = await cacheKey(env, ns, q.query, q.lang);
-  ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
+  if (!contextual) {
+    const ck = await cacheKey(env, ns, q.query, q.lang);
+    ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
+  }
   telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
   return json({ ...out, ...(exempt ? {} : { quota }), ...corsHeaders(req) });
 }
@@ -437,6 +450,41 @@ export default {
     if (req.method === "GET" && (path === "/auth/callback" || path === "/auth/callback/")) return handleCallback(env as any, req);
     if (req.method === "GET" && (path === "/auth/me" || path === "/auth/me/")) return handleMe(env as any, req);
     if ((req.method === "GET" || req.method === "POST") && (path === "/auth/logout" || path === "/auth/logout/")) return handleLogout(env as any, req);
+
+    if (path === "/api/conversations" || path.startsWith("/api/conversations/")) {
+      const session = await sessionFrom(req, env as any);
+      if (!session) return err(401, "unauthorized", "Sign in to sync your conversations across devices");
+      const parts = path.split("/").filter(Boolean); // [api, conversations, id?, messages?]
+      if (parts.length === 4 && parts[3] === "messages" && req.method === "POST") {
+        return handleAppendMessage(env, session.sub, req, parts[2]!);
+      }
+      if (parts.length > 3) return err(404, "not_found", "Unknown route");
+      return handleConversations(env, session.sub, req, { method: req.method, id: parts[2] });
+    }
+
+    if (req.method === "GET" && (path === "/api/datasets" || path === "/api/datasets/")) {
+      const session = await sessionFrom(req, env as any);
+      const roles = session?.roles ?? [];
+      const internal = roles.some((r) => INTERNAL_ROLES.includes(r));
+      return json({
+        datasets: [
+          {
+            id: "oiml",
+            label: "OIML Publications",
+            description: "Recommendations, Documents, Basic publications, Guides — English corpus",
+            enabled: true,
+          },
+          {
+            id: "iso",
+            label: "ISO/IEC Conformity Assessment",
+            description: "ISO/IEC 17xxx reference standards (CASCO) — internal, role-gated",
+            enabled: internal,
+            authenticated: !!session,
+            requires: "mc_member, rc_member, executive_secretary or admin",
+          },
+        ],
+      });
+    }
 
     if (req.method === "GET" && path === "/health") {
       return json({ ok: true, service: "rag-public", index_version: env.INDEX_VERSION, ...cors });

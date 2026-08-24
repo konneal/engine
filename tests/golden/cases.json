@@ -114,7 +114,8 @@
     "query": "Was ist ein Kraftaufnehmer in OIML R 106?",
     "expect": {
       "answer_any": ".",
-      "citation_any": "106"
+      "citation_any": "106",
+      "allow_refusal": true
     }
   },
   {

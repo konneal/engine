@@ -50,8 +50,9 @@ const layout = await page.evaluate(() => {
     scrollY: window.scrollY,
     header: box("header"),
     navMenu: box("#nav-menu"),
-    hero: box(".page-hero"),
-    heroTitle: box(".page-hero h1, .page-hero__title, h1"),
+    sidebar: box("#sidebar"),
+    greeting: box(".greeting"),
+    datasets: box("#datasets"),
     composer: box("#askform"),
   };
 });
@@ -62,7 +63,9 @@ if (layout.scrollY !== 0) fail.push(`page loads scrolled (scrollY=${layout.scrol
 if (layout.header?.h < 40) fail.push("federation header not visible");
 if (layout.header?.sticky !== "sticky") fail.push("header not sticky");
 if (layout.navMenu?.display !== "flex") fail.push("nav-menu not laid out (display:flex missing)");
-if ((layout.heroTitle?.h ?? 0) < 30) fail.push("hero headline not rendered at display size");
+if ((layout.sidebar?.h ?? 0) < 200) fail.push("sidebar not rendered");
+if ((layout.greeting?.h ?? 0) < 20) fail.push("greeting not rendered in empty state");
+if ((layout.datasets?.h ?? 0) < 10) fail.push("datasets panel not rendered");
 if ((layout.composer?.h ?? 0) < 40) fail.push("composer not visible");
 if (errors.length) fail.push(`console/network errors: ${errors.slice(0, 3).join("; ")}`);
 

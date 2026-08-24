@@ -52,7 +52,11 @@ async function runCase(c) {
   } else {
     if (isRefusal) fail("unexpected refusal");
     else pass("answered");
-    for (const p of one(c.expect.answer_any)) re(p).test(answer) ? pass(`answer ~/${p}/`) : fail(`answer lacks /${p}/: ${answer.slice(0, 100)}`);
+    const anyPats = one(c.expect.answer_any);
+    if (anyPats.length) {
+      const hit = anyPats.find((p) => re(p).test(answer));
+      hit ? pass(`answer ~/${hit}/`) : fail(`answer lacks all of [${anyPats.join(", ")}]: ${answer.slice(0, 100)}`);
+    }
     for (const p of one(c.expect.answer_none)) re(p).test(answer) ? fail(`answer contains forbidden /${p}/`) : pass(`answer clean of /${p}/`);
   }
   if (c.expect.citation_any) {

@@ -29,9 +29,20 @@ export interface Retrieved {
   filters: QueryFilters;
 }
 
-export async function retrieve(env: any, query: string): Promise<Retrieved> {
+// "give me more details" is semantically empty on its own — fold the
+// previous question into the RETRIEVAL query (generation still sees the
+// original wording) so follow-ups search the right neighborhood
+export function retrievalQuery(query: string, prev?: string): string {
+  if (!prev || !prev.trim()) return query;
+  const words = query.trim().split(/\s+/).length;
+  const vague = /^(more|continue|details?|elaborate|why|how so|and|also|explain|go on)\b/i.test(query.trim());
+  if (words <= 8 || vague) return `${prev.trim()} — ${query.trim()}`;
+  return query;
+}
+
+export async function retrieve(env: any, query: string, opts: { prev?: string } = {}): Promise<Retrieved> {
   const filters = extractFilters(query);
-  const vector = await embed(env.AI, MODELS.embed, query);
+  const vector = await embed(env.AI, MODELS.embed, retrievalQuery(query, opts.prev));
   const q: any = { topK: LIMITS.retrieveK, returnMetadata: "all" };
   const filter = toVectorizeFilter(filters);
   if (filter) q.filter = filter;
@@ -180,7 +191,12 @@ export async function retrieve(env: any, query: string): Promise<Retrieved> {
   return { hits: diversified.slice(0, LIMITS.rerankKeep), filters };
 }
 
-export function buildMessages(query: string, hits: Hit[], lang?: string) {
+export interface HistoryTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export function buildMessages(query: string, hits: Hit[], lang?: string, history: HistoryTurn[] = []) {
   const context = hits
     .map((h, i) => {
       const label = `${h.metadata.docidentifier || h.metadata.doc_id}:${h.metadata.edition || ""} §${h.metadata.clause_anchor || ""}`.replace(/(:|§)+$/g, "");
@@ -199,8 +215,16 @@ export function buildMessages(query: string, hits: Hit[], lang?: string) {
     "Be concise and precise. Answer in the question's language" + (lang ? ` (explicitly requested: ${lang})` : "") + ".",
   ].join(" ");
 
+  const systemWithHistory = history.length
+    ? system.replace(
+        "You answer questions about OIML publications",
+        "You answer questions about OIML publications. Earlier turns of this conversation are provided for context — answer the LATEST question, treating the passages below as the source of truth for facts and citations",
+      )
+    : system;
+
   return [
-    { role: "system", content: system },
+    { role: "system", content: systemWithHistory },
+    ...history.map((h) => ({ role: h.role, content: h.content })),
     { role: "user", content: `Question: ${query}\n\nContext passages:\n${context}` },
   ];
 }

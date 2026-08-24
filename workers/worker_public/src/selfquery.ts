@@ -50,11 +50,10 @@ export function toVectorizeFilter(f: QueryFilters): Record<string, string> | und
   // ("OIML 106"), and the reranker resolves R/D number collisions
   if (f.doc_number) {
     const out: Record<string, string> = { doc_number: f.doc_number };
-    if (f.language) out.language = f.language;
     if (f.edition) out.edition = f.edition;
-    return out;
+    return out; // language filter omitted: the index is English-only
   }
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(f)) if (v) out[k] = v;
+  for (const [k, v] of Object.entries(f)) if (v && k !== "language") out[k] = v;
   return Object.keys(out).length ? out : undefined;
 }

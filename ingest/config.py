@@ -49,3 +49,7 @@ EMBED_MODEL = "@cf/qwen/qwen3-embedding-0.6b"
 
 MAX_CHUNK_CHARS = 2800
 SHELL_WORD_THRESHOLD = 100
+# English-only index (2026-08-24 user directive): multilingual chunks made
+# follow-up questions retrieve unrelated content; non-English documents
+# are excluded at ingest. Output language stays a serving-time concern.
+INGEST_LANGUAGES = {"en"}
