@@ -52,9 +52,23 @@ def attach_families(docs) -> list:
         if len(best) < 2:
             continue
 
-        lines = [f"- {ident} — {title}" for _r, ident, title in best.values()]
-        n_parts = sum(1 for ident in best if ident.startswith(base_ident + "-"))
-        n_total = len(best)
+        # parts have numeric suffixes (R 60-1, R 60-2); annexes don't
+        # (R 60-Annexe A). The base is not a part — it's the umbrella.
+        part_idents = []
+        annex_idents = []
+        for ident in best:
+            if ident == base_ident:
+                continue
+            suffix = ident[len(base_ident):].lstrip("-").strip()
+            if suffix and suffix[0].isdigit():
+                part_idents.append(ident)
+            else:
+                annex_idents.append(ident)
+        n_parts = len(part_idents)
+        n_annexes = len(annex_idents)
+        n_total = n_parts + n_annexes
+
+        lines = [f"- {ident} — {title}" for _r, ident, title in best.values() if ident != base_ident]
 
         # find the base doc for metadata
         base_doc = next(
@@ -65,14 +79,16 @@ def attach_families(docs) -> list:
             members[0],
         )
 
+        parts_label = f"{n_parts} part{'s' if n_parts != 1 else ''}"
+        annexes_label = f" and {n_annexes} annex{'es' if n_annexes != 1 else ''}" if n_annexes else ""
         text = (
             f"{base_doc.title.split('—')[0].strip()} ({base_ident}) is a multi-part OIML publication. "
-            f"It comprises {n_total} components ({n_parts} parts and {n_total - n_parts} annex/other documents):\n"
+            f"It comprises {parts_label}{annexes_label}:\n"
             + "\n".join(lines)
-            + f"\n\n{base_ident} has {n_total} components."
+            + f"\n\n{base_ident} has {parts_label}{annexes_label} ({n_total} components total)."
         )
 
-        cid = "c" + _h.sha1(f"family|{doctype}|{number}".encode()).hexdigest()[:16]
+        cid = 'c' + _h.sha1(f'family|{doctype}|{number}|{_h.sha256(text.encode()).hexdigest()[:12]}'.encode()).hexdigest()[:16]
         family_chunks.append(Chunk(
             id=cid,
             doc_id=f"family:{doctype}-{number}",
