@@ -128,7 +128,7 @@ class CF:
             state_path.unlink()
 
     def vectorize_delete(self, ids: list[str]) -> None:
-        url = f"{BASE}/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}/delete-by-ids"
+        url = f"{BASE}/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}/delete_by_ids"
         for i in range(0, len(ids), 100):
             self._post(url, {"ids": ids[i : i + 100]})
             print(f"  deleted {min(i + 100, len(ids))}/{len(ids)}")
