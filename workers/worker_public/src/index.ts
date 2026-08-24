@@ -3,6 +3,7 @@ import { buildMessages, citations, retrieve, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { INTERNAL_ROLES } from "./auth";
+import { handleShareConversation, handleGetShared } from "./share";
 import { understandQuery } from "./understand";
 import { gradeRetrieval } from "./grader";
 import { reflect } from "./reflect";
@@ -345,6 +346,9 @@ async function handleAsk(
   }
 
   let answer = await generateOnce(env, model, messages);
+  if (answer === null && model !== MODELS.anon) {
+    answer = await generateOnce(env, MODELS.anon, messages);
+  }
 
   // ── Self-RAG reflection loop ──
   // The model critiques its own answer; if claims are ungrounded, retry
@@ -534,6 +538,52 @@ export default {
           },
         ],
       });
+    }
+
+    if (req.method === "GET" && (path === "/v1/admin/stats" || path === "/v1/admin/stats/")) {
+      if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+      const auth = req.headers.get("authorization") ?? "";
+      if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+      const [byDay, byModel, feedback, convCount] = await Promise.all([
+        env.DB.prepare("SELECT day, tier, COUNT(*) as n, SUM(ok) as ok FROM queries WHERE day >= date('now','-7 days') GROUP BY day, tier ORDER BY day DESC").all(),
+        env.DB.prepare("SELECT model, SUM(requests) as requests FROM spend WHERE day >= date('now','-7 days') GROUP BY model ORDER BY requests DESC").all(),
+        env.DB.prepare("SELECT rating, COUNT(*) as n FROM feedback GROUP BY rating").all(),
+        env.DB.prepare("SELECT COUNT(*) as n FROM conversations").first(),
+      ]);
+      const totalQueries = (byDay.results as any[]).reduce((a, r) => a + r.n, 0);
+      const totalOk = (byDay.results as any[]).reduce((a, r) => a + r.ok_count, 0);
+      const errorRate = totalQueries ? ((totalQueries - totalOk) / totalQueries * 100).toFixed(1) : "0";
+      ctx.waitUntil(env.DB.batch([
+        env.DB.prepare("DELETE FROM queries WHERE day < date('now','-90 days')"),
+        env.DB.prepare("DELETE FROM spend WHERE day < date('now','-90 days')"),
+        env.DB.prepare("DELETE FROM feedback WHERE ts < datetime('now','-90 days')"),
+      ]));
+      return json({
+        window: "7 days",
+        queries_by_day: byDay.results,
+        spend_by_model: byModel.results,
+        feedback: feedback.results,
+        conversations: (convCount as any)?.n ?? 0,
+        error_rate_pct: errorRate,
+        index_version: env.INDEX_VERSION,
+        pruned: "telemetry >90d",
+      }, 200, corsHeaders(req));
+    }
+
+    if (req.method === "POST" && path.startsWith("/api/conversations/") && path.endsWith("/share")) {
+      const session = await sessionFrom(req, env as any);
+      if (!session) return err(401, "unauthorized", "Sign in to share conversations");
+      const parts = path.split("/").filter(Boolean);
+      const convId = parts[2];
+      const conv = await env.DB.prepare("SELECT id, sub, title FROM conversations WHERE id = ?1 AND sub = ?2").bind(convId, session.sub).first();
+      if (!conv) return err(404, "not_found", "No such conversation");
+      const msgs = await env.DB.prepare("SELECT role, content, citations, model FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC").bind(convId).all();
+      return handleShareConversation(env, session.sub, (conv as any).title, msgs.results ?? []);
+    }
+
+    if (req.method === "GET" && path.startsWith("/api/shared/")) {
+      const slug = path.split("/").filter(Boolean)[2] ?? "";
+      return handleGetShared(env, slug);
     }
 
     if (req.method === "GET" && path === "/health") {

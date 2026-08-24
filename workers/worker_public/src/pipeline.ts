@@ -85,6 +85,27 @@ export async function retrieve(
     matches = res.matches ?? [];
   }
 
+  // ── HyDE (Hypothetical Document Embeddings) ──
+  // Embed the hypothetical answer and search with it — its vocabulary
+  // matches the corpus better than the question's. Only for non-filtered
+  // queries (a filter would nullify the benefit).
+  // Ref: arXiv 2212.10496; arXiv 2507.16754 (adaptive HyDE)
+  if (u?.hypothetical_answer && !filter) {
+    try {
+      const hv = await embed(env.AI, MODELS.embed, u.hypothetical_answer);
+      const hres = await env.VECTORIZE.query(hv, { topK: 20, returnMetadata: "all" });
+      const seenIds = new Set(matches.map((m: any) => m.id));
+      for (const m of (hres.matches ?? []).slice(0, 10)) {
+        if (!seenIds.has(m.id)) {
+          matches.push({ id: m.id, score: m.score * 0.7, metadata: m.metadata });
+          seenIds.add(m.id);
+        }
+      }
+    } catch {
+      // HyDE is additive; primary results stand
+    }
+  }
+
   // ── Multi-Query RAG-Fusion ──
   // Generate 2-3 alternative phrasings, retrieve for each, fuse via RRF.
   // Different phrasings surface documents the original query misses.
@@ -328,6 +349,14 @@ export function buildMessages(query: string, hits: Hit[], lang?: string, history
   ];
 }
 
+function oimlPublicationUrl(meta: ChunkMeta): string | undefined {
+  if (!meta.doctype || !meta.doc_number) return undefined;
+  const typeMap: Record<string, string> = { R: "r", D: "d", B: "b", G: "g", E: "e" };
+  const t = typeMap[meta.doctype];
+  if (!t) return undefined;
+  return `https://www.oiml.org/en/publications/${t}${meta.doc_number}`;
+}
+
 export function citations(hits: Hit[]) {
   const rank = (s?: string) => (s === "in-force" || s === "joint" ? 0 : s === "unknown" || !s ? 1 : 2);
   return [...hits]
@@ -340,6 +369,7 @@ export function citations(hits: Hit[]) {
       clause_title: h.metadata.clause_title,
       status: h.metadata.status ?? "unknown",
       superseded_by: h.metadata.superseded_by || undefined,
+      url: oimlPublicationUrl(h.metadata),
       snippet: h.text.slice(0, 400),
       score: h.rerank_score ?? h.score,
     }))

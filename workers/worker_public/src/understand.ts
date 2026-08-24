@@ -20,12 +20,13 @@ export interface QueryUnderstanding {
   complexity: "simple" | "complex";
   query_variants: string[];
   sub_queries: string[];
+  hypothetical_answer: string;
 }
 
 const SYSTEM = [
   "You normalize a user question for a retrieval system over OIML legal-metrology publications (English corpus).",
   "Reply with ONLY a JSON object, no prose, no markdown fence:",
-  '{"docidentifier": "OIML R 60-3" | null, "docnumber": "60" | null, "edition": "2021" | null, "language": "en" | null, "process_intent": true | false, "term": "load cell" | null, "standalone_query": "...", "complexity": "simple", "query_variants": [], "sub_queries": []}',
+  '{"docidentifier": "OIML R 60-3" | null, "docnumber": "60" | null, "edition": "2021" | null, "language": "en" | null, "process_intent": true | false, "term": "load cell" | null, "standalone_query": "...", "complexity": "simple", "query_variants": [], "sub_queries": [], "hypothetical_answer": "..."}',
   "Rules:",
   '- docidentifier: the publication the user names, in any spelling ("r60", "R 60-3", "OIML R60", "the load cell recommendation" → resolve to the OIML identifier you can infer; include the part ("-1", "-3") only when clearly meant). docnumber is the base number without part.',
   "- edition: only when the user pins a year.",
@@ -36,6 +37,7 @@ const SYSTEM = [
   "- complexity: \"complex\" when combining info from multiple documents; \"simple\" otherwise.",
   "- query_variants: 2-3 alternative phrasings for multi-query fusion.",
   "- sub_queries: for complex questions, 2-4 sub-questions. Empty for simple.",
+  "- hypothetical_answer: a 1-2 sentence hypothetical answer to the question (what the ideal document passage would say). Used for HyDE retrieval.",
 ].join("\n");
 
 function extractJson(text: string): QueryUnderstanding | null {
@@ -55,6 +57,7 @@ function extractJson(text: string): QueryUnderstanding | null {
       query_variants: Array.isArray(raw.query_variants)
         ? raw.query_variants.filter((q: unknown) => typeof q === 'string' && (q as string).trim()).map((q: string) => q.trim().slice(0, 300)).slice(0, 4)
         : [],
+      hypothetical_answer: typeof raw.hypothetical_answer === "string" ? raw.hypothetical_answer.trim().slice(0, 300) : "",
       sub_queries: Array.isArray(raw.sub_queries)
         ? raw.sub_queries.filter((q: unknown) => typeof q === 'string' && (q as string).trim()).map((q: string) => q.trim().slice(0, 300)).slice(0, 5)
         : [],    };
