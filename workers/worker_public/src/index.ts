@@ -5,6 +5,7 @@ import { handleAppendMessage, handleConversations } from "./conversations";
 import { INTERNAL_ROLES } from "./auth";
 import { understandQuery } from "./understand";
 import { gradeRetrieval } from "./grader";
+import { reflect } from "./reflect";
 
 export interface Env {
   AI: any;
@@ -150,6 +151,11 @@ function telemetry(
       ).bind(day, tier, model ?? "none"),
     ]),
   );
+}
+
+// self-reflection retry runs at most once per ask
+function opts_reflect_retried(): boolean {
+  return false;
 }
 
 async function generateStream(env: Env, model: string, messages: any[]): Promise<ReadableStream<Uint8Array> | null> {
@@ -338,7 +344,28 @@ async function handleAsk(
     }
   }
 
-  const answer = await generateOnce(env, model, messages);
+  let answer = await generateOnce(env, model, messages);
+
+  // ── Self-RAG reflection loop ──
+  // The model critiques its own answer; if claims are ungrounded, retry
+  // retrieval with the missing-info hint (max one retry).
+  // Ref: selfrag.github.io; arXiv 2606.05658 bounded reflection
+  if (answer && answer !== "I don't have information on this in the indexed OIML publications.") {
+    const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h: Hit) => h.text));
+    if (reflection && !reflection.grounded && reflection.missing_info && !opts_reflect_retried()) {
+      // re-retrieve targeting what was missing
+      const retryRetrieve = await retrieve(env, q.query, {
+        prev,
+        understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` } as any,
+      });
+      if (retryRetrieve.hits.length > 0) {
+        const retryMessages = buildMessages(q.query, retryRetrieve.hits, q.lang, history);
+        const retryAnswer = await generateOnce(env, model, retryMessages);
+        if (retryAnswer) answer = retryAnswer; // better-grounded answer wins
+      }
+    }
+  }
+
   if (answer === null) {
     telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");

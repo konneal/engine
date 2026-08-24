@@ -87,14 +87,13 @@ for (const c of cases) {
 // — faithfulness scoring (RAGAS-style, LLM-as-judge) —
 // The REST API call uses the same Workers AI model; the eval harness
 // runs outside a Worker, so we call directly.
-const { default: readFileSync2 } = await import("node:fs");
-const envText = readFileSync2(new URL("../.env", import.meta.url), "utf8");
+const envText = readFileSync(new URL("../.env", import.meta.url), "utf8");
 const CF_ACCOUNT = (envText.match(/^CLOUDFLARE_ACCOUNT_ID=(.+)$/m) ?? [])[1]?.trim();
 const CF_TOKEN = (envText.match(/^CLOUDFLARE_API_TOKEN=(.+)$/m) ?? [])[1]?.trim() ||
   (() => {
     // fall back to wrangler's stored token
     try {
-      const toml = readFileSync2(
+      const toml = readFileSync(
         process.env.HOME + "/Library/Preferences/.wrangler/config/default.toml",
         "utf8",
       );

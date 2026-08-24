@@ -85,6 +85,92 @@ export async function retrieve(
     matches = res.matches ?? [];
   }
 
+  // ── Multi-Query RAG-Fusion ──
+  // Generate 2-3 alternative phrasings, retrieve for each, fuse via RRF.
+  // Different phrasings surface documents the original query misses.
+  // Ref: RAG-Fusion paper (Semantic Scholar b4d1da74); dev.to 2026 blueprint
+  if (u?.query_variants?.length) {
+    const variantResults: Hit[][] = [];
+    for (const variant of u.query_variants.slice(0, 3)) {
+      try {
+        const vv = await embed(env.AI, MODELS.embed, variant);
+        const vres = await env.VECTORIZE.query(vv, { topK: 20, returnMetadata: "all", ...(filter ? { filter } : {}) });
+        const vhits: Hit[] = (vres.matches ?? []).map((m: any) => ({
+          id: m.id,
+          score: m.score,
+          metadata: (m.metadata ?? {}) as ChunkMeta,
+          text: (m.metadata?.chunk_text as string) ?? "",
+        }));
+        variantResults.push(vhits);
+      } catch {
+        // variant retrieval failure — the primary results stand
+      }
+    }
+    // RRF fuse: primary ranking + each variant ranking
+    if (variantResults.length > 0) {
+      const allRankings: Hit[][] = [
+        matches.map((m: any) => ({
+          id: m.id,
+          score: m.score,
+          metadata: (m.metadata ?? {}) as ChunkMeta,
+          text: (m.metadata?.chunk_text as string) ?? "",
+        })),
+        ...variantResults,
+      ];
+      // simple RRF across all rankings
+      const scores = new Map<string, number>();
+      const byId = new Map<string, Hit>();
+      allRankings.forEach((ranking) => {
+        ranking.forEach((h, i) => {
+          scores.set(h.id, (scores.get(h.id) ?? 0) + 1 / (60 + i + 1));
+          byId.set(h.id, h);
+        });
+      });
+      const fused = [...scores.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, LIMITS.retrieveK)
+        .map(([id]) => byId.get(id)!)
+        .filter(Boolean);
+      if (fused.length > 0) {
+        matches = fused.map((h) => ({ id: h.id, score: h.score, metadata: h.metadata }));
+      }
+    }
+  }
+
+  // ── Multi-hop decomposition for complex questions ──
+  // Retrieve for each sub-question and merge the top results.
+  // Ref: Agent-Orchestrated Adaptive RAG (arXiv 2606.05658)
+  if (u?.complexity === "complex" && u.sub_queries?.length) {
+    const subResults: Hit[][] = [];
+    for (const sub of u.sub_queries.slice(0, 4)) {
+      try {
+        const sv = await embed(env.AI, MODELS.embed, sub);
+        const sres = await env.VECTORIZE.query(sv, { topK: 15, returnMetadata: "all" });
+        subResults.push(
+          (sres.matches ?? []).map((m: any) => ({
+            id: m.id,
+            score: m.score,
+            metadata: (m.metadata ?? {}) as ChunkMeta,
+            text: (m.metadata?.chunk_text as string) ?? "",
+          })),
+        );
+      } catch {
+        // sub-query failure — primary results stand
+      }
+    }
+    // merge sub-results into the candidate pool (union, no RRF — these
+    // are complementary perspectives, not alternatives)
+    const seenIds = new Set(matches.map((m: any) => m.id));
+    for (const sr of subResults) {
+      for (const h of sr.slice(0, 8)) {
+        if (!seenIds.has(h.id)) {
+          matches.push({ id: h.id, score: h.score * 0.8, metadata: h.metadata });
+          seenIds.add(h.id);
+        }
+      }
+    }
+  }
+
   let hits: Hit[] = matches.map((m) => ({
     id: m.id,
     score: m.score,

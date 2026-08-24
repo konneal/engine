@@ -17,12 +17,15 @@ export interface QueryUnderstanding {
   term: string | null;
   /** self-contained retrieval query: follow-ups folded with context */
   standalone_query: string;
+  complexity: "simple" | "complex";
+  query_variants: string[];
+  sub_queries: string[];
 }
 
 const SYSTEM = [
   "You normalize a user question for a retrieval system over OIML legal-metrology publications (English corpus).",
   "Reply with ONLY a JSON object, no prose, no markdown fence:",
-  '{"docidentifier": "OIML R 60-3" | null, "docnumber": "60" | null, "edition": "2021" | null, "language": "en" | null, "process_intent": true | false, "term": "load cell" | null, "standalone_query": "..."}',
+  '{"docidentifier": "OIML R 60-3" | null, "docnumber": "60" | null, "edition": "2021" | null, "language": "en" | null, "process_intent": true | false, "term": "load cell" | null, "standalone_query": "...", "complexity": "simple", "query_variants": [], "sub_queries": []}',
   "Rules:",
   '- docidentifier: the publication the user names, in any spelling ("r60", "R 60-3", "OIML R60", "the load cell recommendation" → resolve to the OIML identifier you can infer; include the part ("-1", "-3") only when clearly meant). docnumber is the base number without part.',
   "- edition: only when the user pins a year.",
@@ -30,6 +33,9 @@ const SYSTEM = [
   "- process_intent: true when the question is about HOW to do something around publications (get certified, apply, contact an issuing authority, comply) rather than the technical content of a publication.",
   "- term: the defined term when the question asks what something is (\"what is a load cell\" → \"load cell\"); otherwise null.",
   "- standalone_query: the question rewritten to stand alone — fold in the conversation context so \"give me more details\" becomes the concrete question. Keep the user's own words where they already stand alone.",
+  "- complexity: \"complex\" when combining info from multiple documents; \"simple\" otherwise.",
+  "- query_variants: 2-3 alternative phrasings for multi-query fusion.",
+  "- sub_queries: for complex questions, 2-4 sub-questions. Empty for simple.",
 ].join("\n");
 
 function extractJson(text: string): QueryUnderstanding | null {
@@ -45,7 +51,13 @@ function extractJson(text: string): QueryUnderstanding | null {
       process_intent: raw.process_intent === true,
       term: typeof raw.term === "string" && raw.term.trim() ? raw.term.trim().slice(0, 60) : null,
       standalone_query: typeof raw.standalone_query === "string" && raw.standalone_query.trim() ? raw.standalone_query.trim().slice(0, 400) : "",
-    };
+      complexity: raw.complexity === 'complex' ? ('complex' as const) : ('simple' as const),
+      query_variants: Array.isArray(raw.query_variants)
+        ? raw.query_variants.filter((q: unknown) => typeof q === 'string' && (q as string).trim()).map((q: string) => q.trim().slice(0, 300)).slice(0, 4)
+        : [],
+      sub_queries: Array.isArray(raw.sub_queries)
+        ? raw.sub_queries.filter((q: unknown) => typeof q === 'string' && (q as string).trim()).map((q: string) => q.trim().slice(0, 300)).slice(0, 5)
+        : [],    };
     return u;
   } catch {
     return null;
