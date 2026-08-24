@@ -119,7 +119,7 @@ def embed(limit: int | None) -> None:
 
 
 def upsert() -> None:
-    from .cf import CF
+    from .cf import CF, INDEX_NAME
 
     cf = CF()
     info = cf.vectorize_info()
@@ -132,8 +132,11 @@ def upsert() -> None:
             c = chunks.get(rec["id"])
             if c:
                 vectors.append({"id": rec["id"], "values": rec["values"], "metadata": c["metadata"]})
+    state = ARTIFACTS / f"upsert_state_{INDEX_NAME}.txt"
+    if state.exists():
+        print(f"resuming from {state.read_text().strip()}")
     print(f"upserting {len(vectors)} vectors")
-    cf.vectorize_upsert(vectors)
+    cf.vectorize_upsert(vectors, state)
     print("done")
 
 

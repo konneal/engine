@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -110,14 +111,27 @@ class CF:
         r.raise_for_status()
         return r.json()["result"]
 
-    def vectorize_upsert(self, vectors: list[dict]) -> None:
-        for i in range(0, len(vectors), 100):
+    def vectorize_upsert(self, vectors: list[dict], state_path: Path | None = None) -> None:
+        # resumable: record the completed batch cursor so a retry (network
+        # drop, expired token) continues instead of restarting from zero
+        start = 0
+        if state_path and state_path.exists():
+            start = int(state_path.read_text().strip() or 0)
+        url = f"{BASE}/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}/upsert"
+        for i in range(start, len(vectors), 100):
             batch = vectors[i : i + 100]
-            self._post(
-                f"{BASE}/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}/upsert",
-                {"vectors": batch},
-            )
+            self._post(url, {"vectors": batch})
+            if state_path:
+                state_path.write_text(str(i + 100))
             print(f"  upserted {min(i + 100, len(vectors))}/{len(vectors)}")
+        if state_path and state_path.exists():
+            state_path.unlink()
+
+    def vectorize_delete(self, ids: list[str]) -> None:
+        url = f"{BASE}/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}/delete-by-ids"
+        for i in range(0, len(ids), 100):
+            self._post(url, {"ids": ids[i : i + 100]})
+            print(f"  deleted {min(i + 100, len(ids))}/{len(ids)}")
 
     def vectorize_query(self, vec: list[float], top_k: int = 5) -> list[dict[str, Any]]:
         data = self._post(
