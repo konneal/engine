@@ -146,3 +146,41 @@ Consumers stop shipping regexes that guess at these boundaries.
    mostly exporter work in existing render code paths.
 2. Tables + glossary (P1) — the two biggest answer-quality wins.
 3. Equations, stable ids, alignment, requirement flags, profiles (P2).
+
+## Beyond RAG — who else needs this
+
+The unit manifest is not a chatbot feature; it is **addressability for
+documents**, which unlocks a family of consumers:
+
+- **Agentic conformity assessment.** Certification bodies and, soon,
+  AI agents that draft type-evaluation reports: map measured test results
+  to requirement unit-ids, auto-generate test plans from a Recommendation's
+  requirements, and produce audit trails (result → requirement → source
+  span). OIML R-series test-report annexes are already structured tables —
+  a machine layer turns report preparation from copywork into assembly.
+- **Regulatory transposition and comparison.** National bodies transpose
+  OIML Recommendations into national law. Requirement-level units +
+  superseded→successor chains make "what changed between the 2000 and
+  2017 edition" and "which national clauses diverge" diffable questions
+  instead of expert reading marathons.
+- **Knowledge graphs / ontologies.** Terms × definitions × symbols ×
+  requirements × documents, emitted per render, compose directly into the
+  semantic layer legal metrology is already building — the glossary layer
+  is the same graph in miniature.
+- **LLM training and evaluation corpora.** Standards are high-quality,
+  normatively precise domain text. Unit manifests make them citable
+  training/eval material (grounded QA benchmarks for legal metrology,
+  like legal benchmarks did for law) — with per-unit provenance.
+- **Cross-publisher standards search.** Canonical unit ids (series,
+  number, part, year, clause) federate search across OIML/ISO/IEC
+  ecosystems instead of each publisher's PDF silo.
+- **Translation QA.** Interlinear alignment turns "is the term set
+  consistent across the E/F/A editions" into a diff.
+- **Accessibility and plain language.** The semantic layer (structured
+  definitions, requirement subjects) is the substrate for plain-language
+  summaries and assistive reading — the same data, different renderer.
+
+The common thread: today all of these consumers re-derive semantics from
+prose. The renderer already holds these semantics in memory while it
+builds the HTML. Emitting them is cheaper than every consumer
+re-guessing them.
