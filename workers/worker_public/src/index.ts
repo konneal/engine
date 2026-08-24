@@ -550,9 +550,9 @@ export default {
         env.DB.prepare("SELECT rating, COUNT(*) as n FROM feedback GROUP BY rating").all(),
         env.DB.prepare("SELECT COUNT(*) as n FROM conversations").first(),
       ]);
-      const totalQueries = (byDay.results as any[]).reduce((a, r) => a + r.n, 0);
-      const totalOk = (byDay.results as any[]).reduce((a, r) => a + r.ok_count, 0);
-      const errorRate = totalQueries ? ((totalQueries - totalOk) / totalQueries * 100).toFixed(1) : "0";
+      const totalQueries = (byDay.results as any[]).reduce((a, r) => a + (r.n || 0), 0) || 0;
+      const totalOk = (byDay.results as any[]).reduce((a, r) => a + (r.ok_count || 0), 0) || 0;
+      const errorRate = totalQueries > 0 ? (((totalQueries - totalOk) / totalQueries) * 100).toFixed(1) : "0";
       ctx.waitUntil(env.DB.batch([
         env.DB.prepare("DELETE FROM queries WHERE day < date('now','-90 days')"),
         env.DB.prepare("DELETE FROM spend WHERE day < date('now','-90 days')"),
