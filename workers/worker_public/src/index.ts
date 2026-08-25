@@ -1,10 +1,11 @@
-import { LIMITS, MODELS, num, sha256Hex, today } from "./config";
+import { LIMITS, MODELS, datasetsFor, num, sha256Hex, today } from "./config";
 import { buildMessages, citations, retrieve, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleShareConversation, handleGetShared } from "./share";
 import { retrieveInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
+import { metaAnswer } from "./meta";
 import { gradeRetrieval } from "./grader";
 import { reflect } from "./reflect";
 
@@ -232,6 +233,24 @@ async function handleAsk(
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
 
   const member = tier === "member" ? await sessionFrom(req, env as any) : null;
+
+  // Meta questions (who are you, what can you do, greetings) describe the
+  // service, not the corpus — answer from the config SSOT, free of quota,
+  // before retrieval can refuse them for lack of passages.
+  const meta = metaAnswer(q.query, !!member);
+  if (meta) {
+    const queryHash = await sha256Hex(q.query);
+    const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
+    telemetry(env, ctx, tier, "ask", null, true, meta.answer.length, queryHash, q.lang);
+    if (wantsStream) {
+      return sseResponse(
+        [{ type: "citations", citations: [] }, { type: "token", v: meta.answer }, { type: "done", model: "service", query_hash: queryHash }],
+        corsHeaders(req),
+      );
+    }
+    return json({ answer: meta.answer, citations: [], model: "service", query_hash: queryHash });
+  }
+
   const exempt = tier === "anon" ? await isExemptIp(env, clientIp(req)) : false;
   const limit =
     tier === "key" ? key!.day_limit : tier === "member" || member ? num(env as any, "MEMBER_DAY_ASK", 300) : num(env as any, "ANON_DAY_ASK", 20);
@@ -528,23 +547,7 @@ export default {
 
     if (req.method === "GET" && (path === "/api/datasets" || path === "/api/datasets/")) {
       const session = await sessionFrom(req, env as any);
-      return json({
-        datasets: [
-          {
-            id: "oiml",
-            label: "OIML Publications",
-            description: "Recommendations, Documents, Basic publications, Guides",
-            enabled: true,
-          },
-          {
-            id: "iso",
-            label: "ISO/IEC Conformity Assessment",
-            description: "ISO/IEC 17xxx standards — federated with OIML results for members",
-            enabled: !!session,
-            authenticated: !!session,
-          },
-        ],
-      });
+      return json({ datasets: datasetsFor(session) });
     }
 
     if (req.method === "GET" && (path === "/v1/admin/stats" || path === "/v1/admin/stats/")) {

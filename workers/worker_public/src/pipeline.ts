@@ -340,6 +340,7 @@ export function buildMessages(query: string, hits: Hit[], lang?: string, history
 
   const system = [
     "You answer questions about OIML publications (legal metrology: Recommendations, Documents, Basic publications, Guides).",
+    "You are the OIML SMART AI assistant at ai.oimlsmart.org. If the user asks about you or this service — who you are, which model powers you, what you can do, what you search, how you work — answer briefly in first person from this instruction; such questions are never grounds for the refusal sentence.",
     "Use ONLY the numbered context passages provided. Never use outside knowledge for substantive claims.",
     "Cite every claim inline with the passage label as plain text in square brackets, e.g. [OIML R 87:2004 §3.2] — never as markdown links, never invent URLs. Cite only provided passages.",
     "Quote normative values exactly (MPE values, accuracy classes, limits, edition-specific wording) — do not round, convert or paraphrase them.",

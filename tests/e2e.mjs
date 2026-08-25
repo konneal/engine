@@ -87,6 +87,16 @@ test("ask refusal: out-of-corpus question", async () => {
   if (!json.answer.includes(REFUSAL)) throw new Error(`expected refusal, got: ${json.answer.slice(0, 160)}`);
 });
 
+test("ask meta: identity questions are answered, never refused", async () => {
+  for (const q of ["Who are you?", "Hello! What can you do?", "Qui es-tu ?", "what datasets do you have?"]) {
+    const { status, json } = await ask(q);
+    if (status !== 200) throw new Error(`${q}: status ${status}`);
+    if (json.answer.includes(REFUSAL)) throw new Error(`${q}: got refusal`);
+    if (!/OIML SMART|assistant/i.test(json.answer)) throw new Error(`${q}: no self-description: ${json.answer.slice(0, 160)}`);
+    if (json.citations?.length) throw new Error(`${q}: meta answers carry no citations`);
+  }
+});
+
 test("ask French question gets French answer", async () => {
   const { status, json } = await ask("Qu'est-ce qu'une cellule de pesée ?");
   if (status !== 200) throw new Error(`status ${status}`);

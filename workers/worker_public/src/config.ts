@@ -14,6 +14,33 @@ export const LIMITS = {
   cacheTtlSec: 6 * 3600,
 } as const;
 
+/** The corpus catalog — single source for /api/datasets and for the
+ *  assistant's self-description. `session: true` datasets are enabled
+ *  for signed-in members (federated via the internal service binding). */
+export const DATASETS: { id: string; label: string; description: string; session?: boolean }[] = [
+  {
+    id: "oiml",
+    label: "OIML Publications",
+    description: "Recommendations, Documents, Basic publications, Guides",
+  },
+  {
+    id: "iso",
+    label: "ISO/IEC Conformity Assessment",
+    description: "ISO/IEC 17xxx standards — federated with OIML results for members",
+    session: true,
+  },
+];
+
+export function datasetsFor(session: unknown): unknown[] {
+  return DATASETS.map((d) => ({
+    id: d.id,
+    label: d.label,
+    description: d.description,
+    enabled: !d.session || !!session,
+    ...(d.session ? { requires: "an OIML SMART account", authenticated: !!session } : {}),
+  }));
+}
+
 export function num(env: Record<string, unknown>, key: string, fallback: number): number {
   const v = Number(env[key]);
   return Number.isFinite(v) && v > 0 ? v : fallback;
