@@ -3,6 +3,12 @@ main = "src/index.ts"
 compatibility_date = "2026-08-01"
 workers_dev = true
 
+# Prompts are DATA (workers/worker_public/prompts/*.md), imported into the
+# bundle as text — edited as content, never as code.
+[[rules]]
+type = "Text"
+globs = ["**/*.md"]
+
 # Route: custom domain on the oimlsmart.org zone (OIML SMART account).
 routes = [
   { pattern = "ai.oimlsmart.org", custom_domain = true }
@@ -38,7 +44,7 @@ binding = "INTERNAL_SERVICE"
 service = "rag-internal"
 
 [vars]
-INDEX_VERSION = "public-v2.51-reindexed"
+INDEX_VERSION = "public-v2.52"
 ANON_DAY_ASK = "20"
 ANON_DAY_SEARCH = "50"
 KEY_DAY_ASK_DEFAULT = "2000"

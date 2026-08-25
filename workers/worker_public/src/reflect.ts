@@ -3,6 +3,9 @@
 // identifies what's missing and the system retries retrieval.
 // Ref: selfrag.github.io; Meilisearch self-RAG guide
 
+// The prompt is data (prompts/reflect.md), bundled as text.
+import reflectPrompt from "../prompts/reflect.md";
+
 export interface ReflectionResult {
   grounded: boolean;
   missing_info: string;
@@ -27,11 +30,7 @@ export async function reflect(
       messages: [
         {
           role: "system",
-          content: [
-            "You are a factuality critic. Given a question, an answer, and the passages the answer was based on,",
-            "determine if every factual claim in the answer is directly supported by the passages.",
-            'Reply with ONLY: {"grounded": true} or {"grounded": false, "missing_info": "what is missing"}',
-          ].join(" "),
+          content: reflectPrompt.trimEnd(),
         },
         {
           role: "user",

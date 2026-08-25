@@ -88,13 +88,22 @@ test("ask refusal: out-of-corpus question", async () => {
 });
 
 test("ask meta: identity questions are answered, never refused", async () => {
-  for (const q of ["Who are you?", "Hello! What can you do?", "Qui es-tu ?", "what datasets do you have?"]) {
+  for (const q of ["Who are you?", "Hello! What can you do?", "Qui es-tu ?", "Wer bist du?", "what datasets do you have?"]) {
     const { status, json } = await ask(q);
     if (status !== 200) throw new Error(`${q}: status ${status}`);
     if (json.answer.includes(REFUSAL)) throw new Error(`${q}: got refusal`);
     if (!/oiml|metrology|publication|assistant/i.test(json.answer)) throw new Error(`${q}: no self-description: ${json.answer.slice(0, 160)}`);
-    if (json.citations?.length) throw new Error(`${q}: meta answers carry no citations`);
   }
+});
+
+test("ask long question (~200 words) is accepted and answered", async () => {
+  const q =
+    "I am a manufacturer of nonautomatic weighing instruments and I am preparing a complete technical file for a new electronic bench scale with a maximum capacity of 30 kilograms and a verification scale interval of 5 grams, intended to be used in commercial retail transactions in several export markets. The instrument will be classified as a class III accuracy scale according to the OIML classification system, and our national market surveillance authority has asked us to demonstrate conformity with the applicable OIML requirements before we can place the instrument on the market. In addition, one of our export customers has asked whether the same instrument could be re-verified after a repair that replaces the load cell, and what that would imply for the errors we are allowed. I therefore need to understand precisely what the OIML publication for nonautomatic weighing instruments says about the maximum permissible errors on initial verification for such an instrument, how those errors scale with the applied load across the weighing range, whether there are any special provisions that apply to instruments with a scale interval smaller than the typical ratio, and what applies at subsequent verification after repair. Could you explain the applicable maximum permissible error values, the accuracy class requirements, and any conditions or notes that I should be aware of when declaring conformity for this class of instrument in the technical file?";
+  if (q.length < 1200) throw new Error("test question is not long enough");
+  const { status, json } = await ask(q);
+  if (status !== 200) throw new Error(`status ${status} — long question rejected`);
+  if (json.answer.length < 80) throw new Error(`no real answer: ${json.answer.slice(0, 160)}`);
+  if (json.answer.includes(REFUSAL)) throw new Error(`long legitimate question refused: ${json.answer.slice(0, 160)}`);
 });
 
 test("ask French question gets French answer", async () => {

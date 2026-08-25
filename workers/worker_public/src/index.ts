@@ -1,12 +1,12 @@
 import { LIMITS, MODELS, datasetsFor, num, sha256Hex, today } from "./config";
-import { buildMessages, citations, retrieve, Hit } from "./pipeline";
+import { buildMessages, citations, retrieve, identityNote, splitHistory, REFUSAL_ANSWER, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleShareConversation, handleGetShared } from "./share";
 import { retrieveInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
-import { classifyMeta, identityNote } from "./meta";
 import { gradeRetrieval } from "./grader";
+import summarizePrompt from "../prompts/summarize.md";
 import { reflect } from "./reflect";
 
 export interface Env {
@@ -192,6 +192,36 @@ async function generateOnce(env: Env, model: string, messages: any[]): Promise<s
   }
 }
 
+/** Compact overflow history into a short continuity summary. Null = keep
+ *  nothing (degrades to plain truncation, never to failure). */
+async function summarizeHistory(
+  env: Env,
+  model: string,
+  turns: Array<{ role: string; content: string }>,
+): Promise<string | null> {
+  try {
+    const convo = turns
+      .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.content.slice(0, 1200)}`)
+      .join("\n")
+      .slice(0, 24000);
+    const res: any = await env.AI.run(model, {
+      messages: [
+        {
+          role: "system",
+          content: summarizePrompt.trimEnd(),
+        },
+        { role: "user", content: convo },
+      ],
+      max_tokens: 400,
+      reasoning_effort: "low",
+    });
+    const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+    return typeof text === "string" && text.trim() ? text.trim().slice(0, 1200) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function* sseTokens(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -233,11 +263,6 @@ async function handleAsk(
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
 
   const member = tier === "member" ? await sessionFrom(req, env as any) : null;
-  // Conversational turns (who are you, what can you do, greetings, thanks)
-  // get answered by the model directly — routed below, past the gates,
-  // because they are real turns too: they count against quota like any
-  // other question and respect the generation kill-switch.
-  const meta = classifyMeta(q.query);
 
   const exempt = tier === "anon" ? await isExemptIp(env, clientIp(req)) : false;
   const limit =
@@ -267,28 +292,46 @@ async function handleAsk(
 
   const ns = tier === "key" ? `k:${key!.id}` : member ? `m:${member.sub}` : "anon";
   const model = member ? MODELS.member : MODELS.anon;
-  const prev = typeof body?.prev === "string" ? body.prev.slice(0, 400) : undefined;
+  const prev = typeof body?.prev === "string" ? body.prev.slice(0, 800) : undefined;
   const rawHistory = Array.isArray(body?.history) ? body.history : [];
   const history = rawHistory
     .filter((h: any) => (h?.role === "user" || h?.role === "assistant") && typeof h?.content === "string" && h.content.trim())
-    .slice(-12)
-    .map((h: any) => ({ role: h.role, content: h.content.slice(0, 1200) }));
+    .slice(-24)
+    .map((h: any) => ({ role: h.role, content: h.content.slice(0, 4000) }));
   const contextual = history.length > 0;
+  // history compaction: turns beyond the budget slice are summarized into a
+  // continuity block (below) instead of silently dropped
+  const budget = num(env as any, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
+  const { kept: keptHistory, overflow } = splitHistory(history, budget);
+  const summary = overflow.length >= 2 ? ((await summarizeHistory(env.AI, MODELS.anon, overflow)) ?? undefined) : undefined;
   let retrieved;
   // fresh=true (regenerate) skips the cache read; contextual follow-ups skip
-  // the cache entirely — the answer depends on the conversation, not the
-  // query; conversational turns are never cached (each one is its own turn)
-  const cached = meta || body?.fresh === true || contextual ? null : await cacheGet(env, ns, q.query, q.lang);
+  // the cache entirely — the answer depends on the conversation, not the query
+  const cached = body?.fresh === true || contextual ? null : await cacheGet(env, ns, q.query, q.lang);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
-  if (meta) {
-    // No retrieval — nothing in the corpus answers "who are you". The model
-    // speaks for itself from the service facts in identityNote (composed
-    // from the DATASETS catalog), in the language of the question.
+  if (cached) {
+    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang);
+    if (wantsStream) {
+      // a cache hit must still speak SSE — the chat client parses a stream
+      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.anon, query_hash: cached.value.query_hash }], corsHeaders(req));
+    }
+    return json({ ...cached.value, cached: true, quota });
+  }
+
+  const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history);
+  console.log("understand:", understanding?.intent ?? "null", "|", q.query.slice(0, 60));
+
+  // Conversational route, decided by query UNDERSTANDING (any language, any
+  // phrasing) — not string matching. No retrieval: nothing in the corpus
+  // answers "who are you". The model speaks for itself from the service
+  // facts in identityNote (composed from the DATASETS catalog).
+  if (understanding?.intent === "conversational") {
     const queryHash = await sha256Hex(q.query);
     const messages = [
       { role: "system", content: identityNote(!!member) },
-      ...history.slice(-6),
+      ...(summary ? [{ role: "system", content: `Earlier in this conversation (summarized for continuity):\n${summary}` }] : []),
+      ...keptHistory.slice(-6),
       { role: "user", content: q.query },
     ];
     if (wantsStream) {
@@ -328,16 +371,6 @@ async function handleAsk(
     return json({ answer, citations: [], model, query_hash: queryHash, ...(exempt ? {} : { quota }) });
   }
 
-  if (cached) {
-    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang);
-    if (wantsStream) {
-      // a cache hit must still speak SSE — the chat client parses a stream
-      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.anon, query_hash: cached.value.query_hash }], corsHeaders(req));
-    }
-    return json({ ...cached.value, cached: true, quota });
-  }
-
-  const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history);
   try {
     retrieved = await retrieve(env, q.query, { prev, understanding, federate });
     // CRAG: grade the passages; a weak grade earns ONE corrective
@@ -355,7 +388,7 @@ async function handleAsk(
   }
   const { hits } = retrieved;
   if (hits.length === 0) {
-    const answer = "I don't have information on this in the indexed OIML publications.";
+    const answer = REFUSAL_ANSWER;
     const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query) };
     telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang);
     return json({ ...out, ...(exempt ? {} : { quota }) });
@@ -365,10 +398,12 @@ async function handleAsk(
     q.query,
     hits,
     q.lang,
-    history,
+    keptHistory,
     understanding?.process_intent
       ? "Retrieval note: these passages come from the OIML Certification System documents because they govern certification/application procedures for OIML publications."
       : undefined,
+    summary,
+    budget,
   );
   const queryHash = await sha256Hex(q.query);
   const cites = citations(usedHits);
@@ -392,7 +427,7 @@ async function handleAsk(
           }
           send({ type: "done", model, query_hash: queryHash });
           telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
-          if (full.length > 0 && !contextual) {
+          if (full.length > 0 && !contextual && !full.includes(REFUSAL_ANSWER)) {
             ctx.waitUntil(
               env.CACHE.put(await cacheKey(env, ns, q.query, q.lang), JSON.stringify({ answer: full, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
@@ -420,7 +455,7 @@ async function handleAsk(
   // The model critiques its own answer; if claims are ungrounded, retry
   // retrieval with the missing-info hint (max one retry).
   // Ref: selfrag.github.io; arXiv 2606.05658 bounded reflection
-  if (answer && answer !== "I don't have information on this in the indexed OIML publications.") {
+  if (answer && !answer.includes(REFUSAL_ANSWER)) {
     const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h: Hit) => h.text));
     if (reflection && !reflection.grounded && reflection.missing_info && !opts_reflect_retried()) {
       // re-retrieve targeting what was missing
@@ -429,7 +464,7 @@ async function handleAsk(
         understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` } as any,
       });
       if (retryRetrieve.hits.length > 0) {
-        const { messages: retryMessages } = buildMessages(q.query, retryRetrieve.hits, q.lang, history);
+        const { messages: retryMessages } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
         const retryAnswer = await generateOnce(env, model, retryMessages);
         if (retryAnswer) answer = retryAnswer; // better-grounded answer wins
       }
@@ -441,7 +476,7 @@ async function handleAsk(
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
   const out = { answer, citations: cites, model: MODELS.anon, query_hash: queryHash };
-  if (!contextual) {
+  if (!contextual && !answer.includes(REFUSAL_ANSWER)) {
     const ck = await cacheKey(env, ns, q.query, q.lang);
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }

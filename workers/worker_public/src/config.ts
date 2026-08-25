@@ -7,21 +7,38 @@ export const MODELS = {
 } as const;
 
 export const LIMITS = {
-  maxInputChars: 1200,
+  // input sizes: generous — real questions can be long (pasted scenarios,
+  // multi-part asks). The context BUDGET is the real governor of what the
+  // model sees; these caps only bound abuse.
+  maxInputChars: 8000,
   maxOutputTokens: 3072, // qwen3-30b-a3b always reasons; 768 starved the answer entirely
   retrieveK: 50, // Vectorize caps topK at 50 when returnMetadata=all
   rerankKeep: 8,
   cacheTtlSec: 6 * 3600,
   // context-window budget (estimated tokens) for the assembled prompt —
-  // system + history slice + passages must fit or the model request fails
-  inputTokenBudget: 12000,
+  // system + summary + history slice + passages must fit or the model
+  // request fails. 16k is conservative for the qwen3 tier (pre-budget
+  // traffic at ~12k+ never hit a length error); raise via INPUT_TOKEN_BUDGET
+  // after watching logs for length rejections
+  inputTokenBudget: 16000,
   maxPassageTokens: 900, // per-passage cap (clause chunks with tables can be huge)
 } as const;
 
-/** The corpus catalog — single source for /api/datasets and for the
- *  assistant's self-description. `session: true` datasets are enabled
- *  for signed-in members (federated via the internal service binding). */
-export const DATASETS: { id: string; label: string; description: string; session?: boolean }[] = [
+/** The corpus catalog — single source for /api/datasets, the assistant's
+ *  self-description, and per-corpus model guidance. `session: true`
+ *  datasets are enabled for signed-in members (federated via the internal
+ *  service binding). `note` (optional) is injected into the system prompt
+ *  when passages from this corpus are present — corpus behavior travels
+ *  with the dataset, not with pipeline code. */
+export interface Dataset {
+  id: string; // equals the chunk metadata `corpus` value
+  label: string;
+  description: string;
+  session?: boolean;
+  note?: string;
+}
+
+export const DATASETS: Dataset[] = [
   {
     id: "oiml",
     label: "OIML Publications",
@@ -32,6 +49,7 @@ export const DATASETS: { id: string; label: string; description: string; session
     label: "ISO/IEC Conformity Assessment",
     description: "ISO/IEC 17xxx standards — federated with OIML results for members",
     session: true,
+    note: "Some passages come from the internal ISO/IEC corpus (labeled ISO/IEC …) — use them alongside the OIML passages and cite them the same way.",
   },
 ];
 

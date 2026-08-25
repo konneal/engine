@@ -4,8 +4,13 @@
 // fallback when this call fails, errors, or times out — degraded mode,
 // never a hard failure.
 
+// The prompt is data (prompts/understanding.md), bundled as text.
+import SYSTEM from "../prompts/understanding.md";
+
 export interface QueryUnderstanding {
-  /** normalized document reference, e.g. "OIML R 60-3" — null when none */
+  /** conversational turn (greeting, identity, small talk) vs knowledge seek */
+  intent: "conversational" | "knowledge";
+  /** normalized document reference, e.g. "OIML R 76-2" — null when none */
   docidentifier: string | null;
   /** base document number for the Vectorize filter, e.g. "60" */
   doc_number: string | null;
@@ -23,22 +28,6 @@ export interface QueryUnderstanding {
   hypothetical_answer: string;
 }
 
-const SYSTEM = [
-  "You normalize a user question for a retrieval system over OIML legal-metrology publications (English corpus).",
-  "Reply with ONLY a JSON object, no prose, no markdown fence:",
-  '{"docidentifier": "OIML R 60-3" | null, "docnumber": "60" | null, "edition": "2021" | null, "language": "en" | null, "process_intent": true | false, "term": "load cell" | null, "standalone_query": "...", "complexity": "simple", "query_variants": [], "sub_queries": [], "hypothetical_answer": "..."}',
-  "Rules:",
-  '- docidentifier: the publication the user names, in any spelling ("r60", "R 60-3", "OIML R60", "the load cell recommendation" → resolve to the OIML identifier you can infer; include the part ("-1", "-3") only when clearly meant). docnumber is the base number without part.',
-  "- edition: only when the user pins a year.",
-  "- language: only when the user asks for a specific answer language; otherwise null (the corpus is English; answering in the user's language is handled elsewhere).",
-  "- process_intent: true when the question is about HOW to do something around publications (get certified, apply, contact an issuing authority, comply) rather than the technical content of a publication.",
-  "- term: the defined term when the question asks what something is (\"what is a load cell\" → \"load cell\"); otherwise null.",
-  "- standalone_query: the question rewritten to stand alone — fold in the conversation context so \"give me more details\" becomes the concrete question. Keep the user's own words where they already stand alone.",
-  "- complexity: \"complex\" when combining info from multiple documents; \"simple\" otherwise.",
-  "- query_variants: 2-3 alternative phrasings for multi-query fusion.",
-  "- sub_queries: for complex questions, 2-4 sub-questions. Empty for simple.",
-  "- hypothetical_answer: a 1-2 sentence hypothetical answer to the question (what the ideal document passage would say). Used for HyDE retrieval.",
-].join("\n");
 
 function extractJson(text: string): QueryUnderstanding | null {
   const m = text.match(/\{[\s\S]*\}/);
@@ -46,6 +35,7 @@ function extractJson(text: string): QueryUnderstanding | null {
   try {
     const raw = JSON.parse(m[0]);
     const u: QueryUnderstanding = {
+      intent: raw.intent === "conversational" ? ("conversational" as const) : ("knowledge" as const),
       docidentifier: typeof raw.docidentifier === "string" && raw.docidentifier.trim() ? raw.docidentifier.trim().slice(0, 60) : null,
       doc_number: typeof raw.docnumber === "string" && /^\d{1,3}$/.test(raw.docnumber) ? raw.docnumber : null,
       edition: typeof raw.edition === "string" && /^\d{4}$/.test(raw.edition) ? raw.edition : null,
@@ -67,7 +57,6 @@ function extractJson(text: string): QueryUnderstanding | null {
   }
 }
 
-const TIMEOUT_MS = 3500;
 
 /** Understand the query with the cheap model. Null = use the regex fallback. */
 export async function understandQuery(
@@ -77,8 +66,8 @@ export async function understandQuery(
   history: Array<{ role: string; content: string }>,
 ): Promise<QueryUnderstanding | null> {
   const convo = history
-    .slice(-4)
-    .map((h) => `${h.role === "user" ? "User" : "Assistant"}: ${h.content.slice(0, 300)}`)
+    .slice(-6)
+    .map((h) => `${h.role === "user" ? "User" : "Assistant"}: ${h.content.slice(0, 600)}`)
     .join("\n");
   const user = `${convo ? "Conversation so far:\n" + convo + "\n\n" : ""}Question: ${query}`;
   const body = {
@@ -86,19 +75,23 @@ export async function understandQuery(
       { role: "system", content: SYSTEM },
       { role: "user", content: user },
     ],
-    max_tokens: 400,
+    // the model always reasons; reasoning tokens share this budget — too
+    // small and the JSON is never reached (understanding silently degrades)
+    max_tokens: 1200,
     reasoning_effort: "low",
   };
-  const call = (async () => {
-    const res: any = await ai.run(model, body);
-    const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
-    return typeof text === "string" ? extractJson(text) : null;
-  })();
-  // one retry on failure/timeout — a single transient miss should not
-  // cost the query its understanding; after the retry it degrades to
-  // vanilla retrieval (no filters, no heuristics), never to regexes
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const timeout = new Promise<null>((r) => setTimeout(() => r(null), TIMEOUT_MS));
+  // each attempt issues a FRESH call — re-racing a timed-out promise would
+  // retry nothing. Generous first attempt: reasoning + the full JSON must
+  // fit inside the timeout or understanding silently degrades to vanilla
+  // retrieval (which refuses conversational turns).
+  const ATTEMPT_TIMEOUTS = [7000, 4000];
+  for (let attempt = 0; attempt < ATTEMPT_TIMEOUTS.length; attempt++) {
+    const call = (async () => {
+      const res: any = await ai.run(model, body);
+      const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+      return typeof text === "string" ? extractJson(text) : null;
+    })();
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), ATTEMPT_TIMEOUTS[attempt]));
     try {
       const got = await Promise.race([call, timeout]);
       if (got) return got;
