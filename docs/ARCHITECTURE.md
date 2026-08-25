@@ -1,4 +1,4 @@
-# OIML RAG Architecture — 2026-08-24
+# OIML RAG Architecture — 2026-08-26
 
 The complete serving pipeline, layer by layer. Every technique is
 grounded in 2025/2026 research and running in production at
@@ -7,23 +7,41 @@ grounded in 2025/2026 research and running in production at
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        USER (browser / API)                         │
-│  chat UI (sessions, fork, edit, export, markdown copy, globe)       │
-│  ↓ SSE (stream:true, stop, prev, history[8])                        │
+│  chat UI — Vue islands (Astro 7/Vite 8/Tailwind 4): sessions,      │
+│  fork, edit, export, markdown copy, globe spinner; suggestions +   │
+│  datasets panel render the API response verbatim (no hardcoded     │
+│  client content)                                                    │
+│  ↓ SSE (stream:true, stop, prev, history[20])                       │
 ├─────────────────────────────────────────────────────────────────────┤
 │                        WORKER (rag-public)                          │
 │                                                                     │
+│  ┌─ 0. CONVERSATIONAL ROUTE (LLM-decided) ────────────────────────┐ │
+│  │  understanding.intent: conversational | knowledge               │ │
+│  │  · greetings, identity, capability, small talk (ANY language)  │ │
+│  │    → answered directly from the DATASETS catalog facts         │ │
+│  │    (prompts/conversational.md), no retrieval, never refused    │ │
+│  │  · off-topic SUBJECT questions are knowledge (honest refusal   │ │
+│  │    + redirect) — "conversational" never means off-topic        │ │
+│  │  · asymmetric default: null/doubt → knowledge path             │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│                              ↓                                      │
 │  ┌─ 1. QUERY UNDERSTANDING (LLM) ─────────────────────────────────┐ │
-│  │  qwen3-30b-a3b → strict JSON:                                   │ │
-│  │  · docidentifier/docnumber  (any phrasing: "r60", "R 60-3")    │ │
+│  │  qwen3-30b-a3b → strict JSON (prompts/understanding.md):       │ │
+│  │  · intent (see layer 0)  · docidentifier/docnumber             │ │
 │  │  · process_intent  (certify/apply → B-series, not R-series)    │ │
 │  │  · term  ("what is a load cell" → "load cell")                 │ │
 │  │  · standalone_query  (follow-ups folded with context)          │ │
 │  │  · complexity  (simple vs complex → adaptive depth)            │ │
 │  │  · query_variants[2-3]  (alternative phrasings for fusion)    │ │
 │  │  · sub_queries[2-4]  (decomposition for complex questions)     │ │
+│  │  · hypothetical_answer  (→ HyDE embedding)                     │ │
 │  │  UNISON with deterministic regexes (union, not either-or)     │ │
-│  │  3.5s timeout + 1 retry; failure → vanilla retrieval           │ │
+│  │  1200 max_tokens (reasoning shares the budget), fresh call     │ │
+│  │  per retry, per-attempt timeouts 7s/4s; failure → vanilla      │ │
 │  └────────────────────────────────────────────────────────────────┘ │
+│  │  Concurrently: the folded query is embedded while understanding │
+│  │  runs (warm embedding) — reused whenever the final retrieval    │
+│  │  query is unchanged; understand→embed collapses to max()        │ │
 │                              ↓                                      │
 │  ┌─ 2. MULTI-QUERY RAG-FUSION ────────────────────────────────────┐ │
 │  │  Primary query + each query_variant → own embedding            │ │
@@ -81,9 +99,19 @@ grounded in 2025/2026 research and running in production at
 │                              ↓                                      │
 │  ┌─ 10. GENERATION ───────────────────────────────────────────────┐ │
 │  │  Anon: qwen3-30b-a3b-fp8 | Member: qwen3.8-27b                │ │
+│  │  System prompt is DATA (prompts/system.md, {{PLACEHOLDERS}}   │ │
+│  │  filled from code; per-corpus notes travel with the DATASETS  │ │
+│  │  catalog entry)                                                 │ │
+│  │  CONTEXT BUDGET (16k tokens est., CJK/Arabic-aware):           │ │
+│  │  · history 30% slice, newest-first, turns clipped 600 tok     │ │
+│  │  · overflow turns SUMMARIZED into a continuity block          │ │
+│  │    (prompts/summarize.md) — never silently dropped            │ │
+│  │  · passages fill the rest, best-ranked first, 900 tok/chunk   │ │
+│  │  · citations built from passages actually included            │ │
 │  │  Streaming SSE (3072 max_tokens, reasoning_effort: low)        │ │
-│  │  History turns as messages + retrieval note for process intent│ │
-│  │  Strict grounding prompt + mandatory process-answer rule      │ │
+│  │  Strict grounding + mandatory process-answer rule; refusals   │ │
+│  │  canonicalized to the exact contract sentence (model           │ │
+│  │  paraphrases are normalized server-side)                       │ │
 │  │  Citations sorted: in-force → unknown → superseded/withdrawn  │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 │                              ↓                                      │
@@ -99,6 +127,8 @@ grounded in 2025/2026 research and running in production at
 │  │  · Cache hit → SSE stream (must speak SSE)                    │ │
 │  │  · Regenerate (fresh=true) → skip cache read                   │ │
 │  │  · Contextual follow-ups → skip cache entirely                 │ │
+│  │  · Refusals are NEVER cached (they describe the moment, not    │ │
+│  │    the question — a cached refusal poisons retries)            │ │
 │  │  INDEX_VERSION bumped on any retrieval/logic change            │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 │                                                                     │
@@ -136,16 +166,21 @@ grounded in 2025/2026 research and running in production at
 │  │  · superseded_by: successor identifier                        ││
 │  └────────────────────────────────────────────────────────────────┘│
 │                              ↓                                      │
-│  ┌─ Contextual EnrichMENT (running) ───────────────────────────────┐│
+│  ┌─ Contextual Enrichment (RUNNING over 31k chunks) ───────────────┐│
 │  │  Anthropic contextual retrieval technique                      ││
-│  │  qwen3-30b generates 1-2 sentence context per chunk            ││
-│  │  Prepended before embedding (35-49% failure reduction)        ││
-│  │  42k chunks, ~$1.30 one-time cost                             ││
+│  │  POST /admin/enrich (Bearer ADMIN_TOKEN): deepseek-v4-pro      ││
+│  │  writes a 1-sentence situating context per chunk              ││
+│  │  (prompts/enrichment.md; 1600 max_tokens — reasoning          ││
+│  │  models starve below that), KV-cached 30d per chunk id;       ││
+│  │  context+text re-embedded and upserted in place (ctx flag)    ││
+│  │  Driver: ingest/enrich.py — paced (--rpm), rate-aware         ││
+│  │  backoff on Workers AI 3021s, resumable state file;           ││
+│  │  ~$0.0015/chunk → ≈$50 one-time (quality-first lane)          ││
 │  └────────────────────────────────────────────────────────────────┘│
 │                              ↓                                      │
 │  ┌─ Embedding + Indexing ──────────────────────────────────────────┐│
 │  │  @cf/qwen/qwen3-embedding-0.6b (1024-dim, 100+ languages)     ││
-│  │  → Vectorize idx_oiml_public_v2 (cosine, 42k vectors)        ││
+│  │  → Vectorize idx_oiml_public_v2 (cosine, 31k English vectors) ││
 │  │  Metadata indexes: doctype, doc_number, edition, language     ││
 │  │  Resumable embed (25/batch, per-item fallback)               ││
 │  │  Resumable upsert (batch cursor, idempotent)                  ││
@@ -166,18 +201,25 @@ grounded in 2025/2026 research and running in production at
 │  │  Reported per case + averaged in eval-report.json             ││
 │  │  Ref: docs.ragas.io faithfulness metric                       ││
 │  └────────────────────────────────────────────────────────────────┘│
-│  ┌─ Live E2E (11 cases) ───────────────────────────────────────────┐│
-│  │  Health, ask quality, citations, refusals, auth, quotas       ││
+│  ┌─ Live E2E (13 cases) ───────────────────────────────────────────┐│
+│  │  Health, ask quality, citations, refusals + redirect, meta     ││
+│  │  turns (EN/FR/DE), 200-word questions, French, auth, quotas   ││
 │  │  tests/e2e.mjs                                                  ││
 │  └────────────────────────────────────────────────────────────────┘│
-│  ┌─ Browser E2E ────────────────────────────────────────────────────┐│
-│  │  Playwright: layout, sidebar, chips, globe spinner, live ask  ││
-│  │  tests/browser.mjs                                              ││
+│  ┌─ Retrieval eval (hit@5) ─────────────────────────────────────────┐│
+│  │  Golden cases + 8 vocabulary-mismatch PARAPHRASE probes        ││
+│  │  (the contextual-enrichment failure mode) via /v1/search;     ││
+│  │  snapshots to artifacts/eval/ for before/after lift          ││
+│  │  tests/retrieval.mjs                                            ││
 │  └────────────────────────────────────────────────────────────────┘│
-│  ┌─ UI (jsdom, 35 checks) ─────────────────────────────────────────┐│
-│  │  Chat bundle in jsdom: sessions CRUD, XSS safety, markdown,   ││
-│  │  fork, edit, export, regenerate, refusal                      ││
-│  │  tests/ui.mjs                                                   ││
+│  ┌─ UI (Playwright, 30 checks, runs in CI) ─────────────────────────┐│
+│  │  Real Chromium over the built site with stubbed APIs (SSE      ││
+│  │  included): ask/stream/citations/superseded badges/sessions   ││
+│  │  CRUD/filter/persistence/XSS safety. tests/ui.mjs; CI also    ││
+│  │  builds the site for real (site-shell checked out)            ││
+│  └────────────────────────────────────────────────────────────────┘│
+│  ┌─ Browser E2E ────────────────────────────────────────────────────┐│
+│  │  Production layout + console-error probe. tests/browser.mjs   ││
 │  └────────────────────────────────────────────────────────────────┘│
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -219,14 +261,17 @@ grounded in 2025/2026 research and running in production at
 │                                                                     │
 │  · GraphRAG (knowledge graph over terms/documents) — vocab repo    │
 │    has 6,031 concepts; relaton has 5,707 relations                │
-│  · HyDE (hypothetical document embeddings) — query→mock doc→embed │
 │  · FLARE (forward-looking active retrieval) — predict next        │
 │    sentence to anticipate retrieval needs                         │
 │  · Speculative RAG (parallel draft generation)                    │
-│  · ISO internal tier (idx_iso_internal created but empty;         │
-│    worker_internal federation pending)                            │
 │  · Turnstile/WAF (needs dashboard sitekey)                        │
-│  · Citation deep links to document renderings (R2)                │
-│  · Shareable conversation permalinks                              │
+│                                                                     │
+│  Shipped since the 08-24 revision: HyDE (hypothetical-answer       │
+│  embedding via understanding), ISO internal tier + federated       │
+│  retrieval (worker_internal /retrieve + RRF), citation deep        │
+│  links (R2 renderings), shareable permalinks, contextual           │
+│  enrichment (running), conversational routing, context budget      │
+│  + compaction, prompts-as-data, CI with real site build +          │
+│  Playwright UI suite, retrieval eval harness                       │
 └─────────────────────────────────────────────────────────────────────┘
 ```

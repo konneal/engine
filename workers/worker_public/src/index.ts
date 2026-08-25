@@ -632,6 +632,16 @@ async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request): Prom
   );
   const ok = results.filter((r: any) => r.ok).length;
   console.log("enrich:", ok, "/", results.length, "usage:", JSON.stringify(usage));
+  if (usage.requests > 0) {
+    // ledger: enrichment spend shows up in /v1/admin/stats like serving
+    ctx.waitUntil(
+      env.DB.prepare(
+        "INSERT INTO spend (day, tier, model, requests) VALUES (?1,'enrich',?2,?3) ON CONFLICT(day, tier, model) DO UPDATE SET requests = requests + ?3",
+      )
+        .bind(today(), model, usage.requests)
+        .run(),
+    );
+  }
   return json({ results, usage });
 }
 
