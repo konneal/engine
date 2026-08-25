@@ -4,14 +4,9 @@
 // storage with last-write-wins on title/updatedAt.
 
 import { LIMITS } from "./config";
+import { json, err } from "./lib/http";
 
 const ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-
-const err = (status: number, code: string, message: string) =>
-  json({ error: { code, message } }, status);
 
 interface ConvRow {
   id: string;

@@ -2,6 +2,7 @@ import { embed, rerank } from "./ai";
 import { LIMITS, MODELS } from "./config";
 import { QueryFilters, toVectorizeFilter, extractFilters, PROCESS_INTENT_RE } from "./selfquery";
 import { keywordRank, rrfFuse } from "./hybrid";
+import { toHits } from "./lib/hit";
 import { QueryUnderstanding } from "./understand";
 
 export interface ChunkMeta {

@@ -1,12 +1,7 @@
 // Public read-only shared conversations (TODO.rag/09).
 
 import { LIMITS } from "./config";
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-
-const err = (status: number, code: string, message: string) =>
-  json({ error: { code, message } }, status);
+import { json, err } from "./lib/http";
 
 const SLUG_RE = /^[a-z0-9]{10}$/;
 
