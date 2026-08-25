@@ -1,5 +1,5 @@
 import { LIMITS, MODELS, datasetsFor, SUGGESTIONS, num, sha256Hex, today } from "./config";
-import { buildMessages, citations, retrieve, identityNote, splitHistory, REFUSAL_ANSWER, Hit } from "./pipeline";
+import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, REFUSAL_ANSWER, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleShareConversation, handleGetShared } from "./share";
@@ -169,6 +169,12 @@ function canonicalRefusal(answer: string): string {
   return m ? answer.replace(m[0], REFUSAL_ANSWER) : answer;
 }
 
+/** Start an embed call without awaiting failures — null result means the
+ *  caller simply embeds fresh. */
+function embedWarm(env: Env, text: string): Promise<number[] | null> {
+  return embed(env.AI, MODELS.embed, text).catch(() => null);
+}
+
 async function generateStream(env: Env, model: string, messages: any[]): Promise<ReadableStream<Uint8Array> | null> {
   try {
     const res: any = await env.AI.run(model, {
@@ -327,6 +333,10 @@ async function handleAsk(
     return json({ ...cached.value, cached: true, quota });
   }
 
+  // warm the folded-query embedding concurrently with understanding —
+  // retrieval reuses it when the understanding leaves the query as-is
+  const warmQuery = retrievalQuery(q.query, prev);
+  const warmEmbed = embedWarm(env, warmQuery);
   const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history);
   console.log("understand:", understanding?.intent ?? "null", "|", q.query.slice(0, 60));
 
@@ -380,7 +390,7 @@ async function handleAsk(
   }
 
   try {
-    retrieved = await retrieve(env, q.query, { prev, understanding, federate });
+    retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed });
     // CRAG: grade the passages; a weak grade earns ONE corrective
     // re-retrieval with the document identifier made explicit
     const grade = await gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text));

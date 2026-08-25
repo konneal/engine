@@ -67,7 +67,7 @@ const PROCESS_EXPANSION = " OIML Certification System OIML-CS issuing authority 
 export async function retrieve(
   env: any,
   query: string,
-  opts: { prev?: string; understanding?: QueryUnderstanding | null; queryOverride?: string; federate?: (query: string) => Promise<Hit[]> } = {},
+  opts: { prev?: string; understanding?: QueryUnderstanding | null; queryOverride?: string; federate?: (query: string) => Promise<Hit[]>; warmEmbed?: Promise<number[] | null> } = {},
 ): Promise<Retrieved> {
   const u = opts.understanding ?? null;
   // UNION of signals: deterministic regexes are the floor (tested, zero
@@ -79,9 +79,17 @@ export async function retrieve(
       ? { doc_number: u.doc_number, ...(u.edition ? { edition: u.edition } : {}) }
       : rf;
   const filter = toVectorizeFilter(filters);
-  let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || retrievalQuery(query, opts.prev);
+  const folded = retrievalQuery(query, opts.prev);
+  let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || folded;
   if (u?.process_intent || PROCESS_INTENT_RE.test(query)) rq += PROCESS_EXPANSION;
-  const vector = await embed(env.AI, MODELS.embed, rq);
+  // the folded query can be embedded WHILE understanding runs — if the
+  // final retrieval query turns out to be exactly that, the warm embedding
+  // (started ~2s earlier) is reused and the serial understand→embed
+  // pipeline collapses to max(understand, embed)
+  const vector =
+    rq === folded && opts.warmEmbed
+      ? ((await opts.warmEmbed) ?? (await embed(env.AI, MODELS.embed, rq)))
+      : await embed(env.AI, MODELS.embed, rq);
   const q: any = { topK: LIMITS.retrieveK, returnMetadata: "all" };
   if (filter) q.filter = filter;
 
