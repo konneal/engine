@@ -140,6 +140,7 @@ export async function handleCallback(env: any, req: Request): Promise<Response> 
     });
     return new Response(null, { status: 302, headers: { location: "/", "set-cookie": cookie } });
   } catch (e) {
+    if (e instanceof OidcError) console.error("auth callback:", e.reason, "—", e.message.slice(0, 200));
     return redirectWithError(e instanceof OidcError ? e.reason : "exchange");
   }
 }
