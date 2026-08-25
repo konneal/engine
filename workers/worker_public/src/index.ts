@@ -1,4 +1,4 @@
-import { LIMITS, MODELS, datasetsFor, num, sha256Hex, today } from "./config";
+import { LIMITS, MODELS, datasetsFor, SUGGESTIONS, num, sha256Hex, today } from "./config";
 import { buildMessages, citations, retrieve, identityNote, splitHistory, REFUSAL_ANSWER, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
@@ -161,6 +161,16 @@ function opts_reflect_retried(): boolean {
   return false;
 }
 
+// the model occasionally paraphrases the refusal sentence ("...information
+// on how to make lasagna in the indexed..."); the API contract is the
+// exact canonical sentence — normalize variants, keep the redirect tail
+const REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the indexed OIML publications\.?/i;
+function canonicalRefusal(answer: string): string {
+  if (answer.includes(REFUSAL_ANSWER)) return answer;
+  const m = answer.match(REFUSAL_VARIANT);
+  return m ? answer.replace(m[0], REFUSAL_ANSWER) : answer;
+}
+
 async function generateStream(env: Env, model: string, messages: any[]): Promise<ReadableStream<Uint8Array> | null> {
   try {
     const res: any = await env.AI.run(model, {
@@ -212,7 +222,7 @@ async function summarizeHistory(
         },
         { role: "user", content: convo },
       ],
-      max_tokens: 400,
+      max_tokens: 900,
       reasoning_effort: "low",
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
@@ -376,6 +386,7 @@ async function handleAsk(
     // CRAG: grade the passages; a weak grade earns ONE corrective
     // re-retrieval with the document identifier made explicit
     const grade = await gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text));
+    console.log("grade:", grade);
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate });
@@ -427,9 +438,10 @@ async function handleAsk(
           }
           send({ type: "done", model, query_hash: queryHash });
           telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
-          if (full.length > 0 && !contextual && !full.includes(REFUSAL_ANSWER)) {
+          const canonical = canonicalRefusal(full);
+          if (canonical.length > 0 && !contextual && !canonical.includes(REFUSAL_ANSWER)) {
             ctx.waitUntil(
-              env.CACHE.put(await cacheKey(env, ns, q.query, q.lang), JSON.stringify({ answer: full, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
+              env.CACHE.put(await cacheKey(env, ns, q.query, q.lang), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
           }
           controller.close();
@@ -455,8 +467,10 @@ async function handleAsk(
   // The model critiques its own answer; if claims are ungrounded, retry
   // retrieval with the missing-info hint (max one retry).
   // Ref: selfrag.github.io; arXiv 2606.05658 bounded reflection
+  if (answer) answer = canonicalRefusal(answer);
   if (answer && !answer.includes(REFUSAL_ANSWER)) {
     const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h: Hit) => h.text));
+    console.log("reflection:", reflection ? (reflection.grounded ? "grounded" : "ungrounded") : "null");
     if (reflection && !reflection.grounded && reflection.missing_info && !opts_reflect_retried()) {
       // re-retrieve targeting what was missing
       const retryRetrieve = await retrieve(env, q.query, {
@@ -619,7 +633,7 @@ export default {
 
     if (req.method === "GET" && (path === "/api/datasets" || path === "/api/datasets/")) {
       const session = await sessionFrom(req, env as any);
-      return json({ datasets: datasetsFor(session) });
+      return json({ datasets: datasetsFor(session), suggestions: SUGGESTIONS });
     }
 
     if (req.method === "GET" && (path === "/v1/admin/stats" || path === "/v1/admin/stats/")) {

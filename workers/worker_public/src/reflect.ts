@@ -24,7 +24,7 @@ export async function reflect(
     .map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 300)}`)
     .join("\n");
 
-  const timeout = new Promise<null>((r) => setTimeout(() => r(null), 3000));
+  const timeout = new Promise<null>((r) => setTimeout(() => r(null), 6000));
   const call = (async () => {
     const res: any = await ai.run(model, {
       messages: [
@@ -37,7 +37,9 @@ export async function reflect(
           content: `Question: ${question}\n\nAnswer:\n${answer.slice(0, 1500)}\n\nPassages:\n${ctx}`,
         },
       ],
-      max_tokens: 200,
+      // reasoning shares this budget — starved budgets silently disable
+      // the reflection layer (null = no retry ever fires)
+      max_tokens: 700,
       reasoning_effort: "low",
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;

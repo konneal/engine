@@ -63,6 +63,15 @@ export function datasetsFor(session: unknown): unknown[] {
   }));
 }
 
+/** Empty-state starter questions, served by /api/datasets — UI content
+ *  comes from the API, never hardcoded in the client. */
+export const SUGGESTIONS: string[] = [
+  "What is R 60?",
+  "What is a load cell?",
+  "What is the OIML-CS?",
+  "Qu'est-ce que le OIML-CS ?",
+];
+
 export function num(env: Record<string, unknown>, key: string, fallback: number): number {
   const v = Number(env[key]);
   return Number.isFinite(v) && v > 0 ? v : fallback;

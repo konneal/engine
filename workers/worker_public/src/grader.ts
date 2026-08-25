@@ -22,14 +22,16 @@ export async function gradeRetrieval(
     .slice(0, 8)
     .map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 220)}`)
     .join("\n");
-  const timeout = new Promise<null>((r) => setTimeout(() => r(null), 2500));
+  const timeout = new Promise<null>((r) => setTimeout(() => r(null), 6000));
   const call = (async () => {
     const res: any = await ai.run(model, {
       messages: [
         { role: "system", content: SYSTEM },
         { role: "user", content: `Question: ${query}\n\nPassages:\n${summary}` },
       ],
-      max_tokens: 200,
+      // reasoning shares this budget — starved budgets silently disable
+      // the CRAG corrective layer (default "good" fires)
+      max_tokens: 700,
       reasoning_effort: "low",
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
