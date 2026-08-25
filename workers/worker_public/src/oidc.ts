@@ -148,6 +148,11 @@ export async function exchangeCode(
     code_verifier: params.codeVerifier,
   });
   const headers: Record<string, string> = { "content-type": "application/x-www-form-urlencoded" };
+  // The OP's WAF classifies Origin-less POSTs as cross-site form
+  // submissions and rejects them with 403. The backchannel is
+  // server-to-server (PKCE + client auth are the real security), so we
+  // present the issuer's own origin to pass its same-origin check.
+  headers.origin = new URL(metadata.token_endpoint).origin;
   if (params.clientSecret) {
     headers.authorization = `Basic ${btoa(`${encodeURIComponent(params.clientId)}:${encodeURIComponent(params.clientSecret)}`)}`;
   }
