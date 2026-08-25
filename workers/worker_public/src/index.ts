@@ -4,6 +4,7 @@ import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { INTERNAL_ROLES } from "./auth";
 import { handleShareConversation, handleGetShared } from "./share";
+import { hasInternalAccess, delegateToInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
 import { gradeRetrieval } from "./grader";
 import { reflect } from "./reflect";
@@ -27,6 +28,7 @@ export interface Env {
   OIDC_CLIENT_SECRET?: string;
   OIDC_REDIRECT_URI?: string;
   SESSION_SECRET?: string;
+  INTERNAL_SERVICE?: { fetch(input: RequestInfo, init?: RequestInit): Promise<Response> };
 }
 
 const json = (body: unknown, status = 200, extra: Record<string, string> = {}) =>
@@ -246,6 +248,15 @@ async function handleAsk(
   }
   if ((await env.CACHE.get("sys:generation")) === "off") {
     return err(503, "generation_disabled", "Generation is temporarily paused; search remains available.");
+  }
+
+  // Internal-tier delegation: users with internal roles get federated
+  // retrieval (OIML + ISO) via the service binding. rag-public itself
+  // never touches the internal index.
+  if (member && env.INTERNAL_SERVICE && (await hasInternalAccess(member))) {
+    const delegated = await delegateToInternal(env.INTERNAL_SERVICE, req, q.query, body);
+    if (delegated) return delegated;
+    // delegation failed (internal worker down?) — fall through to public-only
   }
 
   const ns = tier === "key" ? `k:${key!.id}` : member ? `m:${member.sub}` : "anon";

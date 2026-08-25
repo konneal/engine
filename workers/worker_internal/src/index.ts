@@ -168,27 +168,75 @@ export default {
           { role: "system", content: SYSTEM },
           { role: "user", content: `Question: ${query}\n\nContext passages:\n${context}` },
         ];
+        const cites = hits.map((h) => ({
+          doc_id: h.metadata.doc_id,
+          docidentifier: h.metadata.docidentifier,
+          edition: h.metadata.edition,
+          language: h.metadata.language,
+          clause_anchor: h.metadata.clause_anchor,
+          clause_title: h.metadata.clause_title,
+          status: h.metadata.status ?? "unknown",
+          corpus: h.metadata.corpus,
+          snippet: h.text.slice(0, 400),
+          score: h.score,
+        }));
+
+        // SSE streaming (for the chat UI through the service binding)
+        if (body?.stream !== false) {
+          const encoder = new TextEncoder();
+          const sse = new ReadableStream({
+            async start(controller) {
+              const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+              send({ type: "citations", citations: cites });
+              let answer = "";
+              try {
+                const res: any = await env.AI.run(MODEL_MEMBER, {
+                  messages,
+                  stream: true,
+                  max_tokens: 3072,
+                  reasoning_effort: "low",
+                });
+                const stream = res && typeof res.getReader === "function" ? res : res?.body;
+                if (stream) {
+                  const reader = (stream as ReadableStream).getReader();
+                  const decoder = new TextDecoder();
+                  let buf = "";
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buf += decoder.decode(value, { stream: true });
+                    const parts = buf.split("\n");
+                    buf = parts.pop() ?? "";
+                    for (const line of parts) {
+                      const trimmed = line.trim();
+                      if (!trimmed.startsWith("data:")) continue;
+                      try {
+                        const evt = JSON.parse(trimmed.slice(5).trim());
+                        const tok = typeof evt?.response === "string" ? evt.response : evt?.choices?.[0]?.delta?.content;
+                        if (tok) { answer += tok; send({ type: "token", v: tok }); }
+                      } catch { /* partial JSON */ }
+                    }
+                  }
+                }
+              } catch { /* stream failure */ }
+              if (!answer) {
+                // streaming failed — generate complete
+                answer = (await generate(env, MODEL_MEMBER, messages)) ?? "I don't have information on this.";
+              }
+              send({ type: "done", model: MODEL_MEMBER, federated: true });
+              controller.close();
+            },
+          });
+          return new Response(sse, {
+            headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "access-control-allow-origin": "*" },
+          });
+        }
+
+        // Non-streaming (JSON)
         let answer = await generate(env, MODEL_MEMBER, messages);
         if (!answer) answer = await generate(env, MODEL_ANON, messages);
         if (!answer) return err(502, "generation_failed", "Model unavailable");
-
-        return json({
-          answer,
-          citations: hits.map((h) => ({
-            doc_id: h.metadata.doc_id,
-            docidentifier: h.metadata.docidentifier,
-            edition: h.metadata.edition,
-            language: h.metadata.language,
-            clause_anchor: h.metadata.clause_anchor,
-            clause_title: h.metadata.clause_title,
-            status: h.metadata.status ?? "unknown",
-            corpus: h.metadata.corpus,
-            snippet: h.text.slice(0, 400),
-            score: h.score,
-          })),
-          model: MODEL_MEMBER,
-          federated: true,
-        });
+        return json({ answer, citations: cites, model: MODEL_MEMBER, federated: true });
       } catch (e: any) {
         return err(503, "retrieval_unavailable", "Search is briefly busy — please retry.");
       }

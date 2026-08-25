@@ -30,8 +30,15 @@ binding = "DB"
 database_name = "rag-public"
 database_id = "655cd63f-1826-4161-bfd1-90c584add4ce"
 
+# Service binding: rag-public delegates federated retrieval to rag-internal
+# for users with internal roles. rag-public itself holds NO binding to the
+# internal Vectorize index — isolation is structural (CLAUDE.md).
+[[services]]
+binding = "INTERNAL_SERVICE"
+service = "rag-internal"
+
 [vars]
-INDEX_VERSION = "public-v2.41"
+INDEX_VERSION = "public-v2.42"
 ANON_DAY_ASK = "20"
 ANON_DAY_SEARCH = "50"
 KEY_DAY_ASK_DEFAULT = "2000"
