@@ -27,17 +27,29 @@ jobs:
       - run: python -m pip install -r ingest/requirements.txt
       - run: python -m compileall -q ingest
 
-  site:
+  site-and-ui:
+    # builds the site for real (site-shell checked out as the sibling the
+    # file: dependency expects) and runs the Playwright UI suite against
+    # the built bundle with stubbed APIs
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - run: git submodule update --init --remote ../site-shell || true  # no-op locally linked
+      - uses: actions/checkout@v4
+        with:
+          repository: oimlsmart/site-shell
+          path: site-shell-checkout
+          token: ${{ secrets.SITE_SHELL_TOKEN || github.token }}
+      - name: place site-shell where the file: dependency expects it
+        run: ln -s "$GITHUB_WORKSPACE/site-shell-checkout" "../site-shell"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm ci
       - run: npm run site:build
-        continue-on-error: true  # requires the site-shell sibling; enable when vendored
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/ui.mjs
 
   e2e:
     # Manual/nightly only — hits the live service and spends quota.
@@ -48,6 +60,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: npm ci
       - run: npm run test:e2e
         env:
           BASE_URL: ${{ vars.E2E_BASE_URL || 'https://ai.oimlsmart.org' }}

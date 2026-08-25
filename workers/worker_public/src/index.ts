@@ -159,11 +159,6 @@ function telemetry(
   );
 }
 
-// self-reflection retry runs at most once per ask
-function opts_reflect_retried(): boolean {
-  return false;
-}
-
 // the model occasionally paraphrases the refusal sentence ("...information
 // on how to make lasagna in the indexed..."); the API contract is the
 // exact canonical sentence — normalize variants, keep the redirect tail
@@ -474,7 +469,7 @@ async function handleAsk(
   if (answer && !answer.includes(REFUSAL_ANSWER)) {
     const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h: Hit) => h.text));
     console.log("reflection:", reflection ? (reflection.grounded ? "grounded" : "ungrounded") : "null");
-    if (reflection && !reflection.grounded && reflection.missing_info && !opts_reflect_retried()) {
+    if (reflection && !reflection.grounded && reflection.missing_info) {
       // re-retrieve targeting what was missing
       const retryRetrieve = await retrieve(env, q.query, {
         prev,
