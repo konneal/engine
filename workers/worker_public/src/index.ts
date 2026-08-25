@@ -531,10 +531,11 @@ export default {
           {
             id: "iso",
             label: "ISO/IEC Conformity Assessment",
-            description: "ISO/IEC 17xxx reference standards (CASCO) — internal, role-gated",
+            description: "ISO/IEC 17xxx reference standards (CASCO) — federated with OIML results",
             enabled: internal,
             authenticated: !!session,
             requires: "mc_member, rc_member, executive_secretary or admin",
+            endpoint: internal ? "https://internal.oimlsmart.org/api/ask" : undefined,
           },
         ],
       });
