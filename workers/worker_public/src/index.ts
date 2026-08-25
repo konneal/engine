@@ -7,6 +7,8 @@ import { retrieveInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
 import { gradeRetrieval } from "./grader";
 import summarizePrompt from "../prompts/summarize.md";
+import { embed } from "./ai";
+import enrichmentPrompt from "../prompts/enrichment.md";
 import { reflect } from "./reflect";
 
 export interface Env {
@@ -22,6 +24,7 @@ export interface Env {
   ANON_DAY_HARD_CAP: string;
   ADMIN_TOKEN?: string;
   MEMBER_DAY_ASK?: string;
+  ENRICH_MODEL?: string;
   EXEMPT_IPS?: string;
   OIDC_ISSUER?: string;
   OIDC_CLIENT_ID?: string;
@@ -561,6 +564,72 @@ async function handleSearch(
   return json({ results, filters, quota, ...corsHeaders(req) });
 }
 
+
+/** Contextual enrichment (quality-first lane): for each chunk, write a
+ *  situating context (KV-cached per chunk id), embed context+text, and
+ *  upsert in place — the enrichment persists into every future retrieval
+ *  of that chunk. Driven by ingest/enrich.py in resumable batches. */
+async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const chunks = Array.isArray(body?.chunks) ? body.chunks : [];
+  if (chunks.length === 0 || chunks.length > 8) return err(400, "invalid_input", "chunks: 1-8 required");
+  const force = body?.force === true;
+  const model = typeof env.ENRICH_MODEL === "string" && env.ENRICH_MODEL ? env.ENRICH_MODEL : MODELS.enrich;
+
+  const usage = { prompt_tokens: 0, completion_tokens: 0, requests: 0, cache_hits: 0 };
+  const results = await Promise.all(
+    chunks.map(async (c: any) => {
+      if (!c?.id || typeof c?.text !== "string" || !c?.metadata) return { id: c?.id ?? null, ok: false, error: "invalid chunk" };
+      try {
+        const cacheKey = `e:${c.id}`;
+        let context = force ? null : await env.CACHE.get(cacheKey);
+        const cached = !!context;
+        if (!context) {
+          const m = c.metadata;
+          const head = `${m.docidentifier ?? m.doc_id}${m.clause_anchor ? " §" + m.clause_anchor : ""}${m.clause_title ? " — " + m.clause_title : ""}`;
+          const res: any = await env.AI.run(model, {
+            messages: [
+              { role: "system", content: enrichmentPrompt.trimEnd() },
+              { role: "user", content: `${head}\n\n${c.text.slice(0, 1500)}` },
+            ],
+            max_tokens: 1600,
+            reasoning_effort: "low",
+          });
+          const raw = typeof res?.response === "string" && res.response.trim()
+            ? res.response
+            : res?.choices?.[0]?.message?.content;
+          context = typeof raw === "string" ? raw.trim().replace(/^["\']|[\"']$/g, "").slice(0, 400) : "";
+          if (!context) {
+            console.log("enrich raw keys:", Object.keys(res ?? {}), "sample:", JSON.stringify(res).slice(0, 300));
+            return { id: c.id, ok: false, error: "empty enrichment" };
+          }
+          if (res?.usage) {
+            usage.prompt_tokens += Number(res.usage.prompt_tokens ?? 0);
+            usage.completion_tokens += Number(res.usage.completion_tokens ?? 0);
+          }
+          usage.requests += 1;
+          ctx.waitUntil(env.CACHE.put(cacheKey, context, { expirationTtl: 2_592_000 }));
+        } else {
+          usage.cache_hits += 1;
+        }
+        const original = typeof c.metadata.chunk_text === "string" && c.metadata.chunk_text ? c.metadata.chunk_text : c.text;
+        const enriched = `${context}\n\n${original}`;
+        const vector = await embed(env.AI, MODELS.embed, enriched.slice(0, 6000));
+        await env.VECTORIZE.upsert([{ id: c.id, values: vector, metadata: { ...c.metadata, chunk_text: enriched, ctx: "1" } }]);
+        return { id: c.id, ok: true, cached, context };
+      } catch (e: any) {
+        return { id: c.id, ok: false, error: String(e?.message ?? e).slice(0, 200) };
+      }
+    }),
+  );
+  const ok = results.filter((r: any) => r.ok).length;
+  console.log("enrich:", ok, "/", results.length, "usage:", JSON.stringify(usage));
+  return json({ results, usage });
+}
+
 async function handleCreateKey(env: Env, req: Request): Promise<Response> {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
@@ -724,6 +793,7 @@ export default {
       return json({ ok: true, ...cors });
     }
 
+    if (req.method === "POST" && (path === "/admin/enrich" || path === "/v1/admin/enrich")) return handleEnrich(env, ctx, req);
     if (req.method === "POST" && path === "/v1/admin/keys") return handleCreateKey(env, req);
     if (req.method === "GET" && path === "/v1/admin/keys") return handleListKeys(env, req);
 

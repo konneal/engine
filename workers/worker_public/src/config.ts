@@ -4,6 +4,9 @@ export const MODELS = {
   anon: "@cf/qwen/qwen3-30b-a3b-fp8",
   member: "@cf/qwen/qwen3.8-27b", // Standard QA tier for signed-in members
   grader: "@cf/deepseek-ai/deepseek-v4-flash", // CRAG retrieval grader (cached input is near-free)
+  // contextual enrichment is the QUALITY-FIRST lane (one-time spend over
+  // the corpus, its quality persists into every future retrieval)
+  enrich: "@cf/deepseek-ai/deepseek-v4-pro-0813",
 } as const;
 
 export const LIMITS = {
