@@ -1,7 +1,7 @@
 // Shared auth: session validation + role constants used by both workers.
 import { readSession } from "./session";
 
-export const INTERNAL_ROLES = ["mc_member", "rc_member", "executive_secretary", "admin"] as const;
+// Two tiers: anonymous (public) and member (both). No role gates.
 
 export function authConfig(env: any) {
   const sessionSecret = env.SESSION_SECRET;

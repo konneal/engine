@@ -2,7 +2,6 @@ import { LIMITS, MODELS, num, sha256Hex, today } from "./config";
 import { buildMessages, citations, retrieve, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
-import { INTERNAL_ROLES } from "./auth";
 import { handleShareConversation, handleGetShared } from "./share";
 import { hasInternalAccess, delegateToInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
@@ -529,24 +528,20 @@ export default {
 
     if (req.method === "GET" && (path === "/api/datasets" || path === "/api/datasets/")) {
       const session = await sessionFrom(req, env as any);
-      const roles = session?.roles ?? [];
-      const internal = roles.some((r) => INTERNAL_ROLES.includes(r));
       return json({
         datasets: [
           {
             id: "oiml",
             label: "OIML Publications",
-            description: "Recommendations, Documents, Basic publications, Guides — English corpus",
+            description: "Recommendations, Documents, Basic publications, Guides",
             enabled: true,
           },
           {
             id: "iso",
             label: "ISO/IEC Conformity Assessment",
-            description: "ISO/IEC 17xxx reference standards (CASCO) — federated with OIML results",
-            enabled: internal,
+            description: "ISO/IEC 17xxx standards — federated with OIML results for members",
+            enabled: !!session,
             authenticated: !!session,
-            requires: "mc_member, rc_member, executive_secretary or admin",
-            endpoint: internal ? "https://internal.oimlsmart.org/api/ask" : undefined,
           },
         ],
       });

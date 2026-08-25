@@ -33,13 +33,10 @@ export function authErrorText(reason: string): string {
   return PLAIN_LANGUAGE[reason] ?? "Sign-in failed. Please try again.";
 }
 
-// Tier mapping, declared per docs/identity-onboarding-rag.md §11:
-//   member tier  — ANY valid session (the public service's anti-abuse
-//                  courtesy; no role bound)
-//   internal     — the bounded estate set below, when the ISO corpus
-//                  tier ships (the OP can bound the policy's role
-//                  allowlist to exactly this set then)
-export const INTERNAL_ROLES = ["mc_member", "rc_member", "executive_secretary", "admin"];
+// Two tiers only: anonymous (public index) and member (both indexes).
+// Estate roles (mc_member, etc.) are identity claims, NOT access gates
+// here — any authenticated user is a member.
+export const INTERNAL_ROLES: string[] = []; // deprecated: kept for API compat
 
 export interface AuthConfig {
   issuer: string;

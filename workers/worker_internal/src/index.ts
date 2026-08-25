@@ -138,11 +138,7 @@ export default {
 
     // All other routes require an authenticated session with an internal role
     const session = await sessionFrom(req, env as any);
-    if (!session) return err(401, "unauthorized", "Sign in required — this endpoint federates the internal ISO/IEC corpus.");
-    const hasInternalRole = session.roles.some((r: string) => (INTERNAL_ROLES as readonly string[]).includes(r));
-    if (!hasInternalRole) {
-      return err(403, "forbidden", `Your account (${session.roles.join(", ") || "no roles"}) does not include an internal-access role. Required: ${INTERNAL_ROLES.join(", ")}.`);
-    }
+    if (!session) return err(401, "unauthorized", "Sign in required — this endpoint federates the OIML + ISO/IEC corpora.");
 
     if (req.method === "POST" && (path === "/api/ask" || path === "/v1/ask")) {
       let body: any;

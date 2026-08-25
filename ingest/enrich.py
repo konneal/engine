@@ -118,6 +118,11 @@ def enrich(limit: int | None = None) -> None:
                 )
             done = min(i + ENRICH_BATCH, len(todo))
             print(f"  {done}/{len(todo)} enriched", flush=True)
+            # yield to the serving path — enrichment is batch work and
+            # must never saturate Workers AI rate limits that /api/ask
+            # shares on the same account
+            import time as _t
+            _t.sleep(3)
     print(f"enriched chunks at {ENRICHED_PATH}")
 
 

@@ -3,15 +3,16 @@
 // NO Vectorize binding to the internal index — this is the only path,
 // and it's role-gated.
 
-import { INTERNAL_ROLES } from "./auth";
 import type { SessionClaims } from "./session";
 
 interface ServiceFetcher {
   fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
 }
 
+/** Any signed-in member gets both datasets (public + ISO). The tier
+ *  distinction is: anonymous = public only, member = federated. */
 export function hasInternalAccess(session: SessionClaims): boolean {
-  return session.roles.some((r) => INTERNAL_ROLES.includes(r));
+  return true;
 }
 
 /**
