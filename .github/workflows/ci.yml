@@ -41,7 +41,7 @@ jobs:
           repository: oimlsmart/site-shell
           path: site-shell-checkout
           token: ${{ secrets.SITE_SHELL_TOKEN || github.token }}
-      - name: place site-shell where the file: dependency expects it
+      - name: place site-shell where the file dependency expects it
         run: ln -s "$GITHUB_WORKSPACE/site-shell-checkout" "../site-shell"
       - uses: actions/setup-node@v4
         with:
