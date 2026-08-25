@@ -12,6 +12,10 @@ export const LIMITS = {
   retrieveK: 50, // Vectorize caps topK at 50 when returnMetadata=all
   rerankKeep: 8,
   cacheTtlSec: 6 * 3600,
+  // context-window budget (estimated tokens) for the assembled prompt —
+  // system + history slice + passages must fit or the model request fails
+  inputTokenBudget: 12000,
+  maxPassageTokens: 900, // per-passage cap (clause chunks with tables can be huge)
 } as const;
 
 /** The corpus catalog — single source for /api/datasets and for the

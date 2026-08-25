@@ -1,9 +1,9 @@
-// Meta/self-intent handling: identity, capability, greeting and thanks
-// questions are about the SERVICE, not the corpus. Routed through the
-// retrieval pipeline they find no related passages and hit the mandatory
-// refusal sentence — so they are answered here, deterministically, from the
-// DATASETS catalog (the same SSOT /api/datasets serves). Refusal stays
-// calibrated to topical knowledge questions only.
+// Meta/self-intent ROUTING: identity, capability, greeting and thanks
+// turns are conversational — about the service, not the corpus. Routed
+// through retrieval they waste embed/rerank/grade calls over irrelevant
+// passages and invite the refusal sentence. The classifier only decides
+// the route; the ANSWER always comes from the model (identityNote gives
+// it the service facts), so any phrasing, any language, real speech.
 
 import { DATASETS } from "./config";
 
@@ -27,7 +27,7 @@ function stripGreeting(q: string): string {
 // Whole-question anchors: a pattern must describe the ENTIRE (short) query —
 // "what do you know" is meta, "what do you know about OIML R 60" is topical.
 const IDENTITY_PATTERNS: RegExp[] = [
-  /^(who|what) (are|r) (you|u)$/,
+  /^(who|what) (are|r) (you|u)( and (what|how) can (you|u) (help|do)( me)?)?$/,
   /^(who|what) am i (talking|speaking|chatting) (to|with)$/,
   /^who (made|created|built|trained|developed|designed) (you|u)$/,
   /^(are|r) (you|u) (an? )?(ai|a\.i\.|robot|bot|chatbot|human|real|person|llm|gpt|chatgpt|claude|gemini|deepseek|qwen|machine)( (or|and) (a |an )?\w+)?$/,
@@ -77,40 +77,27 @@ export function classifyMeta(rawQuery: string): MetaKind | null {
   return null;
 }
 
-function corpusList(member: boolean): string {
-  const rows = DATASETS.filter((d) => !d.session || member).map((d) => `- **${d.label}** — ${d.description}`);
+/** System instruction for a conversational (meta) turn: the service facts
+ *  the model speaks from, composed from the DATASETS catalog — the same
+ *  SSOT /api/datasets serves. */
+export function identityNote(member: boolean): string {
+  const corpora = DATASETS.filter((d) => !d.session || member)
+    .map((d) => `- ${d.label}: ${d.description}`)
+    .join("\n");
   const locked = DATASETS.filter((d) => d.session && !member);
   const upsell = locked.length
-    ? `\n\nSign in with an OIML SMART account to also search: ${locked.map((d) => `**${d.label}** (${d.description.toLowerCase()})`).join("; ")}.`
+    ? `\nSigned-in members additionally search: ${locked.map((d) => `${d.label} (${d.description})`).join("; ")}.`
     : "";
-  return rows.join("\n") + upsell;
-}
-
-const EN_IDENTITY = (member: boolean) =>
-  `I'm the OIML SMART AI assistant for legal metrology. I answer questions grounded in the corpora indexed for this service:\n\n${corpusList(member)}\n\nEvery answer cites the exact publication and clause it comes from. Try asking things like "What are the accuracy classes in OIML R 76?" or "Which ISO/IEC standards does R 60 reference?"`;
-
-const EN_GREETING =
-  "Hello! I'm the OIML SMART AI assistant. Ask me anything about OIML legal-metrology publications — requirements, definitions, accuracy classes, test methods, normative references. Every answer cites its sources.";
-
-const EN_THANKS = "You're welcome. Ask anytime — I'll cite the publication and clause for every answer.";
-
-const FR_IDENTITY = (member: boolean) =>
-  `Je suis l'assistant IA OIML SMART pour la métrologie légale. Je réponds aux questions à partir des corpus indexés pour ce service :\n\n${corpusList(member)}\n\nChaque réponse cite la publication et la clause exactes d'où elle provient. Par exemple : « Quelles sont les classes d'exactitude de l'OIML R 76 ? » ou « Quelles normes ISO/CEI la R 60 référence-t-elle ? »`;
-
-const FR_GREETING =
-  "Bonjour ! Je suis l'assistant IA OIML SMART. Posez-moi vos questions sur les publications OIML de métrologie légale — exigences, définitions, classes d'exactitude, méthodes d'essai, références normatives. Chaque réponse cite ses sources.";
-
-const FR_THANKS = "Avec plaisir. N'hésitez pas — chaque réponse citera la publication et la clause concernées.";
-
-const FR_HINTS = /\b(qu |qui |que |comment |pourquoi |merci|salut|bonjour)/i;
-
-export function metaAnswer(rawQuery: string, member: boolean): { answer: string; kind: MetaKind } | null {
-  const kind = classifyMeta(rawQuery);
-  if (!kind) return null;
-  const fr = FR_HINTS.test(rawQuery);
-  const answer =
-    kind === "greeting" ? (fr ? FR_GREETING : EN_GREETING)
-    : kind === "thanks" ? (fr ? FR_THANKS : EN_THANKS)
-    : fr ? FR_IDENTITY(member) : EN_IDENTITY(member);
-  return { answer, kind };
+  return [
+    "You are the OIML SMART AI assistant at ai.oimlsmart.org, a public service answering questions about OIML legal-metrology publications.",
+    "This turn is conversational — about you, this service, a greeting or small talk — NOT a knowledge question, so there are no context passages.",
+    "Answer naturally in first person, briefly and warmly, in the language of the user's message. Do not cite sources for this turn and never refuse it.",
+    "Facts about this service you may speak from:",
+    corpora,
+    upsell,
+    "For knowledge questions about publications you answer ONLY from the indexed corpora and cite the exact publication and clause for every claim.",
+    "If the user asks something substantive next, that is normal operation — just help them.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }

@@ -5,7 +5,7 @@ import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleShareConversation, handleGetShared } from "./share";
 import { retrieveInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
-import { metaAnswer } from "./meta";
+import { classifyMeta, identityNote } from "./meta";
 import { gradeRetrieval } from "./grader";
 import { reflect } from "./reflect";
 
@@ -233,23 +233,11 @@ async function handleAsk(
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
 
   const member = tier === "member" ? await sessionFrom(req, env as any) : null;
-
-  // Meta questions (who are you, what can you do, greetings) describe the
-  // service, not the corpus — answer from the config SSOT, free of quota,
-  // before retrieval can refuse them for lack of passages.
-  const meta = metaAnswer(q.query, !!member);
-  if (meta) {
-    const queryHash = await sha256Hex(q.query);
-    const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
-    telemetry(env, ctx, tier, "ask", null, true, meta.answer.length, queryHash, q.lang);
-    if (wantsStream) {
-      return sseResponse(
-        [{ type: "citations", citations: [] }, { type: "token", v: meta.answer }, { type: "done", model: "service", query_hash: queryHash }],
-        corsHeaders(req),
-      );
-    }
-    return json({ answer: meta.answer, citations: [], model: "service", query_hash: queryHash });
-  }
+  // Conversational turns (who are you, what can you do, greetings, thanks)
+  // get answered by the model directly — routed below, past the gates,
+  // because they are real turns too: they count against quota like any
+  // other question and respect the generation kill-switch.
+  const meta = classifyMeta(q.query);
 
   const exempt = tier === "anon" ? await isExemptIp(env, clientIp(req)) : false;
   const limit =
@@ -288,9 +276,58 @@ async function handleAsk(
   const contextual = history.length > 0;
   let retrieved;
   // fresh=true (regenerate) skips the cache read; contextual follow-ups skip
-  // the cache entirely — the answer depends on the conversation, not the query
-  const cached = body?.fresh === true || contextual ? null : await cacheGet(env, ns, q.query, q.lang);
+  // the cache entirely — the answer depends on the conversation, not the
+  // query; conversational turns are never cached (each one is its own turn)
+  const cached = meta || body?.fresh === true || contextual ? null : await cacheGet(env, ns, q.query, q.lang);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
+
+  if (meta) {
+    // No retrieval — nothing in the corpus answers "who are you". The model
+    // speaks for itself from the service facts in identityNote (composed
+    // from the DATASETS catalog), in the language of the question.
+    const queryHash = await sha256Hex(q.query);
+    const messages = [
+      { role: "system", content: identityNote(!!member) },
+      ...history.slice(-6),
+      { role: "user", content: q.query },
+    ];
+    if (wantsStream) {
+      const stream = await generateStream(env, model, messages);
+      if (stream) {
+        const encoder = new TextEncoder();
+        const sse = new ReadableStream({
+          async start(controller) {
+            const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+            send({ type: "citations", citations: [], ...(exempt ? {} : { quota }) });
+            let full = "";
+            try {
+              for await (const tok of sseTokens(stream)) {
+                full += tok;
+                send({ type: "token", v: tok });
+              }
+            } catch {
+              // stream ended prematurely — deliver what we have
+            }
+            send({ type: "done", model, query_hash: queryHash });
+            telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
+            controller.close();
+          },
+        });
+        return new Response(sse, {
+          headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "x-accel-buffering": "no", ...corsHeaders(req) },
+        });
+      }
+    }
+    let answer = await generateOnce(env, model, messages);
+    if (answer === null && model !== MODELS.anon) answer = await generateOnce(env, MODELS.anon, messages);
+    if (answer === null) {
+      telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
+      return err(502, "generation_failed", "The generation model is unavailable; please retry.");
+    }
+    telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
+    return json({ answer, citations: [], model, query_hash: queryHash, ...(exempt ? {} : { quota }) });
+  }
+
   if (cached) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang);
     if (wantsStream) {
@@ -324,7 +361,7 @@ async function handleAsk(
     return json({ ...out, ...(exempt ? {} : { quota }) });
   }
 
-  const messages = buildMessages(
+  const { messages, usedHits } = buildMessages(
     q.query,
     hits,
     q.lang,
@@ -334,7 +371,7 @@ async function handleAsk(
       : undefined,
   );
   const queryHash = await sha256Hex(q.query);
-  const cites = citations(hits);
+  const cites = citations(usedHits);
 
   if (wantsStream) {
     const stream = await generateStream(env, model, messages);
@@ -392,7 +429,7 @@ async function handleAsk(
         understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` } as any,
       });
       if (retryRetrieve.hits.length > 0) {
-        const retryMessages = buildMessages(q.query, retryRetrieve.hits, q.lang, history);
+        const { messages: retryMessages } = buildMessages(q.query, retryRetrieve.hits, q.lang, history);
         const retryAnswer = await generateOnce(env, model, retryMessages);
         if (retryAnswer) answer = retryAnswer; // better-grounded answer wins
       }

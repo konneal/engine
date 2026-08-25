@@ -92,7 +92,7 @@ test("ask meta: identity questions are answered, never refused", async () => {
     const { status, json } = await ask(q);
     if (status !== 200) throw new Error(`${q}: status ${status}`);
     if (json.answer.includes(REFUSAL)) throw new Error(`${q}: got refusal`);
-    if (!/OIML SMART|assistant/i.test(json.answer)) throw new Error(`${q}: no self-description: ${json.answer.slice(0, 160)}`);
+    if (!/oiml|metrology|publication|assistant/i.test(json.answer)) throw new Error(`${q}: no self-description: ${json.answer.slice(0, 160)}`);
     if (json.citations?.length) throw new Error(`${q}: meta answers carry no citations`);
   }
 });
