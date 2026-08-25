@@ -3,7 +3,7 @@ import { buildMessages, citations, retrieve, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleShareConversation, handleGetShared } from "./share";
-import { hasInternalAccess, delegateToInternal } from "./internal_gateway";
+import { retrieveInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
 import { gradeRetrieval } from "./grader";
 import { reflect } from "./reflect";
@@ -249,14 +249,14 @@ async function handleAsk(
     return err(503, "generation_disabled", "Generation is temporarily paused; search remains available.");
   }
 
-  // Internal-tier delegation: users with internal roles get federated
-  // retrieval (OIML + ISO) via the service binding. rag-public itself
-  // never touches the internal index.
-  if (member && env.INTERNAL_SERVICE && (await hasInternalAccess(member))) {
-    const delegated = await delegateToInternal(env.INTERNAL_SERVICE, req, q.query, body);
-    if (delegated) return delegated;
-    // delegation failed (internal worker down?) — fall through to public-only
-  }
+  // Members get federated retrieval (OIML + ISO/IEC) merged into the same
+  // pipeline via the service binding; rag-public never touches the
+  // internal index itself, and generation/rerank stay in ONE pipeline.
+  const service = env.INTERNAL_SERVICE;
+  const cookie = req.headers.get("cookie") ?? "";
+  const federate = member && service
+    ? (q2: string) => retrieveInternal(service, cookie, q2)
+    : undefined;
 
   const ns = tier === "key" ? `k:${key!.id}` : member ? `m:${member.sub}` : "anon";
   const model = member ? MODELS.member : MODELS.anon;
@@ -283,13 +283,13 @@ async function handleAsk(
 
   const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history);
   try {
-    retrieved = await retrieve(env, q.query, { prev, understanding });
+    retrieved = await retrieve(env, q.query, { prev, understanding, federate });
     // CRAG: grade the passages; a weak grade earns ONE corrective
     // re-retrieval with the document identifier made explicit
     const grade = await gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text));
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate });
       const grade2 = await gradeRetrieval(env.AI, MODELS.grader, q.query, second.hits.map((h: Hit) => h.text));
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better
     }

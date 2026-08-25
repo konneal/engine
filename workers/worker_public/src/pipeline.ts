@@ -54,7 +54,7 @@ const PROCESS_EXPANSION = " OIML Certification System OIML-CS issuing authority 
 export async function retrieve(
   env: any,
   query: string,
-  opts: { prev?: string; understanding?: QueryUnderstanding | null; queryOverride?: string } = {},
+  opts: { prev?: string; understanding?: QueryUnderstanding | null; queryOverride?: string; federate?: (query: string) => Promise<Hit[]> } = {},
 ): Promise<Retrieved> {
   const u = opts.understanding ?? null;
   // UNION of signals: deterministic regexes are the floor (tested, zero
@@ -200,6 +200,21 @@ export async function retrieve(
     text: (m.metadata?.chunk_text as string) ?? "",
   }));
 
+  // ── Federated ISO/IEC tier ──
+  // Members get passages from the internal index (service binding) merged
+  // into the same candidate pool; the shared reranker + fusion below sort
+  // it out. Slight discount: the public corpus answers by default.
+  if (opts.federate) {
+    const fed = await opts.federate(rq).catch(() => [] as Hit[]);
+    const seen = new Set(hits.map((h) => h.id));
+    for (const h of fed) {
+      if (!seen.has(h.id)) {
+        hits.push({ ...h, score: h.score * 0.95 });
+        seen.add(h.id);
+      }
+    }
+  }
+
   // overview chunks repeat the title/doctype boilerplate and embed strongly
   // for name-like queries, crowding clause chunks out of the rerank window
   for (const h of hits) {
@@ -321,17 +336,25 @@ export function buildMessages(query: string, hits: Hit[], lang?: string, history
     })
     .join("\n\n");
 
+  const isoHits = hits.some((h) => (h.metadata as any).corpus === "iso");
+
   const system = [
     "You answer questions about OIML publications (legal metrology: Recommendations, Documents, Basic publications, Guides).",
     "Use ONLY the numbered context passages provided. Never use outside knowledge for substantive claims.",
     "Cite every claim inline with the passage label as plain text in square brackets, e.g. [OIML R 87:2004 §3.2] — never as markdown links, never invent URLs. Cite only provided passages.",
     "Quote normative values exactly (MPE values, accuracy classes, limits, edition-specific wording) — do not round, convert or paraphrase them.",
     "For definitions, quote the source definition verbatim.",
+    "Publications are issued in parts and annex volumes (e.g. OIML R 60-1, OIML R 60-A, 'OIML R 60 (Annexes)') — a passage from any part or annex of a publication IS that publication's content; use and cite it as such. This includes bibliography and normative-reference lists found in those volumes.",
     "When passages from several editions of the same document appear, answer from the most recent edition unless the question names an edition; say which edition you used.",
     "Passages carry a status (in-force, superseded, withdrawn). Prefer in-force editions for normative claims; if you must cite a superseded or withdrawn edition, say so explicitly.",
     "Synthesize practical answers from the passages: definitions, procedures and rules across passages answer the question even when no single passage states the answer verbatim — cite each passage you draw on.",
     "MANDATORY: when the question asks how to do something (get certified, apply, comply, register, test) and the passages describe the governing system or procedure, ALWAYS answer with that procedure citing the governing documents. Refusing such a question because the passages do not name the specific publication is WRONG — the publication sets technical requirements; the HOW is governed by the certification-system documents in the passages.",
     "Refuse (with ONLY this exact sentence: I don't have information on this in the indexed OIML publications.) only when NO passage relates to the question's topic — never invent content.",
+    ...(isoHits
+      ? [
+          "Some passages come from the internal ISO/IEC corpus (labeled ISO/IEC …) — use them alongside the OIML passages and cite them the same way.",
+        ]
+      : []),
     "Be concise and precise. Answer in the question's language" + (lang ? ` (explicitly requested: ${lang})` : "") + ".",
   ].join(" ");
 
@@ -370,6 +393,7 @@ export function citations(hits: Hit[]) {
       clause_title: h.metadata.clause_title,
       status: h.metadata.status ?? "unknown",
       superseded_by: h.metadata.superseded_by || undefined,
+      corpus: h.metadata.corpus || "oiml",
       url: oimlPublicationUrl(h.metadata),
       snippet: h.text.slice(0, 400),
       score: h.rerank_score ?? h.score,

@@ -22,7 +22,7 @@ id = "0f65d12cc77c41b5b91086de1c04f6da"
 binding = "CACHE"
 
 [vars]
-INDEX_VERSION = "internal-v1"
+INDEX_VERSION = "internal-v2-retrieve-only"
 SESSION_SECRET_SET = "true"
 
 # deploy on internal.oimlsmart.org (custom domain)

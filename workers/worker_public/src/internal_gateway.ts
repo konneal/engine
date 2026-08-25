@@ -1,9 +1,10 @@
-// Internal-tier gateway: delegates ask requests to rag-internal via a
-// service binding when the user has an internal role. rag-public holds
-// NO Vectorize binding to the internal index — this is the only path,
-// and it's role-gated.
+// Internal-tier gateway: fetches FEDERATED passages (OIML + ISO/IEC) from
+// rag-internal via the service binding. rag-public holds NO Vectorize
+// binding to the internal index — this is the only path, member-gated.
+// rag-internal is retrieval-only; the serving pipeline (rerank, grading,
+// generation) stays here — one pipeline, both audiences.
 
-import type { SessionClaims } from "./session";
+import type { Hit } from "./pipeline";
 
 interface ServiceFetcher {
   fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
@@ -11,48 +12,33 @@ interface ServiceFetcher {
 
 /** Any signed-in member gets both datasets (public + ISO). The tier
  *  distinction is: anonymous = public only, member = federated. */
-export function hasInternalAccess(session: SessionClaims): boolean {
+export function hasInternalAccess(): boolean {
   return true;
 }
 
-/**
- * Forward the ask request to rag-internal via the service binding.
- * The internal worker handles: session validation, role check,
- * federated retrieval (both indexes), reranking, and generation.
- * Returns the complete response, or null on failure (caller falls
- * through to public-only retrieval).
- */
-export async function delegateToInternal(
+/** Ask rag-internal for RRF-fused passages for the query. Returns [] on
+ *  any failure — the public-only results then serve the member. */
+export async function retrieveInternal(
   service: ServiceFetcher,
-  originalReq: Request,
+  cookie: string,
   query: string,
-  body: any,
-): Promise<Response | null> {
+): Promise<Hit[]> {
   try {
-    const internalReq = new Request("https://internal/api/ask", {
+    const res = await service.fetch("https://internal/retrieve", {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        // forward the session cookie — same signing secret on both workers
-        cookie: originalReq.headers.get("cookie") ?? "",
-      },
-      body: JSON.stringify({
-        query,
-        stream: body?.stream ?? true,
-        lang: body?.lang,
-      }),
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ query }),
     });
-    const res = await service.fetch(internalReq);
-    if (!res.ok) return null;
-    // pass through the response (SSE stream or JSON)
-    return new Response(res.body, {
-      status: res.status,
-      headers: {
-        "content-type": res.headers.get("content-type") ?? "application/json",
-        "cache-control": "no-cache",
-      },
-    });
+    if (!res.ok) return [];
+    const data: any = await res.json();
+    if (!Array.isArray(data?.hits)) return [];
+    return data.hits.map((h: any) => ({
+      id: h.id,
+      score: h.score,
+      metadata: h.metadata ?? {},
+      text: h.text ?? "",
+    }));
   } catch {
-    return null;
+    return [];
   }
 }

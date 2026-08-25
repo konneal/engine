@@ -11,8 +11,13 @@ from .status import status_for
 from .models import DocRecord, Section
 
 ATTR_RE = re.compile(r"^:([A-Za-z0-9_-]+):\s*(.*)$", re.M)
-DOCID_RE = re.compile(r"OIML\s+([RB DGE])\s*(\d+)", re.I)
-BARE_DOCID_RE = re.compile(r"^([RB DGE])\s*(\d+)", re.I)
+DOCID_RE = re.compile(r"OIML\s+([RBV DGE])\s*(\d+)", re.I)
+BARE_DOCID_RE = re.compile(r"^([RBV DGE])\s*(\d+)", re.I)
+# "Annexes to OIML R 60:2017" — the volume's own title declares its family
+ANNEX_TITLE_RE = re.compile(r"^\s*Annex(?:es)?\s+(?:to|of)\s+OIML\s+([A-Z])\s*-?\s*(\d+)", re.I)
+# slug is the pipeline's own naming from the official PDF filenames
+SLUG_ID_RE = re.compile(r"^([a-z]+)[-_]?(\d+)(?!\d)")
+SERIES = {"R", "D", "B", "G", "E", "V"}
 DOCTYPE_MAP = {
     "recommendation": "R",
     "document": "D",
@@ -61,17 +66,49 @@ def language_from_slug(slug: str) -> str:
     return "en"
 
 
+def explicit_slug_language(slug: str) -> str | None:
+    """The suffix actually present in the filename, or None. BIML PDF
+    filenames carry the language; the OCR'd :language: header can lie
+    (French docs declaring 'en'), so an explicit suffix wins over it."""
+    hit = ""
+    for suffix, code in LANG_FROM_SLUG:
+        if slug.endswith(suffix) and len(suffix) > len(hit):
+            hit = suffix
+            winner = code
+    return winner if hit else None
+
+
 def edition_from_slug(slug: str) -> str:
     m = re.search(r"(19\d{2}|20\d{2})", slug)
     return m.group(1) if m else ""
 
 
 def classify_identifier(title: str, attrs: dict[str, str], slug: str) -> tuple[str, str, str]:
-    """Returns (docidentifier, doctype, doc_number) — header docidentifier wins."""
+    """Identity precedence: a readable header docidentifier wins (it can
+    correct the slug — e.g. sources/r120-1996-ara holds OIML D 117:2003);
+    a title-declared annex volume beats an OCR-garbled header (R 60's
+    annexes OCR as "OIML D 60"); a placeholder header ("OIML D X") defers
+    to the slug, which comes from the official PDF filenames."""
     docid = attrs.get("docidentifier", "")
     dm = DOCID_RE.search(docid) or BARE_DOCID_RE.match(docid)
-    if dm:
+    header_ok = bool(dm and dm.group(2).isdigit())
+
+    tm = ANNEX_TITLE_RE.match(title or "")
+    if tm:
+        series, num = tm.group(1).upper(), str(int(tm.group(2)))
+        if not (header_ok and dm.group(1).upper() == series and dm.group(2) == num):
+            return f"OIML {series} {num} (Annexes)", series, num
+
+    if header_ok:
         return docid, dm.group(1).upper(), dm.group(2)
+
+    sm = SLUG_ID_RE.match(slug or "")
+    if sm and sm.group(1).upper() in SERIES:
+        series, num = sm.group(1).upper(), str(int(sm.group(2)))
+        year = attrs.get("edition") or edition_from_slug(slug)
+        suffix = f":{year}" if re.fullmatch(r"(19|20)\d{2}", year or "") else ""
+        return f"OIML {series} {num}{suffix}", series, num
+
     doctype = attrs.get("series", "").strip().upper()
     doc_number = attrs.get("docnumber", "").strip()
     if not doctype:
@@ -83,7 +120,7 @@ def classify_identifier(title: str, attrs: dict[str, str], slug: str) -> tuple[s
     if not doc_number:
         m = re.search(r"(?:^|[a-z])(\d{1,3})", slug)
         doc_number = m.group(1) if m else ""
-    if doctype and doc_number:
+    if doctype and doc_number.isdigit():
         year = attrs.get("edition") or edition_from_slug(slug)
         suffix = f":{year}" if year else ""
         return f"OIML {doctype} {doc_number}{suffix}", doctype, doc_number
@@ -278,7 +315,7 @@ def _collection_identities(parent_root: Path) -> dict[str, str]:
             subdir = str(ref.get("fileref", "")).split("/")[0]
             ident = str(ref.get("identifier", "")).strip()
             if subdir and ident:
-                m = re.match(r"([A-Za-z]+)[-_]?(\d+)(?:[-_]?(\d+|annex-[A-Za-z]+))?", ident)
+                m = re.match(r"([A-Za-z]+)[-_]?(\d+)(?:[-_]?(annex-[A-Za-z]+|[A-Z]|\d+))?", ident)
                 if m:
                     series, num, part = m.group(1).upper(), str(int(m.group(2))), (m.group(3) or "").strip()
                     if part.startswith("annex-"):
@@ -307,7 +344,7 @@ def parse_doc(doc_root: Path, corpus: str, slug: str, ident_override: str | None
     elif not re.fullmatch(r"(19|20)\d{2}", edition):
         # part/edition numbers like "2" are not years — never render as ":2"
         edition = edition_from_slug(slug)
-    language = attrs.get("language", "").strip() or language_from_slug(slug)
+    language = explicit_slug_language(slug) or attrs.get("language", "").strip() or language_from_slug(slug)
     html_path = (
         metanorma_dir / "document.html"
         if corpus == "clean"
