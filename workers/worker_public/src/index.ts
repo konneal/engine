@@ -7,7 +7,10 @@ import { retrieveInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
 import { gradeRetrieval } from "./grader";
 import summarizePrompt from "../prompts/summarize.md";
+import relevancyPrompt from "../prompts/relevancy.md";
+import precisionPrompt from "../prompts/precision.md";
 import { embed } from "./ai";
+import { scoreFaithfulness } from "./faithfulness";
 import enrichmentPrompt from "../prompts/enrichment.md";
 import { reflect } from "./reflect";
 
@@ -654,6 +657,65 @@ async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request): Prom
   return json({ results, usage });
 }
 
+
+/** RAGAS-style metric battery (G13): judge an (question, answer, passages)
+ *  triple — faithfulness, answer relevancy, context precision. Driven by
+ *  tests/eval-suite.mjs; prompts are data; refuses nothing, judges only. */
+async function scoreJudge(
+  ai: any,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<number | null> {
+  try {
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 8000));
+    const call = (async () => {
+      const res: any = await ai.run(model, {
+        messages: [
+          { role: "system", content: systemPrompt.trimEnd() },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 900,
+        reasoning_effort: "low",
+      });
+      const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+      const m = (text ?? "").match(/\{[\s\S]*?\}/);
+      if (!m) return null;
+      const score = JSON.parse(m[0]).score;
+      return typeof score === "number" ? Math.max(0, Math.min(1, score)) : null;
+    })();
+    return await Promise.race([call, timeout]);
+  } catch {
+    return null;
+  }
+}
+
+async function handleJudge(env: Env, req: Request): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const question = typeof body?.question === "string" ? body.question.slice(0, 2000) : "";
+  const answer = typeof body?.answer === "string" ? body.answer.slice(0, 4000) : "";
+  const passages = Array.isArray(body?.passages)
+    ? body.passages.filter((p: unknown) => typeof p === "string").map((p: string) => p.slice(0, 600)).slice(0, 8)
+    : [];
+  if (!question || !answer) return err(400, "invalid_input", "question and answer required");
+
+  const passagesText = passages.map((p: string, i: number) => `[${i + 1}] ${p}`).join("\n");
+  const [faith, relevancy, precision] = await Promise.all([
+    passages.length ? scoreFaithfulness(env.AI, MODELS.grader, answer, passages) : Promise.resolve(null),
+    scoreJudge(env.AI, MODELS.grader, relevancyPrompt, `Question: ${question}\n\nAnswer:\n${answer}`),
+    passages.length ? scoreJudge(env.AI, MODELS.grader, precisionPrompt, `Question: ${question}\n\nPassages:\n${passagesText}`) : Promise.resolve(null),
+  ]);
+  return json({
+    question_hash: await sha256Hex(question),
+    faithfulness: faith ? faith.score : null,
+    answer_relevancy: relevancy,
+    context_precision: precision,
+  });
+}
+
 async function handleCreateKey(env: Env, req: Request): Promise<Response> {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
@@ -818,6 +880,7 @@ export default {
     }
 
     if (req.method === "POST" && (path === "/admin/enrich" || path === "/v1/admin/enrich")) return handleEnrich(env, ctx, req);
+    if (req.method === "POST" && (path === "/admin/judge" || path === "/v1/admin/judge")) return handleJudge(env, req);
     if (req.method === "POST" && path === "/v1/admin/keys") return handleCreateKey(env, req);
     if (req.method === "GET" && path === "/v1/admin/keys") return handleListKeys(env, req);
 
