@@ -11,6 +11,7 @@ from .config import ARTIFACTS
 from .models import ManifestEntry
 from .parse import apply_precedence, load_corpus, normalize_identifier
 from .enrich import run as run_enrich
+from .graph import build as graph_build, apply as graph_apply
 
 CHUNKS_PATH = ARTIFACTS / "chunks.jsonl"
 MANIFEST_PATH = ARTIFACTS / "manifest.json"
@@ -270,7 +271,7 @@ def probe() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingest")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich)]:
+    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", run_graph)]:
         sp = sub.add_parser(name)
         sp.add_argument("--limit", type=int, default=None)
         sp.add_argument("--corpus", default=None)
@@ -289,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         probe()
     elif args.cmd == "enrich":
         run_enrich(args.limit, args.batch, args.concurrency, args.force, args.rpm)
+    elif args.cmd == "graph":
+        (graph_apply if args.corpus == "apply" else graph_build)()
     return 0
 
 
