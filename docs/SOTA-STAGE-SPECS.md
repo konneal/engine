@@ -32,37 +32,89 @@ anchors and OCR artifacts. Identity comes from a precedence ladder
 - No per-document quality signals (OCR confidence, completeness) beyond
   shell flags.
 
-### Target source contract (what we ask Metanorma to emit; feeds
-metanorma/metanorma#592)
-```yaml
-# document.adoc header (machine-checkable, schema-validated at ingest)
-docidentifier: OIML R 60-1          # series + part, NEVER inferred from slug
-part: 1                              # or annex: A
-edition: "2017"
-language: en
-doctype: R                           # R|D|B|G|E|V
-status: in-force                     # joined from relaton if absent
-superseded_by: ""                    # filled by relaton join
-title: Metrological regulation for load cells — Part 1
-source_tier: clean|dirty
+### Target source contract — the MODEL serialization, not a rendering
+
+Metanorma is model-driven: adoc source compiles to a **semantic model**
+whose canonical interchange is the semantic XML (`document.xml`, the
+isodoc-family model), and renderings (HTML/PDF/DOCX) are DERIVED OUTPUT.
+Ingesting a rendering and scraping attributes back out of it inverts the
+dependency and loses the model: obligation (normative/informative), typed
+term entries, formula semantics, bibitem identity. The contract therefore
+consumes, in order of preference:
+
+**1. Semantic XML (primary, clean corpus; ask upstream in #592 to emit it
+as a first-class build artifact):**
+```xml
+<standard-document>
+  <bibdata>
+    <docidentifier type="oiml">OIML R 60-1</docidentifier>
+    <edition>2017</edition> <language>en</language>
+  </bibdata>
+  <sections>
+    <clause id="cl-4.1.2" obligation="normative">
+      <title>Maximum number of verification intervals</title>
+      <p>…</p>
+      <table id="tbl-4.1.2-1">
+        <name>Maximum permissible errors</name>
+        <thead><th>Load m (in units of e)</th><th>MPE</th></thead>
+        <tbody><tr><td>0 ≤ m ≤ 5·10³</td><td>0.5e</td></tr></tbody>
+      </table>
+      <formula id="frm-1"><stem type="AsciiMath">n_LC &lt;= ...</stem></formula>
+    </clause>
+  </sections>
+  <terms>
+    <term id="term-load-cell"><preferred>load cell</preferred>
+      <definition>…</definition></term>
+  </terms>
+  <bibliography>
+    <bibitem id="IEC61000-4-2">…</bibitem>
+  </bibliography>
+</standard-document>
 ```
-```html
-<!-- compiled HTML with AI-ready semantics -->
-<section id="cl-4.1.2" data-clause="4.1.2" data-title="Maximum number of
-  verification intervals" data-docid="OIML R 60-1:2017">
-  <table data-table-id="t4.1.2-1" data-caption="Maximum permissible errors"
-         data-col-units="e, mpe">
-    <thead><tr><th>Load m (in units of e)</th><th>MPE</th></tr></thead>…
-  </table>
-  <span class="stem" data-latex="n_{LC} \leq ...">…</span>
-  <termref data-concept="load-cell">load cell</termref>
-  <bibref data-cite="IEC61000-4-2">IEC 61000-4-2:2008</bibref>
-</section>
+
+**2. Canonical AI-friendly JSON projection (what RAG actually wants;
+derived from the model, upstream or at ingest):**
+```jsonc
+{
+  "doc": { "docidentifier": "OIML R 60-1", "part": "1", "edition": "2017",
+           "language": "en", "doctype": "R", "status": "in-force",
+           "family": "R-60", "superseded_by": null },
+  "nodes": [
+    { "type": "clause",    "anchor": "4.1.2", "obligation": "normative",
+      "breadcrumb": ["4 Testing", "4.1 Classification"], "text": "…" },
+    { "type": "table",     "anchor": "tbl-4.1.2-1",
+      "caption": "Maximum permissible errors",
+      "columns": [{ "label": "Load m (in units of e)", "unit": "e" },
+                  { "label": "MPE" }],
+      "rows": [["0 ≤ m ≤ 5·10³", "0.5e"]] },
+    { "type": "formula",   "anchor": "frm-1", "asciimath": "n_LC <= ...",
+      "latex": "n_{LC} \leq …", "described": "limit on verification intervals" },
+    { "type": "term",      "anchor": "term-load-cell", "concept": "load-cell",
+      "definition": "…" },
+    { "type": "reference", "anchor": "IEC61000-4-2",
+      "cited": "IEC 61000-4-2:2008" }
+  ]
+}
 ```
-**Migration:** ingest keeps the HTML-first parser but keys on the
-`data-*` attributes when present (clean corpus), falling back to today's
-heuristics (dirty corpus). The contract makes clean-corpus parsing
-deterministic and lets upstream fixes propagate without parser changes.
+This projection maps 1:1 onto `ChunkRecordV2` (Stage 2) — ingest becomes a
+mechanical walk of typed model nodes, with zero scraping and zero
+structure guessing. If a specific serialization (e.g. TOML or another
+AI-oriented form) is preferred upstream, the projection schema is the
+contract; the encoding is swappable.
+
+**3. Adoc model elements parsed directly** — where semantic XML is not
+available, the adoc source IS model-bearing (`stem:[]`, adoc tables,
+terms sections); parse the model, not a rendering.
+
+**4. HTML only as OCR-slate fallback** — the dirty corpus's compiled HTML
+remains the last-resort input for slates whose adoc is too degraded;
+everything else moves off renderings entirely.
+
+**Migration:** clean corpus first (compile → semantic XML → JSON
+projection → existing chunker consumes nodes); dirty corpus stays on the
+HTML-first parser until per-slate re-OCR/re-compile upgrades it. Upstream
+ask (#592): ship the semantic XML (and ideally the JSON projection) as an
+official output flavor so AI consumers never parse renderings.
 
 ---
 
@@ -145,6 +197,9 @@ interface ChunkRecordV2 {
   quality: { ocr_confidence?: number };
 }
 ```
+- **Derivation:** `ChunkRecordV2` fields come from the Stage 0 model
+  projection (semantic XML → JSON), not from HTML scraping — the parser
+  walks typed model nodes and fills payloads mechanically.
 - **Embedding input per type:** tables embed as `context + caption +
   header map + row tuples serialized` (structure-preserving, TabRAG
   lesson); equations embed as `described + latex`; definitions embed the
