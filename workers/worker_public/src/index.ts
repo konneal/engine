@@ -341,7 +341,7 @@ async function handleAsk(
   const warmQuery = retrievalQuery(q.query, prev);
   const warmEmbed = embedWarm(env, warmQuery);
   const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history);
-  console.log("understand:", understanding?.intent ?? "null", "|", q.query.slice(0, 60));
+  console.log("understand:", understanding?.intent ?? "null", understanding?.doc_number ? `doc#${understanding.doc_number}${understanding.edition ? "@" + understanding.edition : ""}` : "nodoc", "|", q.query.slice(0, 50));
 
   // Conversational route, decided by query UNDERSTANDING (any language, any
   // phrasing) — not string matching. No retrieval: nothing in the corpus

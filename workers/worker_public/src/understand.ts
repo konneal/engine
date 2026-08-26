@@ -82,14 +82,14 @@ export async function understandQuery(
     ],
     // the model always reasons; reasoning tokens share this budget — too
     // small and the JSON is never reached (understanding silently degrades)
-    max_tokens: 1200,
+    max_tokens: 1500,
     reasoning_effort: "low",
   };
   // each attempt issues a FRESH call — re-racing a timed-out promise would
   // retry nothing. Generous first attempt: reasoning + the full JSON must
   // fit inside the timeout or understanding silently degrades to vanilla
   // retrieval (which refuses conversational turns).
-  const ATTEMPT_TIMEOUTS = [7000, 4000];
+  const ATTEMPT_TIMEOUTS = [10000, 5000];
   for (let attempt = 0; attempt < ATTEMPT_TIMEOUTS.length; attempt++) {
     const call = (async () => {
       const res: any = await ai.run(model, body);
