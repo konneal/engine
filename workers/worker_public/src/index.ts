@@ -1,5 +1,5 @@
 import { LIMITS, MODELS, datasetsFor, SUGGESTIONS, num, sha256Hex, today } from "./config";
-import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, REFUSAL_ANSWER, Hit } from "./pipeline";
+import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, REFUSAL_ANSWER, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleShareConversation, handleGetShared } from "./share";
@@ -391,6 +391,15 @@ async function handleAsk(
 
   try {
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed });
+    // cascade final tier: joint listwise reordering for hard/member
+    // queries (cross-encoder already pruned; this orders the survivors)
+    if (retrieved.hits.length >= 4 && (member || understanding?.complexity === "complex")) {
+      const reordered = await listwiseRerank(env, MODELS.listwise, understanding?.standalone_query || q.query, retrieved.hits);
+      if (reordered) {
+        console.log("listwise: reordered", reordered[0]?.metadata?.docidentifier ?? "?", "to top");
+        retrieved = { hits: reordered, filters: retrieved.filters };
+      }
+    }
     // CRAG: grade the passages; a weak grade earns ONE corrective
     // re-retrieval with the document identifier made explicit
     const grade = await gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text));

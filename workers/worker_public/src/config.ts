@@ -7,6 +7,9 @@ export const MODELS = {
   // contextual enrichment is the QUALITY-FIRST lane (one-time spend over
   // the corpus, its quality persists into every future retrieval)
   enrich: "@cf/deepseek-ai/deepseek-v4-pro-0813",
+  // final-tier listwise reranker for hard/member queries (cascade:
+  // cross-encoder prunes, listwise orders jointly)
+  listwise: "@cf/zai-org/glm-4.7-flash",
 } as const;
 
 export const LIMITS = {

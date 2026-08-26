@@ -2,6 +2,7 @@ import { embed, rerank } from "./ai";
 import { LIMITS, MODELS, DATASETS } from "./config";
 import systemPromptText from "../prompts/system.md";
 import conversationalPromptText from "../prompts/conversational.md";
+import listwisePromptText from "../prompts/listwise.md";
 
 /** The one sanctioned refusal sentence (also in prompts/system.md).
  *  Refusals are never cached: a refusal says "retrieval found nothing",
@@ -411,6 +412,49 @@ export function splitHistory(
     used += t;
   }
   return { kept: history.slice(cut), overflow: history.slice(0, cut) };
+}
+
+
+/** Final-tier LLM listwise rerank: jointly reorders the top passages for
+ *  hard queries (cascade stage after the cross-encoder). Null = keep the
+ *  incoming order (timeout/parse failure never blocks serving). */
+export async function listwiseRerank(
+  env: any,
+  model: string,
+  query: string,
+  hits: Hit[],
+): Promise<Hit[] | null> {
+  if (hits.length < 4) return null;
+  try {
+    const listing = hits
+      .map((h, i) => {
+        const label = `${h.metadata.docidentifier || h.metadata.doc_id}:${h.metadata.edition || ""} §${h.metadata.clause_anchor || ""}`;
+        return `[${i + 1}] ${label.replace(/(:|§)+$/g, "")} — ${h.text.replace(/\s+/g, " ").slice(0, 220)}`;
+      })
+      .join("\n");
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 6000));
+    const call = (async () => {
+      const res: any = await env.AI.run(model, {
+        messages: [
+          { role: "system", content: listwisePromptText.trimEnd() },
+          { role: "user", content: `Question: ${query}\n\nPassages:\n${listing}` },
+        ],
+        max_tokens: 700,
+        reasoning_effort: "low",
+      });
+      const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+      const m = (text ?? "").match(/\[[\s\S]*?\]/);
+      if (!m) return null;
+      const order = JSON.parse(m[0]);
+      if (!Array.isArray(order) || order.length !== hits.length) return null;
+      const idx = order.map((n: unknown) => Number(n) - 1);
+      if (idx.some((n: number) => !Number.isInteger(n) || n < 0 || n >= hits.length) || new Set(idx).size !== hits.length) return null;
+      return idx.map((n: number) => hits[n]);
+    })();
+    return await Promise.race([call, timeout]);
+  } catch {
+    return null;
+  }
 }
 
 export function buildMessages(
