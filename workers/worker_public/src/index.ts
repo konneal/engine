@@ -386,7 +386,7 @@ async function handleAsk(
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
     telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
-    return json({ answer, citations: [], model, query_hash: queryHash, ...(exempt ? {} : { quota }) });
+    return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], ...(exempt ? {} : { quota }) });
   }
 
   try {
@@ -444,7 +444,7 @@ async function handleAsk(
           } catch {
             // stream ended prematurely — deliver what we have
           }
-          send({ type: "done", model, query_hash: queryHash });
+          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] });
           telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
           const canonical = canonicalRefusal(full);
           if (canonical.length > 0 && !contextual && !canonical.includes(REFUSAL_ANSWER)) {
@@ -497,7 +497,7 @@ async function handleAsk(
     telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
-  const out = { answer, citations: cites, model: MODELS.anon, query_hash: queryHash };
+  const out = { answer, citations: cites, model: MODELS.anon, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] };
   if (!contextual && !answer.includes(REFUSAL_ANSWER)) {
     const ck = await cacheKey(env, ns, q.query, q.lang);
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));

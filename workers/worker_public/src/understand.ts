@@ -26,6 +26,8 @@ export interface QueryUnderstanding {
   query_variants: string[];
   sub_queries: string[];
   hypothetical_answer: string;
+  /** plausible next questions (conversational UX), in the user's language */
+  follow_ups: string[];
 }
 
 
@@ -50,6 +52,9 @@ function extractJson(text: string): QueryUnderstanding | null {
       hypothetical_answer: typeof raw.hypothetical_answer === "string" ? raw.hypothetical_answer.trim().slice(0, 300) : "",
       sub_queries: Array.isArray(raw.sub_queries)
         ? raw.sub_queries.filter((q: unknown) => typeof q === 'string' && (q as string).trim()).map((q: string) => q.trim().slice(0, 300)).slice(0, 5)
+        : [],
+      follow_ups: Array.isArray(raw.follow_ups)
+        ? raw.follow_ups.filter((q: unknown) => typeof q === 'string' && (q as string).trim()).map((q: string) => q.trim().slice(0, 200)).slice(0, 2)
         : [],    };
     return u;
   } catch {

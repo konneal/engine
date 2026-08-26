@@ -96,7 +96,7 @@ await page.route("**/api/**", (route) => {
         { type: "citations", citations: CITES(), quota: { used: 1, limit: 20 } },
         { type: "token", v: "R 60 is the OIML Recommendation for load cells [OIML R 60-1:2021 " },
         { type: "token", v: "§overview]." },
-        { type: "done", model: "@cf/qwen/qwen3-30b-a3b-fp8", query_hash: "a".repeat(64) },
+        { type: "done", model: "@cf/qwen/qwen3-30b-a3b-fp8", query_hash: "a".repeat(64), follow_ups: ["What are the accuracy classes?", "How is n_LC limited?"] },
       ];
     }
     return route.fulfill({ status: 200, contentType: "text/event-stream", body: sse(events) });
@@ -141,6 +141,8 @@ check("source chip expands its card", (await page.locator(".src-card:not(.open-c
 check("inline citation links rendered", (await page.locator(".cite-ref").count()) >= 1);
 check("doubled clause numbers deduplicated", !/4\.1\.2\s*4\.1\.2/.test(await chat.textContent()));
 check("message actions rendered", (await page.locator(".assistant-body ~ * button, .msg-acts button, button.act").count()) >= 1);
+const chips = page.locator(".assistant-body ~ * .follow-up");
+check("follow-up suggestion chips rendered", (await chips.count()) >= 2);
 check("quota meter updated", (await chat.textContent()).includes("1 / 20"));
 const askReq = asked.find((a) => a.url.includes("/api/ask"));
 check("request went to /api/ask with stream", !!askReq && askReq.body.stream === true);
@@ -192,6 +194,16 @@ const pwned = await page.evaluate(() => typeof window.__pwned !== "undefined" &&
 check("script tags never execute", !pwned);
 check("payload rendered as text, not HTML", (await page.locator(".assistant-body").last().textContent()).includes("<script>window.__pwned=1</script>"));
 check("no javascript: links survive", (await page.locator('.assistant-body a[href^="javascript:"]').count()) === 0);
+
+// — follow-up chips: clicking one asks it as the next question —
+const chipSet = page.locator(".follow-up");
+if ((await chipSet.count()) >= 1) {
+  await chipSet.first().dispatchEvent("click");
+  await page.waitForTimeout(400);
+  check("follow-up chip asks the question", (await chat.textContent()).includes("What are the accuracy classes?"));
+} else {
+  check("follow-up chip asks the question", false, "no chips rendered");
+}
 
 check("no uncaught page errors", errors.length === 0, errors[0] ?? "");
 
