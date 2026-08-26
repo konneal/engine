@@ -1,0 +1,13 @@
+name = "rag-mcp"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+workers_dev = true
+
+# MCP server (audience: public). Proxies retrieval/answering to the
+# rag-public worker over the public API — no direct index bindings here,
+# so corpus isolation stays enforced in ONE place.
+[vars]
+RAG_BASE = "https://ai.oimlsmart.org"
+
+[observability]
+enabled = true
