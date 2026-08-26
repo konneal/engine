@@ -32,15 +32,40 @@ anchors and OCR artifacts. Identity comes from a precedence ladder
 - No per-document quality signals (OCR confidence, completeness) beyond
   shell flags.
 
-### Target source contract — the MODEL serialization, not a rendering
+### Target source contract — consume the metanorma-document MODEL HUB
 
-Metanorma is model-driven: adoc source compiles to a **semantic model**
-whose canonical interchange is the semantic XML (`document.xml`, the
-isodoc-family model), and renderings (HTML/PDF/DOCX) are DERIVED OUTPUT.
-Ingesting a rendering and scraping attributes back out of it inverts the
-dependency and loses the model: obligation (normative/informative), typed
-term entries, formula semantics, bibitem identity. The contract therefore
-consumes, in order of preference:
+Metanorma is model-driven, and the toolchain already provides the right
+substrate: **`metanorma-document`** deserializes semantic XML into typed
+lutaml-model classes (`Metanorma::IsoDocument::Root.from_xml`,
+`basic_document` → `standard_document` → `iso_document` hierarchies,
+collections, mirror round-trips) — and, being lutaml-model based, the
+same model serializes natively to **XML, YAML, or JSON**. Requirements,
+permissions, and recommendations are ALREADY first-class block classes
+(`RequirementModel`, `PermissionModel`). The upstream sibling
+**`modspec-ruby`** models normative statements and conformance tests as
+addressable objects (`/req/<class>/<name>` URIs, obligation, inheritance,
+suites) with YAML/JSON round-trips; **Glossarist** and **Relaton**
+exports provide the terminology and citation datasets.
+
+The ingest contract is therefore NOT a file format — it is a **projection
+over the model**:
+
+1. Deserialize: semantic XML (or YAML/JSON) → metanorma-document model.
+2. Project: a small adapter walks typed model nodes and emits the
+   canonical node JSON below (the adapter can live upstream as a
+   metanorma-document serialization flavor, or in our ingest as a Ruby
+   step). ChunkRecordV2 (Stage 2) is filled mechanically from nodes.
+3. Requirement/conformance nodes additionally project through the ModSpec
+   model (identifier, obligation, class, linked conformance tests).
+4. Glossarist/Relaton dataset exports feed definition chunks and graph
+   edges directly (no side-repo joins).
+5. Adoc model elements are parsed directly when no compiled model exists;
+   compiled HTML remains the OCR-slate fallback ONLY.
+
+Renderings (HTML/PDF/DOCX) are never ingestion inputs outside the OCR
+fallback. Encoding is irrelevant — the node schema is the contract.
+
+For reference, the node projection shape:
 
 **1. Semantic XML (primary, clean corpus; ask upstream in #592 to emit it
 as a first-class build artifact):**
@@ -175,7 +200,8 @@ inside prose.
 
 ### Target — one chunk schema, typed payloads
 ```ts
-type BlockType = "clause" | "table" | "equation" | "definition" | "reference" | "family";
+type BlockType = "clause" | "table" | "equation" | "definition" | "reference"
+               | "requirement" | "conformance_test" | "family";
 
 interface ChunkRecordV2 {
   id: string;                        // content-hash (stable across re-chunk)
@@ -193,6 +219,19 @@ interface ChunkRecordV2 {
   };
   equation?: { asciimath: string; latex: string; described: string };
   term?: { concept: string; definition: string; source_vocab: string };
+  requirement?: {                   // ModSpec projection (metanorma-document
+    identifier: string;             // RequirementModel → modspec-ruby)
+    class: string;                  // "/req/oiml-r60-1/classification"
+    obligation: "requirement" | "recommendation" | "permission";
+    statement: string;              // the normative statement, verbatim
+    inherits: string[];             // parent statement URIs
+  };
+  conformance_test?: {
+    identifier: string;             // "/conf/oiml-r60-1/nlc-limit"
+    class: string;
+    requirement: string;            // URI of the tested statement
+    method: string;                 // verification method text
+  };
   reference?: { cited: string; relaton_key: string | null };
   quality: { ocr_confidence?: number };
 }
@@ -348,7 +387,8 @@ loop (agentic, Workflows "research mode", spend-capped ≤3 iterations):
 ```sql
 CREATE TABLE graph_nodes (id TEXT PRIMARY KEY, kind TEXT, label TEXT);   -- doc|concept|term
 CREATE TABLE graph_edges (src TEXT, dst TEXT, kind TEXT, meta TEXT);
--- kinds: cites|supersedes|part_of|defines|related_to
+-- kinds: cites|supersedes|part_of|defines|related_to|
+--         tested_by|requirement_of (from ModSpec projection)
 -- seeded from relaton (cites/supersedes/part_of) + vocab glossarist
 -- (defines/related_to); PUBLIC projection excludes ISO labels entirely
 ```
@@ -436,3 +476,34 @@ feedback buttons.
 7. Stage 9 metric battery + dashboards + gate
 Each step ships with its own probes; no step requires the previous step's
 deploy to be simultaneous (schemas are additive).
+
+
+---
+
+## Metanorma as semantic publisher — the forward play
+
+What the toolchain already supports changes the upstream ask
+(metanorma/metanorma#592) from "please emit AI-friendly output" to
+"please PACKAGE what you already have":
+
+1. **Model serializations are done** — metanorma-document (lutaml-model)
+   round-trips semantic XML/YAML/JSON. The missing piece is only a
+   curated *node projection* flavor (the schema in this document) so AI
+   consumers don't each re-invent their own walk of the model.
+2. **Requirements/conformance as data** — ModSpec projection makes every
+   "shall" statement addressable (`/req/<class>/<name>`), with conformance
+   tests linked. For standards bodies this turns compliance questions
+   ("what does R 60-1 require? how is it verified?") from prose retrieval
+   into OBJECT retrieval — the single biggest structural win available to
+   a standards-domain RAG.
+3. **Glossarist + Relaton exports as first-class ingestion lanes** —
+   terminology and citation graphs ship WITH the document instead of
+   being joined from downstream repos.
+4. **The bundle ask:** one document source → human renderings (HTML/PDF)
+   AND machine serializations (node projection JSON, ModSpec requirement
+   export, Glossarist/Relaton datasets). Metanorma becomes the semantic
+   publisher for the AI ecosystem, exactly as it is the rendering
+   publisher today.
+
+Our side: ingest v2 (roadmap Phase 2) implements the projection adapter
+and the requirement/conformance retrieval lane against this contract.
