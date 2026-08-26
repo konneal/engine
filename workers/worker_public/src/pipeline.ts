@@ -13,7 +13,7 @@ export const REFUSAL_ANSWER = "I don't have information on this in the indexed O
 function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (m, k: string) => (k in vars ? vars[k] : ""));
 }
-import { QueryFilters, toVectorizeFilter, extractFilters, PROCESS_INTENT_RE } from "./selfquery";
+import { QueryFilters, toVectorizeFilter } from "./selfquery";
 import { keywordRank, rrfFuse } from "./hybrid";
 import { toHits } from "./lib/hit";
 import { QueryUnderstanding } from "./understand";
@@ -47,14 +47,15 @@ export interface Retrieved {
   filters: QueryFilters;
 }
 
-// "give me more details" is semantically empty on its own — fold the
+// Short follow-ups are usually elliptical ("and the limits?") — fold the
 // previous question into the RETRIEVAL query (generation still sees the
-// original wording) so follow-ups search the right neighborhood
+// original wording). Purely structural (word count): whether a question
+// is elliptical is a semantic judgment, and semantics belong to the
+// understanding model, whose standalone_query takes precedence anyway.
 export function retrievalQuery(query: string, prev?: string): string {
   if (!prev || !prev.trim()) return query;
   const words = query.trim().split(/\s+/).length;
-  const vague = /^(more|continue|details?|elaborate|why|how so|and|also|explain|go on)\b/i.test(query.trim());
-  if (words <= 8 || vague) return `${prev.trim()} — ${query.trim()}`;
+  if (words <= 8) return `${prev.trim()} — ${query.trim()}`;
   return query;
 }
 
@@ -70,18 +71,18 @@ export async function retrieve(
   opts: { prev?: string; understanding?: QueryUnderstanding | null; queryOverride?: string; federate?: (query: string) => Promise<Hit[]>; warmEmbed?: Promise<number[] | null> } = {},
 ): Promise<Retrieved> {
   const u = opts.understanding ?? null;
-  // UNION of signals: deterministic regexes are the floor (tested, zero
-  // latency); the LLM understanding layers on top for what regexes cannot
-  // see (creative phrasings, context rewriting). Both contribute.
-  const rf = extractFilters(query);
-  const filters: QueryFilters =
+  // Filters and process-intent come ONLY from query understanding — no
+  // regex floor, no union. When understanding is unavailable the query
+  // runs unfiltered and unexpanded (vanilla retrieval); meaning is never
+  // decided by string matching.
+  const filters: QueryFilters | null =
     u && !u.process_intent && u.doc_number
       ? { doc_number: u.doc_number, ...(u.edition ? { edition: u.edition } : {}) }
-      : rf;
-  const filter = toVectorizeFilter(filters);
+      : null;
+  const filter = filters ? toVectorizeFilter(filters) : null;
   const folded = retrievalQuery(query, opts.prev);
   let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || folded;
-  if (u?.process_intent || PROCESS_INTENT_RE.test(query)) rq += PROCESS_EXPANSION;
+  if (u?.process_intent) rq += PROCESS_EXPANSION;
   // the folded query can be embedded WHILE understanding runs — if the
   // final retrieval query turns out to be exactly that, the warm embedding
   // (started ~2s earlier) is reused and the serial understand→embed
@@ -300,7 +301,7 @@ export async function retrieve(
   // get a tie-break nudge so stale duplicate chunks don't crowd out current
   // ones. Scaled to the live score spread — rerank scores cluster within
   // ~0.001, so any fixed-magnitude boost would reorder everything.
-  if (!filters.edition && hits.length > 1) {
+  if (!filters?.edition && hits.length > 1) {
     const year = (s?: string) => (/^(19|20)\d{2}$/.test(s ?? "") ? Number(s) : null);
     const scored = hits.map((h) => h.rerank_score ?? h.score);
     const spread = Math.max(...scored) - Math.min(...scored);
@@ -328,11 +329,11 @@ export async function retrieve(
     // a doc-number query matches every part (R 60-1/-2/Annexe A) — without
     // a global overview cap their near-identical overviews crowd out the
     // definition and clause chunks the answer needs
-    const ovCap = filters.doc_number ? 6 : 2; // part overviews of the queried family are signal, not noise
+    const ovCap = filters?.doc_number ? 6 : 2; // part overviews of the queried family are signal, not noise
     if (isOverview && overviews >= ovCap) continue;
     const key = `${h.metadata.docidentifier}|${h.metadata.language}`;
     const n = perDoc.get(key) ?? 0;
-    const cap = isOverview ? 1 : filters.doc_number ? 3 : 2;
+    const cap = isOverview ? 1 : filters?.doc_number ? 3 : 2;
     if (n < cap) {
       diversified.push(h);
       perDoc.set(key, n + 1);
@@ -340,7 +341,7 @@ export async function retrieve(
     }
     if (diversified.length >= LIMITS.rerankKeep + 2) break;
   }
-  return { hits: diversified.slice(0, LIMITS.rerankKeep), filters };
+  return { hits: diversified.slice(0, LIMITS.rerankKeep), filters: filters ?? {} };
 }
 
 export interface HistoryTurn {
