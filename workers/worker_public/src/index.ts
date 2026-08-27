@@ -343,6 +343,7 @@ async function handleAsk(
   const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history);
   console.log("understand:", understanding?.intent ?? "null", understanding?.doc_number ? `doc#${understanding.doc_number}${understanding.edition ? "@" + understanding.edition : ""}` : "nodoc", "|", q.query.slice(0, 50));
   const graphDocNumbers = await graphExpand(env, understanding);
+  const eNote = await editionNote(env, understanding);
 
   // Conversational route, decided by query UNDERSTANDING (any language, any
   // phrasing) — not string matching. No retrieval: nothing in the corpus
@@ -426,14 +427,15 @@ async function handleAsk(
     return json({ ...out, ...(exempt ? {} : { quota }) });
   }
 
+  const processNote = understanding?.process_intent
+    ? "Retrieval note: these passages come from the OIML Certification System documents because they govern certification/application procedures for OIML publications."
+    : undefined;
   const { messages, usedHits } = buildMessages(
     q.query,
     hits,
     q.lang,
     keptHistory,
-    understanding?.process_intent
-      ? "Retrieval note: these passages come from the OIML Certification System documents because they govern certification/application procedures for OIML publications."
-      : undefined,
+    [processNote, eNote].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
@@ -757,6 +759,27 @@ async function graphExpand(env: Env, u: { term?: string | null; defined_terms?: 
   return numbers.size ? [...numbers].slice(0, 6) : undefined;
 }
 
+
+/** Edition registry note (documents table): when the query names a
+ *  publication, tell the model which editions are ACTIVE so superseded
+ *  passages are treated as such — derived status from successor edges,
+ *  not the fallible relaton status field. */
+async function editionNote(env: Env, u: { doc_number?: string | null } | null): Promise<string | undefined> {
+  if (!env.DB || !u?.doc_number) return undefined;
+  try {
+    const rows = await env.DB.prepare(
+      "SELECT docidentifier FROM documents WHERE family = (SELECT family FROM documents WHERE docidentifier LIKE ?1 || '%:%' LIMIT 1) AND active = 1",
+    )
+      .bind(`% ${u.doc_number}:%`)
+      .all<{ docidentifier: string }>();
+    const actives = (rows.results ?? []).map((r) => r.docidentifier);
+    if (!actives.length) return undefined;
+    return `Publication registry (authoritative): the ACTIVE edition(s) for this publication are ${actives.join(", ")}. Passages from other editions are superseded — use them only for historical comparison and say so.`;
+  } catch {
+    return undefined;
+  }
+}
+
 async function handleCreateKey(env: Env, req: Request): Promise<Response> {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
@@ -825,6 +848,18 @@ export default {
       }
       if (parts.length > 3) return err(404, "not_found", "Unknown route");
       return handleConversations(env, session.sub, req, { method: req.method, id: parts[2] });
+    }
+
+    if (req.method === "GET" && (path === "/api/documents" || path === "/api/documents/")) {
+      const fam = url.searchParams.get("family")?.trim();
+      const rows = await env.DB.prepare(
+        fam
+          ? "SELECT canonical_id, docidentifier, family, part, edition, derived_status, active, superseded_by, title FROM documents WHERE family = ?1 ORDER BY part, edition"
+          : "SELECT canonical_id, docidentifier, family, part, edition, derived_status, active, superseded_by, title FROM documents WHERE active = 1 ORDER BY family, part",
+      )
+        .bind(...(fam ? [fam] : []))
+        .all();
+      return json({ documents: rows.results ?? [] });
     }
 
     if (req.method === "GET" && (path === "/api/datasets" || path === "/api/datasets/")) {
