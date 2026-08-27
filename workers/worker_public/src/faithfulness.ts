@@ -23,7 +23,8 @@ export async function scoreFaithfulness(
     .map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 900)}`)
     .join("\n");
 
-  const timeout = new Promise<null>((r) => setTimeout(() => r(null), 15000));
+  const t0 = Date.now();
+  const timeout = new Promise<null>((r) => setTimeout(() => { console.log(`faithfulness: timeout (${Date.now() - t0}ms)`); r(null); }, 30000));
   const call = (async () => {
     const res: any = await ai.run(model, {
       messages: [
@@ -48,16 +49,12 @@ export async function scoreFaithfulness(
         // not JSON — keep scanning
       }
     }
-    if (!parsed) return null;
+    if (!parsed) { console.log(`faithfulness: no parse (${Date.now() - t0}ms, text ${((text ?? "").length)} chars)`); return null; }
     return {
       score: Math.max(0, Math.min(1, parsed.score as number)),
       ungrounded_claims: Array.isArray(parsed.ungrounded_claims) ? parsed.ungrounded_claims.map(String).slice(0, 5) : [],
     };
   })();
 
-  try {
-    return await Promise.race([call, timeout]);
-  } catch {
-    return null;
-  }
+  return await Promise.race([call, timeout]);
 }
