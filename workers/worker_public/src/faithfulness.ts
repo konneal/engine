@@ -23,7 +23,7 @@ export async function scoreFaithfulness(
     .map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 400)}`)
     .join("\n");
 
-  const timeout = new Promise<null>((r) => setTimeout(() => r(null), 8000));
+  const timeout = new Promise<null>((r) => setTimeout(() => r(null), 15000));
   const call = (async () => {
     const res: any = await ai.run(model, {
       messages: [
@@ -33,7 +33,7 @@ export async function scoreFaithfulness(
         },
         { role: "user", content: `Answer:\n${answer.slice(0, 2000)}\n\nPassages:\n${context}` },
       ],
-      max_tokens: 900,
+      max_tokens: 1200,
       reasoning_effort: "low",
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;

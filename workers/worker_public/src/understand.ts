@@ -20,6 +20,8 @@ export interface QueryUnderstanding {
   process_intent: boolean;
   /** definition-style question whose subject is `term` */
   term: string | null;
+  /** corpus-terminology mapping of everyday wording (drift→creep) */
+  defined_terms: string[];
   /** self-contained retrieval query: follow-ups folded with context */
   standalone_query: string;
   complexity: "simple" | "complex";
@@ -44,6 +46,9 @@ function extractJson(text: string): QueryUnderstanding | null {
       language: typeof raw.language === "string" && /^[a-z]{2}$/.test(raw.language) ? raw.language : null,
       process_intent: raw.process_intent === true,
       term: typeof raw.term === "string" && raw.term.trim() ? raw.term.trim().slice(0, 60) : null,
+      defined_terms: Array.isArray(raw.defined_terms)
+        ? raw.defined_terms.filter((t: unknown) => typeof t === "string" && (t as string).trim()).map((t: string) => t.trim().slice(0, 60)).slice(0, 4)
+        : [],
       standalone_query: typeof raw.standalone_query === "string" && raw.standalone_query.trim() ? raw.standalone_query.trim().slice(0, 400) : "",
       complexity: raw.complexity === 'complex' ? ('complex' as const) : ('simple' as const),
       query_variants: Array.isArray(raw.query_variants)

@@ -65,6 +65,7 @@ def esc(s: str) -> str:
 def build() -> int:
     nodes: dict[str, str] = {}
     edges: set[tuple[str, str, str]] = set()
+    docs: dict[str, dict] = {}
     skipped = 0
 
     for f in sorted(RELATON.glob("*.yaml")):
@@ -88,6 +89,20 @@ def build() -> int:
         label = next((t.get("content") for t in titles if t.get("language") == "eng"), None) or (
             titles[0].get("content") if titles else primary
         )
+        if node not in docs:  # primary file wins; language instances collapse
+            fam = family_of(primary)
+            base_id = re.sub(r"^OIML\s+", "", primary)
+            part_m = re.search(r"^[A-Z]+\s+\d+(?:-([A-Za-z0-9]+))?", base_id)
+            ed_m = re.search(r":(\d{4})", base_id)
+            docs[node] = {
+                "docidentifier": primary,
+                "family": fam.split(":", 1)[1] if fam else "",
+                "part": (part_m.group(1) if part_m else None),
+                "edition": ed_m.group(1) if ed_m else "",
+                "status": ((d.get("status") or {}).get("stage") or {}).get("content", "unknown"),
+                "title": label or primary,
+            }
+
         nodes[node] = f"doc|{esc(label or primary)}"
 
         fam = family_of(primary)
@@ -104,6 +119,33 @@ def build() -> int:
                 other = norm_id(di.get("content", ""))
                 if other and other != node:
                     edges.add((node, other, kind))
+
+    # ── documents registry: derive status + active from successor edges ──
+    succ_of: dict[str, str] = {}
+    for src, dst, kind in edges:
+        if kind == "successor":
+            succ_of[src] = dst
+    for nid, rec in docs.items():
+        has_succ = nid in succ_of
+        rec["derived_status"] = "superseded" if has_succ else rec["status"]
+        rec["superseded_by"] = succ_of.get(nid)
+    # active = terminal (no successor) with max edition within family+part
+    by_fp: dict[tuple[str, str | None], list[str]] = {}
+    for nid, rec in docs.items():
+        by_fp.setdefault((rec["family"], rec["part"]), []).append(nid)
+    for fp, nids in by_fp.items():
+        terminal = [n for n in nids if n not in succ_of]
+        # active = terminal AND not superseded by its own status field —
+        # a terminal-but-superseded record is a relaton data gap (no
+        # successor recorded), surfaced as a family with NO active edition
+        live_terminal = [n for n in terminal if docs[n]["status"] != "superseded" and docs[n]["status"] != "withdrawn"]
+        if live_terminal:
+            top = max(live_terminal, key=lambda n: docs[n]["edition"])
+            for n in nids:
+                docs[n]["active"] = 1 if n == top else 0
+        else:  # cyclic or unanchored chain — nothing marked active
+            for n in nids:
+                docs[n]["active"] = 0
 
     # vocab concepts (public projection: OIML + VIM/VIML terminology).
     # Glossarist files are multi-document YAML: the concept record carries
@@ -151,7 +193,14 @@ def build() -> int:
     with OUT.open("w", encoding="utf-8") as out:
         # d1 execute wraps the file atomically itself and rejects explicit
         # BEGIN/COMMIT — plain statements only
-        out.write("DELETE FROM graph_nodes;\nDELETE FROM graph_edges;\n")
+        out.write("DELETE FROM graph_nodes;\nDELETE FROM graph_edges;\nDELETE FROM documents;\n")
+        for nid, rec in docs.items():
+            out.write(
+                f"INSERT OR IGNORE INTO documents (canonical_id, docidentifier, family, part, edition, status, derived_status, active, superseded_by, title) "
+                f"VALUES ('{nid}', '{esc(rec['docidentifier'])}', '{rec['family']}', {repr(rec['part']) if rec['part'] else 'NULL'}, "
+                f"'{rec['edition']}', '{rec['status']}', '{rec['derived_status']}', {rec['active']}, "
+                f"{('' + chr(39) + rec['superseded_by'] + chr(39)) if rec['superseded_by'] else 'NULL'}, '{esc(rec['title'])}');\n"
+            )
         node_rows = [(nid.split(":", 1)[0], label) for nid, label in nodes.items()]
         for nid, v in nodes.items():
             kind, label = v.split("|", 1)
@@ -162,7 +211,9 @@ def build() -> int:
 
 
     kept = sum(1 for s, d, k in edges if s in nodes and d in nodes)
+    active_ct = sum(1 for r in docs.values() if r.get("active"))
     print(
+        f"documents registry: {len(docs)} editions, {active_ct} active; "
         f"graph: {len(nodes)} nodes ({sum(1 for v in node_rows if v[0]=='doc')} docs, "
         f"{sum(1 for v in node_rows if v[0]=='family')} families, {concepts} concepts), "
         f"{kept} edges ({defines} defines), {skipped} non-publication records skipped → {OUT}"

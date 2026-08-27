@@ -26,6 +26,17 @@ if (!KEY || !ADMIN_TOKEN) {
 const cases = JSON.parse(readFileSync(new URL("./golden/cases.json", import.meta.url), "utf8")).filter((c) => c.query);
 const run = limit ? cases.slice(0, limit) : cases;
 
+async function searchPassages(query) {
+  const res = await fetch(`${BASE}/v1/search`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
+    body: JSON.stringify({ query, top_k: 8 }),
+  });
+  if (!res.ok) return [];
+  const d = await res.json();
+  return (d.results ?? []).map((r) => `${r.docidentifier}${r.clause_anchor ? " §" + r.clause_anchor : ""}: ${(r.snippet ?? "").slice(0, 500)}`);
+}
+
 async function ask(query) {
   const res = await fetch(`${BASE}/v1/ask`, {
     method: "POST",
@@ -53,7 +64,9 @@ for (const c of run) {
   try {
     const a = await ask(c.query);
     const answer = a.answer ?? "";
-    const passages = (a.citations ?? []).map((x) => `${x.docidentifier}${x.clause_anchor ? " §" + x.clause_anchor : ""}: ${x.snippet ?? ""}`);
+    // full passages via search (citation snippets are ~200 chars and
+    // under-measure context precision)
+    const passages = await searchPassages(c.query);
     row.refused = answer.includes(REFUSAL);
     row.answer_chars = answer.length;
     row.passage_count = passages.length;

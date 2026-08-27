@@ -69,7 +69,7 @@ const PROCESS_EXPANSION = " OIML Certification System OIML-CS issuing authority 
 export async function retrieve(
   env: any,
   query: string,
-  opts: { prev?: string; understanding?: QueryUnderstanding | null; queryOverride?: string; federate?: (query: string) => Promise<Hit[]>; warmEmbed?: Promise<number[] | null> } = {},
+  opts: { prev?: string; understanding?: QueryUnderstanding | null; queryOverride?: string; federate?: (query: string) => Promise<Hit[]>; warmEmbed?: Promise<number[] | null>; graphDocNumbers?: string[] } = {},
 ): Promise<Retrieved> {
   const u = opts.understanding ?? null;
   // Filters and process-intent come ONLY from query understanding — no
@@ -127,6 +127,34 @@ export async function retrieve(
       }
     } catch {
       // HyDE is additive; primary results stand
+    }
+  }
+
+  // ── Graph lane ──
+  // The D1 projection (relaton structure + Glossarist defines edges)
+  // resolves what the query's WORDS map to in the corpus's own structure:
+  // a defined term → the documents that define it; a named publication →
+  // its family/successors. Same query vector, graph-filtered candidates —
+  // vocabulary mismatch stops mattering when the graph carries the link.
+  if (opts.graphDocNumbers?.length && vector) {
+    try {
+      const g = await env.VECTORIZE.query(vector, {
+        topK: 15,
+        returnMetadata: "all",
+        filter: { doc_number: { $in: opts.graphDocNumbers } },
+      });
+      const seenIds = new Set(matches.map((m: any) => m.id));
+      let merged = 0;
+      for (const m of (g.matches ?? []).slice(0, 10)) {
+        if (!seenIds.has(m.id)) {
+          matches.push({ id: m.id, score: m.score * 0.75, metadata: m.metadata });
+          seenIds.add(m.id);
+          merged++;
+        }
+      }
+      console.log("graph lane:", g.matches?.length ?? 0, "hits,", merged, "merged");
+    } catch {
+      // graph lane is additive; primary results stand
     }
   }
 
@@ -264,6 +292,17 @@ export async function retrieve(
       if (scores) {
         hits.forEach((h, i) => (h.rerank_score = scores[i]));
         hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
+        // the pre-rerank family boost does not survive re-sorting — short
+        // structural summaries always lose to content-heavy clauses under
+        // a cross-encoder. For doc-scoped queries pin family chunks AFTER
+        // rerank: 'what is R 60' must lead with the family summary, not
+        // an annex definition that happens to match the words.
+        if (filter?.doc_number) {
+          const families = hits.filter((h) => h.metadata.clause_anchor === "family");
+          if (families.length) {
+            hits = [...families, ...hits.filter((h) => h.metadata.clause_anchor !== "family")];
+          }
+        }
       }
     } catch {
       // vector order is the fallback, by design
