@@ -271,7 +271,7 @@ def probe() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingest")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None)]:
+    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None), ("fts", None)]:
         sp = sub.add_parser(name)
         sp.add_argument("--limit", type=int, default=None)
         sp.add_argument("--corpus", default=None)
@@ -295,6 +295,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "tables":
         from .tables import run_tables
         run_tables(corpus=args.corpus, limit=args.limit)
+    elif args.cmd == "fts":
+        from .fts import apply as fts_apply
+        fts_apply(limit=args.limit)
     return 0
 
 

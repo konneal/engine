@@ -15,7 +15,8 @@ function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (m, k: string) => (k in vars ? vars[k] : ""));
 }
 import { QueryFilters, toVectorizeFilter } from "./selfquery";
-import { keywordRank, rrfFuse } from "./hybrid";
+import { rrfFuse } from "./hybrid";
+import { lexicalPrefilter } from "./lexical";
 import { toHits } from "./lib/hit";
 import { QueryUnderstanding } from "./understand";
 
@@ -84,14 +85,17 @@ export async function retrieve(
   const folded = retrievalQuery(query, opts.prev);
   let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || folded;
   if (u?.process_intent) rq += PROCESS_EXPANSION;
-  // the folded query can be embedded WHILE understanding runs — if the
-  // final retrieval query turns out to be exactly that, the warm embedding
-  // (started ~2s earlier) is reused and the serial understand→embed
-  // pipeline collapses to max(understand, embed)
-  const vector =
+  // Dense embed + full-corpus BM25 prefilter in parallel (G-ETSI-1 /
+  // arXiv:2604.09868 §II-B5). Lexical must scan the whole corpus — the
+  // old keywordRank only re-ordered dense hits and could not recover
+  // exact-jargon misses. Fail-open: empty lexical list leaves dense alone.
+  const vectorP =
     rq === folded && opts.warmEmbed
-      ? ((await opts.warmEmbed) ?? (await embed(env.AI, MODELS.embed, rq)))
-      : await embed(env.AI, MODELS.embed, rq);
+      ? opts.warmEmbed.then((w) => w ?? embed(env.AI, MODELS.embed, rq))
+      : embed(env.AI, MODELS.embed, rq);
+  const lexicalP = lexicalPrefilter(env, rq).catch(() => [] as Hit[]);
+  const [vector, lexicalHits] = await Promise.all([vectorP, lexicalP]);
+  if (lexicalHits.length) console.log("lexical prefilter:", lexicalHits.length, "hits");
   const q: any = { topK: LIMITS.retrieveK, returnMetadata: "all" };
   if (filter) q.filter = filter;
 
@@ -251,6 +255,21 @@ export async function retrieve(
     text: (m.metadata?.chunk_text as string) ?? "",
   }));
 
+  // Union full-corpus lexical hits that dense missed (G-ETSI-1). Prefer
+  // dense metadata/text when both sources return the same id.
+  if (lexicalHits.length) {
+    const seen = new Set(hits.map((h) => h.id));
+    let added = 0;
+    for (const h of lexicalHits) {
+      if (!seen.has(h.id)) {
+        hits.push(h);
+        seen.add(h.id);
+        added++;
+      }
+    }
+    if (added) console.log("lexical union:", added, "new candidates");
+  }
+
   // ── Federated ISO/IEC tier ──
   // Members get passages from the internal index (service binding) merged
   // into the same candidate pool; the shared reranker + fusion below sort
@@ -308,14 +327,11 @@ export async function retrieve(
       // vector order is the fallback, by design
     }
 
-    // 2. keyword (lexical) ranking — catches exact terms dense embeddings
-    //    miss (part numbers, "n_LC", defined terms)
-    const keywordRanked = keywordRank(rq, hits);
-
-    // 3. RRF fusion of dense+rerank ranking with keyword ranking
-    //    (only when keyword actually found something)
-    if (keywordRanked.length > 0) {
-      hits = rrfFuse(hits, keywordRanked, LIMITS.retrieveK);
+    // 2. RRF with the FULL-CORPUS lexical ranking (not a re-score of the
+    //    dense shortlist). ETSI §II-B7: dense+sparse fusion lifts precision
+    //    and MRR on standards jargon without changing recall.
+    if (lexicalHits.length > 0) {
+      hits = rrfFuse(hits, lexicalHits, LIMITS.retrieveK);
     }
   }
 
