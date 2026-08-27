@@ -345,6 +345,24 @@ async function handleAsk(
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);
 
+  // semantic cache: near-duplicate of a recently answered question —
+  // serves the stored answer with a `similar: true` marker (checked only
+  // for standalone knowledge questions; contextual turns always run live)
+  if (understanding?.intent !== "conversational" && !contextual) {
+    const warmVec = (await warmEmbed) ?? null;
+    if (warmVec) {
+      const sc = await semanticCacheGet(env, warmVec);
+      if (sc) {
+        console.log("semantic cache hit");
+        telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang);
+        if (wantsStream) {
+          return sseResponse([{ type: "citations", citations: sc.citations ?? [] }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true }], corsHeaders(req));
+        }
+        return json({ ...sc, similar: true, ...(exempt ? {} : { quota }) });
+      }
+    }
+  }
+
   // Conversational route, decided by query UNDERSTANDING (any language, any
   // phrasing) — not string matching. No retrieval: nothing in the corpus
   // answers "who are you". The model speaks for itself from the service
@@ -463,6 +481,8 @@ async function handleAsk(
           telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
           const canonical = canonicalRefusal(full);
           if (canonical.length > 0 && !contextual && !canonical.includes(REFUSAL_ANSWER)) {
+            const wv = (await warmEmbed) ?? null;
+            if (wv) semanticCachePut(env, ctx, wv, { answer: canonical, citations: cites, model, query_hash: queryHash });
             ctx.waitUntil(
               env.CACHE.put(await cacheKey(env, ns, q.query, q.lang), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
@@ -513,6 +533,10 @@ async function handleAsk(
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
   const out = { answer, citations: cites, model: MODELS.anon, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] };
+  if (!contextual && !answer.includes(REFUSAL_ANSWER)) {
+    const warmVec = (await warmEmbed) ?? null;
+    if (warmVec) semanticCachePut(env, ctx, warmVec, out);
+  }
   if (!contextual && !answer.includes(REFUSAL_ANSWER)) {
     const ck = await cacheKey(env, ns, q.query, q.lang);
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
@@ -780,6 +804,47 @@ async function editionNote(env: Env, u: { doc_number?: string | null } | null): 
   }
 }
 
+
+// ── Semantic answer cache (G6) ──
+// Near-duplicate queries re-pay the whole pipeline. Bucket KV by a
+// leading-dimension signature of the query embedding; confirm with full
+// cosine >= 0.97 before serving. Same INDEX_VERSION namespace as the
+// answer cache (index changes invalidate both). Single entry per bucket
+// (v1): collisions overwrite, never mix.
+function cosine(a: number[], b: number[]): number {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+}
+
+function scSignature(v: number[]): string {
+  return v.slice(0, 16).map((x) => x.toFixed(2)).join(",");
+}
+
+async function semanticCacheGet(env: Env, vec: number[]): Promise<{ answer: string; citations: unknown[]; model: string; query_hash: string } | null> {
+  try {
+    const raw = await env.CACHE.get(`sc:${env.INDEX_VERSION}:${scSignature(vec)}`, "json") as any;
+    if (!raw?.v || !Array.isArray(raw.v) || raw.v.length !== vec.length) return null;
+    if (cosine(raw.v, vec) < 0.97) return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function semanticCachePut(env: Env, ctx: ExecutionContext, vec: number[], payload: { answer: string; citations: unknown[]; model: string; query_hash: string }): void {
+  const v = vec.map((x) => Number(x.toFixed(3)));
+  ctx.waitUntil(
+    env.CACHE.put(`sc:${env.INDEX_VERSION}:${scSignature(vec)}`, JSON.stringify({ v, ...payload }), { expirationTtl: LIMITS.cacheTtlSec }),
+  );
+}
+
 async function handleCreateKey(env: Env, req: Request): Promise<Response> {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
@@ -848,18 +913,6 @@ export default {
       }
       if (parts.length > 3) return err(404, "not_found", "Unknown route");
       return handleConversations(env, session.sub, req, { method: req.method, id: parts[2] });
-    }
-
-    if (req.method === "GET" && (path === "/api/documents" || path === "/api/documents/")) {
-      const fam = url.searchParams.get("family")?.trim();
-      const rows = await env.DB.prepare(
-        fam
-          ? "SELECT canonical_id, docidentifier, family, part, edition, derived_status, active, superseded_by, title FROM documents WHERE family = ?1 ORDER BY part, edition"
-          : "SELECT canonical_id, docidentifier, family, part, edition, derived_status, active, superseded_by, title FROM documents WHERE active = 1 ORDER BY family, part",
-      )
-        .bind(...(fam ? [fam] : []))
-        .all();
-      return json({ documents: rows.results ?? [] });
     }
 
     if (req.method === "GET" && (path === "/api/datasets" || path === "/api/datasets/")) {

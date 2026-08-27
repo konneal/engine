@@ -9,5 +9,10 @@ workers_dev = true
 [vars]
 RAG_BASE = "https://ai.oimlsmart.org"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "rag-public"
+database_id = "655cd63f-1826-4161-bfd1-90c584add4ce"
+
 [observability]
 enabled = true

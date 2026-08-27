@@ -10,6 +10,9 @@
 export interface Env {
   RAG_BASE: string;
   RAG_API_KEY?: string;
+  /** read-only access to the derived documents registry (public OIML
+   *  metadata: editions, active flags, supersession) */
+  DB: D1Database;
 }
 
 const PROTOCOL_VERSION = "2025-06-18";
@@ -36,6 +39,18 @@ const TOOLS = [
         top_k: { type: "integer", description: "Number of passages (default 5, max 10)", default: 5 },
       },
       required: ["query"],
+    },
+  },
+  {
+    name: "oiml_documents",
+    description:
+      "Look up the publication registry for an OIML family: every edition with its derived status (in-force/superseded), which edition is ACTIVE (terminal of the successor chain), and supersession links. Use for 'current/latest edition' and edition-history questions.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        family: { type: "string", description: "Family key, e.g. 'R-60' (series letter-number)" },
+      },
+      required: ["family"],
     },
   },
   {
@@ -77,6 +92,19 @@ async function callTool(env: Env, name: string, args: any): Promise<{ content: A
     const data = await rag(env, "/api/search", { query, top_k: Math.min(10, Math.max(1, Number(args?.top_k) || 5)) });
     const text = (data.results ?? []).map(searchResultText).join("\n\n") || "No passages matched.";
     return { content: [{ type: "text", text }] };
+  }
+  if (name === "oiml_documents") {
+    const family = String(args?.family ?? "").trim().slice(0, 20);
+    if (!/^[A-Z]-\d{1,3}$/i.test(family)) throw new Error("family must look like 'R-60'");
+    const rows = await env.DB.prepare(
+      "SELECT d.docidentifier, d.derived_status, d.active, s.docidentifier AS succ FROM documents d LEFT JOIN documents s ON d.superseded_by = s.canonical_id WHERE d.family = ?1 ORDER BY d.part, d.edition",
+    )
+      .bind(family.toUpperCase())
+      .all();
+    const lines = (rows.results ?? []).map(
+      (r: any) => `${r.docidentifier} — ${r.derived_status}${r.active ? " [ACTIVE]" : ""}${r.succ ? ` → superseded by ${r.succ}` : ""}`,
+    );
+    return { content: [{ type: "text", text: lines.join("\n") || `No editions found for ${family}` }] };
   }
   if (name === "oiml_ask") {
     const query = String(args?.query ?? "").slice(0, 2000);
