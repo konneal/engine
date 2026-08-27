@@ -6,6 +6,53 @@
 we could not ship. This is not speculative — it is the wish list of a
 production RAG consumer of Metanorma output.
 
+## Evidence base (2025–26 primary literature)
+
+Each proposal below is now grounded in peer-reviewed/preprint research on
+RAG over standards and structured documents, not only in our production
+experience:
+
+- **[ETSI]** Al Masoud, Arazzi, Germani, Nocera. *Exploring Structural
+  Complexity in Normative RAG with Graph-based approaches: A case study on
+  the ETSI Standards.* arXiv:2604.09868 (2026). The only empirical RAG
+  study on industrial standards (ETSI EN 301 489-X; 800+ Q&A). Findings
+  used below: hierarchical section structure ↑precision/↑MRR;
+  structure-preserving chunking is the "overall best compromise";
+  tables are exempted from chunking (atomic); parthood (P) and citation
+  (C) edges are the core information model; neighbor-expansion re-ranking
+  *failed*; embedding *smoothing* is the lightweight recall lever. Their
+  §II explicitly points at machine-readable standards (IEC Smart
+  Standards) as the intended end state — this document is the Metanorma
+  version of that end state.
+- **[STC]** Guttal et al. *Structure-Aware Chunking for Tabular Data in
+  RAG.* arXiv:2605.00318 (2026). Row-level key-value units, structural
+  boundaries: hybrid MRR 0.36→0.59, BM25-only Recall@1 0.37→0.75,
+  chunk count −40–56%. Quantifies P1-tables.
+- **[RDR2]** Xu et al. *Equipping Retrieval-Augmented LLMs with Document
+  Structure Awareness.* arXiv:2510.04293 (2025). Document structure trees
+  as first-class retrieval input; flattened chunks are the named failure
+  mode. Grounds P0-manifest.
+- **[SF-RAG]** Yu et al. *SF-RAG: Structure-Fidelity RAG for Academic
+  QA.* arXiv:2602.13647 (2026). Native hierarchy as a low-entropy
+  retrieval prior; flattening "destroys the native hierarchical
+  structure". Grounds P0-manifest + P2 stable ids.
+- **[SPIRE]** *Structure-Preserving Interpretable Retrieval of Evidence.*
+  arXiv:2604.20849 (2026). Linearization "obscures section structure,
+  lists, and tables"; wants citation-ready subdocuments. Grounds P0/P1.
+- **[MAHA]** Rashmi & Upadhya. *Modality-Aware Hybrid retrieval
+  Architecture.* arXiv:2510.14592 (2025). Tables→HTML-structured,
+  equations→LaTeX + text description, modality-aware knowledge graph.
+  Grounds P1-tables/equations.
+- **[ANTHROPIC]** Anthropic. *Contextual Retrieval* (2024): contextual
+  preambles cut top-20 retrieval failures 35%→67% (with BM25+rerank).
+  Grounds the manifest's role: preamble generation needs typed units,
+  not scraped prose.
+- **[LATE]** Günther et al. *Late Chunking.* arXiv:2409.04701 (2024);
+  **[CMP]** Merola & Singh. *Reconstructing Context.*
+  arXiv:2504.19754 (2025): contextual retrieval preserves coherence
+  better; late chunking is cheaper. Both need long-context/typed units —
+  neither works on GUID-anchored scraped HTML.
+
 ## The core problem
 
 RAG consumers today scrape the **compiled HTML** — the least machine-shaped
@@ -13,7 +60,10 @@ artifact Metanorma emits. We parse heading text to recover clause numbers
 (because element ids are GUIDs in OCR-derived docs), regex out boilerplate,
 flatten tables into pipe-joined rows, skip equations entirely, and join
 document status from an external bibliography. Every one of those workarounds
-is a proposal in disguise.
+is a proposal in disguise. This is not just our experience: it is the exact
+failure mode the structure-first literature names — flattened chunks lose
+the hierarchy, tables, and cross-references that make a standard a standard
+([ETSI] §I; [RDR2]; [SF-RAG]; [SPIRE]).
 
 ## P0 — the unit manifest (sidecar alongside every render)
 
@@ -50,6 +100,15 @@ The HTML remains for humans; the manifest is the machine truth. Embedding
 one inside the HTML (`<script type="application/json" id="rag-manifest">`)
 also works and keeps a single artifact.
 
+**Evidence:** [ETSI] builds exactly this model (InfoUnits with title+body
+in a parthood/citation graph) by *recovering* it from PDFs — ToC parsing,
+section-code prefix geometry, reference-resolution heuristics — and shows
+structure preservation improves precision and MRR. The manifest emits what
+they recover, for free, from the model the renderer already holds.
+[RDR2]'s structure trees and [SF-RAG]'s structure-fidelity index consume
+the same shape. [SPIRE] shows the payoff is citation-ready evidence
+subdocuments — which is what our answers cite.
+
 ## P0 — self-contained identity and status block
 
 JSON front matter in every output:
@@ -85,6 +144,16 @@ or CSV serialization per table turns "what is the MPE for class III at
 500 g?" from a fuzzy vector match into an exact lookup the serving layer
 can execute and cite (`OIML R 76:2006, Table 3, row 4`).
 
+**Evidence:** [ETSI] §II-A exempts tabular sections from chunking
+entirely — atomic units, never split. [STC] quantifies the payoff of
+row-level key-value structure: MRR +66% hybrid, Recall@1 +106% BM25-only,
+chunk count −40–56%. [MAHA] parses tables into HTML structure and
+equations into LaTeX as first-class modalities. Our own G1 prototype
+(extracting 10,388 tables from adoc `|===` sources) reproduces the shape
+by hand — e.g. R 76-1 §3.5's MPE table with rowspan-merged class columns
+and clean `ClassⅢ = 0≤m≤500` rows — precisely what the manifest should
+emit natively.
+
 ## P1 — the glossary layer as first-class output
 
 Term entries (`term:: [preferred,definition]`) should also emit a
@@ -102,12 +171,24 @@ generated plain-language fallback ("maximum permissible error equals half
 the verification interval value") in the unit manifest. The fallback is
 what gets indexed; the MathML is what gets rendered.
 
+**Evidence:** [MAHA] treats equations as a distinct modality (LaTeX +
+textual description) and shows retrieval gains from modality-aware
+indexing; our METANORMA-AI-SERIALIZATION conformance rule already requires
+≥2 of {asciimath, latex, described} for exactly this reason.
+
 ## P2 — stable unit ids across revisions
 
 Content-hash-derived ids (or editor-stable anchors) so an editorial
 change re-indexes only changed units. Today any text change re-embeds the
 whole document; across a 900-document corpus with weekly revisions this
 is the difference between incremental and full re-index cost.
+
+**Evidence:** [SF-RAG] shows hierarchy-stable indexing is what makes
+structure-fidelity cheap to maintain; [ETSI]'s InfoUnit ids are only as
+stable as their recovered section codes — model-native anchors (what
+Metanorma has) are strictly better. Stability is also prerequisite for
+[ANTHROPIC] contextual preambles to be cacheable across revisions (our
+enrichment cache is keyed by content-hashed unit ids).
 
 ## P2 — interlinear translation alignment
 
@@ -139,6 +220,9 @@ Consumers stop shipping regexes that guess at these boundaries.
 - Metanorma should not own chunking **policy**. Emit semantic units;
   consumers compose units into chunks for their model. What Metanorma
   owns is **addressability** (stable ids, types, clean text, spans).
+  ([ETSI]'s own taxonomy supports this split: their "Structured +
+  Chunks" winner is a *consumer-side* composition over
+  producer-emitted structure — the producer's job is the structure.)
 
 ## Sequencing
 

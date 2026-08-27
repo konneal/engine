@@ -9,6 +9,17 @@ and AI training corpora. Draft v1.0.0-proposal, 2026-08-26.*
 
 ## 1. Positioning
 
+*Evidence alignment (2025–26): the projection's shape is exactly what the
+normative-RAG literature converges on — [ETSI arXiv:2604.09868] recovers
+InfoUnits + parthood/citation edges from PDFs by heuristic and shows
+structure preservation is the retrieval win; [STC arXiv:2605.00318]
+quantifies typed table rows (MRR 0.36→0.59); [RDR2 arXiv:2510.04293],
+[SF-RAG arXiv:2602.13647], [SPIRE arXiv:2604.20849] all consume
+structure trees/natively-hierarchical indexes; [MAHA arXiv:2510.14592]
+indexes tables as structured objects and equations as LaTeX+description.
+Metanorma can emit natively what all of them recover heuristically.*
+
+
 Metanorma already has the right substrate: `metanorma-document`
 deserializes semantic XML into typed lutaml-model classes and serializes
 them to XML/YAML/JSON natively. This proposal does NOT invent a new
