@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from .config import ARTIFACTS
@@ -88,7 +89,7 @@ def build_rows(limit: int | None = None) -> tuple[list[str], int, int]:
     return inserts, n, n_ctx
 
 
-def _run_sql(path: Path) -> None:
+def _run_sql(path: Path, attempts: int = 3) -> None:
     wrangler_dir = Path(__file__).resolve().parents[1] / "workers" / "worker_public"
     env = os.environ.copy()
     env["CLOUDFLARE_ACCOUNT_ID"] = env.get("CLOUDFLARE_ACCOUNT_ID") or "06cad8ae9a017c856ab496c6bca9a9d8"
@@ -97,29 +98,55 @@ def _run_sql(path: Path) -> None:
         "--remote", "--file", str(path),
         "-c", "wrangler.toml",
     ]
-    r = subprocess.run(cmd, cwd=wrangler_dir, capture_output=True, text=True, env=env)
-    if r.returncode != 0:
-        raise RuntimeError(f"d1 execute failed:\n{r.stderr[-2500:] or r.stdout[-2500:]}")
+    last = ""
+    for attempt in range(attempts):
+        r = subprocess.run(cmd, cwd=wrangler_dir, capture_output=True, text=True, env=env)
+        if r.returncode == 0:
+            return
+        last = r.stderr[-2500:] or r.stdout[-2500:]
+        time.sleep(5 * (attempt + 1))
+    raise RuntimeError(f"d1 execute failed ({attempts} attempts):\n{last}")
 
 
-def apply(limit: int | None = None) -> None:
+def apply(limit: int | None = None, resume: bool = False) -> None:
     inserts, n, n_ctx = build_rows(limit)
-    print(f"fts: prepared {n} rows ({n_ctx} with context preamble)")
+    print(f"fts: prepared {n} rows ({n_ctx} with context preamble)", flush=True)
 
-    with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as tf:
-        tf.write("DELETE FROM chunks;\n")
-        clear_path = Path(tf.name)
-    print("fts: clearing…")
-    _run_sql(clear_path)
-    clear_path.unlink(missing_ok=True)
+    skip = 0
+    if resume:
+        # rows are file-ordered; skip the leading batches already loaded
+        current = _count_rows()
+        skip = (current // BATCH) * BATCH
+        print(f"fts: resume — skipping first {skip} rows ({current} present)", flush=True)
+    else:
+        with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as tf:
+            tf.write("DELETE FROM chunks;\n")
+            clear_path = Path(tf.name)
+        print("fts: clearing…", flush=True)
+        _run_sql(clear_path)
+        clear_path.unlink(missing_ok=True)
 
+    inserts = inserts[skip:]
     total = len(inserts)
     for i in range(0, total, BATCH):
         batch = inserts[i : i + BATCH]
         with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as tf:
             tf.write("\n".join(batch) + "\n")
             bpath = Path(tf.name)
-        print(f"fts: {min(i + BATCH, total)}/{total}")
+        print(f"fts: {skip + min(i + BATCH, skip + total)}/{skip + total}", flush=True)
         _run_sql(bpath)
         bpath.unlink(missing_ok=True)
-    print(f"fts: done ({total} rows)")
+    print(f"fts: done ({total} new rows; total should be {skip + total})", flush=True)
+
+
+def _count_rows() -> int:
+    wrangler_dir = Path(__file__).resolve().parents[1] / "workers" / "worker_public"
+    env = os.environ.copy()
+    env["CLOUDFLARE_ACCOUNT_ID"] = env.get("CLOUDFLARE_ACCOUNT_ID") or "06cad8ae9a017c856ab496c6bca9a9d8"
+    r = subprocess.run(
+        ["npx", "wrangler", "d1", "execute", "rag-public", "--remote",
+         "--command", "SELECT COUNT(*) n FROM chunks", "-c", "wrangler.toml", "--json"],
+        cwd=wrangler_dir, capture_output=True, text=True, env=env,
+    )
+    m = re.search(r'"n":\s*(\d+)', r.stdout)
+    return int(m.group(1)) if m else 0

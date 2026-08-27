@@ -279,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--concurrency", type=int, default=3)
         sp.add_argument("--rpm", type=int, default=45)
         sp.add_argument("--force", action="store_true")
+        sp.add_argument("--resume", action="store_true")
     args = parser.parse_args(argv)
     if args.cmd == "parse":
         build(args.corpus, args.limit)
@@ -297,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
         run_tables(corpus=args.corpus, limit=args.limit)
     elif args.cmd == "fts":
         from .fts import apply as fts_apply
-        fts_apply(limit=args.limit)
+        fts_apply(limit=args.limit, resume=args.resume)
     return 0
 
 
