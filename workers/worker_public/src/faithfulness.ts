@@ -37,17 +37,22 @@ export async function scoreFaithfulness(
       reasoning_effort: "low",
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
-    const m = (text ?? "").match(/\{[\s\S]*\}/);
-    if (!m) return null;
-    try {
-      const raw = JSON.parse(m[0]);
-      return {
-        score: typeof raw.score === "number" ? Math.max(0, Math.min(1, raw.score)) : 0.5,
-        ungrounded_claims: Array.isArray(raw.ungrounded_claims) ? raw.ungrounded_claims.map(String).slice(0, 5) : [],
-      };
-    } catch {
-      return null;
+    // reasoning models can emit several {...} fragments before the final
+    // verdict — take the LAST flat object that parses with a numeric score
+    let parsed: { score?: unknown; ungrounded_claims?: unknown } | null = null;
+    for (const m of (text ?? "").matchAll(/\{[^{}]*\}/g)) {
+      try {
+        const obj = JSON.parse(m[0]);
+        if (typeof obj.score === "number") parsed = obj;
+      } catch {
+        // not JSON — keep scanning
+      }
     }
+    if (!parsed) return null;
+    return {
+      score: Math.max(0, Math.min(1, parsed.score as number)),
+      ungrounded_claims: Array.isArray(parsed.ungrounded_claims) ? parsed.ungrounded_claims.map(String).slice(0, 5) : [],
+    };
   })();
 
   try {

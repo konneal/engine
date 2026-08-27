@@ -778,10 +778,18 @@ async function scoreJudge(
         reasoning_effort: "low",
       });
       const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
-      const m = (text ?? "").match(/\{[\s\S]*?\}/);
-      if (!m) return null;
-      const score = JSON.parse(m[0]).score;
-      return typeof score === "number" ? Math.max(0, Math.min(1, score)) : null;
+      // reasoning models can emit {...} fragments before the verdict — the
+      // LAST flat object with a numeric score wins
+      let score: number | null = null;
+      for (const m of (text ?? "").matchAll(/\{[^{}]*\}/g)) {
+        try {
+          const obj = JSON.parse(m[0]);
+          if (typeof obj.score === "number") score = obj.score;
+        } catch {
+          // keep scanning
+        }
+      }
+      return score === null ? null : Math.max(0, Math.min(1, score));
     })();
     return await Promise.race([call, timeout]);
   } catch {
