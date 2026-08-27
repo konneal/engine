@@ -13,6 +13,7 @@ import { embed } from "./ai";
 import { scoreFaithfulness } from "./faithfulness";
 import enrichmentPrompt from "../prompts/enrichment.md";
 import { reflect } from "./reflect";
+import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
 
 export interface Env {
   AI: any;
@@ -504,7 +505,13 @@ async function handleAsk(
           send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] });
           telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
           const canonical = canonicalRefusal(full);
-          if (canonical.length > 0 && !contextual && !canonical.includes(REFUSAL_ANSWER)) {
+          // streamed answers can't be regenerated mid-flight; enforcement
+          // is that an unverified answer is never served from cache again
+          const streamed = checkQuoteAnchors(canonical, usedHits.map((h: Hit) => h.text));
+          if (streamed.violations.length > 0) {
+            console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified — not caching");
+          }
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !canonical.includes(REFUSAL_ANSWER)) {
             const wv = (await warmEmbed) ?? null;
             if (wv) semanticCachePut(env, ctx, wv, { answer: canonical, citations: cites, model, query_hash: queryHash });
             ctx.waitUntil(
@@ -529,12 +536,31 @@ async function handleAsk(
   if (answer === null && model !== MODELS.anon) {
     answer = await generateOnce(env, MODELS.anon, messages);
   }
+  if (answer) answer = canonicalRefusal(answer);
+
+  // ── Deterministic quote-anchor check ──
+  // One corrective regeneration when an anchor quotes text absent from
+  // the passages; the retry wins only if it verifies better.
+  let used = usedHits;
+  if (answer && !answer.includes(REFUSAL_ANSWER)) {
+    const anchors = checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
+    if (anchors.violations.length > 0) {
+      console.log("anchors:", anchors.violations.length, "of", anchors.total, "unverified — regenerating");
+      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: ANCHOR_CORRECTION_NOTE }]);
+      if (corrected) {
+        const correctedAnswer = canonicalRefusal(corrected);
+        const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
+        if (retryAnchors.violations.length < anchors.violations.length) {
+          answer = correctedAnswer;
+        }
+      }
+    }
+  }
 
   // ── Self-RAG reflection loop ──
   // The model critiques its own answer; if claims are ungrounded, retry
   // retrieval with the missing-info hint (max one retry).
   // Ref: selfrag.github.io; arXiv 2606.05658 bounded reflection
-  if (answer) answer = canonicalRefusal(answer);
   if (answer && !answer.includes(REFUSAL_ANSWER)) {
     const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h: Hit) => h.text));
     console.log("reflection:", reflection ? (reflection.grounded ? "grounded" : "ungrounded") : "null");
@@ -545,9 +571,13 @@ async function handleAsk(
         understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` } as any,
       });
       if (retryRetrieve.hits.length > 0) {
-        const { messages: retryMessages } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
+        const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
         const retryAnswer = await generateOnce(env, model, retryMessages);
-        if (retryAnswer) answer = retryAnswer; // better-grounded answer wins
+        // the answer now comes from the retry passages — citations must follow
+        if (retryAnswer) {
+          answer = canonicalRefusal(retryAnswer);
+          used = retryUsed;
+        }
       }
     }
   }
@@ -556,12 +586,20 @@ async function handleAsk(
     telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
-  const out = { answer, citations: cites, model: MODELS.anon, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] };
-  if (!contextual && !answer.includes(REFUSAL_ANSWER)) {
+  const finalCites = citations(used);
+  const finalAnchors = answer.includes(REFUSAL_ANSWER)
+    ? { total: 0, violations: [] as string[] }
+    : checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
+  if (finalAnchors.violations.length > 0) {
+    console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified — not caching");
+  }
+  const out = { answer, citations: finalCites, model: MODELS.anon, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] };
+  const cacheable = !contextual && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
+  if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) semanticCachePut(env, ctx, warmVec, out);
   }
-  if (!contextual && !answer.includes(REFUSAL_ANSWER)) {
+  if (cacheable) {
     const ck = await cacheKey(env, ns, q.query, q.lang);
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }
