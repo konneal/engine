@@ -271,7 +271,7 @@ def probe() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingest")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build)]:
+    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None)]:
         sp = sub.add_parser(name)
         sp.add_argument("--limit", type=int, default=None)
         sp.add_argument("--corpus", default=None)
@@ -292,6 +292,9 @@ def main(argv: list[str] | None = None) -> int:
         run_enrich(args.limit, args.batch, args.concurrency, args.force, args.rpm)
     elif args.cmd == "graph":
         (graph_apply if args.corpus == "apply" else graph_build)()
+    elif args.cmd == "tables":
+        from .tables import run_tables
+        run_tables(corpus=args.corpus, limit=args.limit)
     return 0
 
 
