@@ -8,3 +8,5 @@ __pycache__/
 .env.*
 artifacts/
 .DS_Store
+
+.astro/
