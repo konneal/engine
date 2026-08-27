@@ -34,7 +34,7 @@ export async function scoreFaithfulness(
         },
         { role: "user", content: `Answer:\n${answer.slice(0, 2000)}\n\nPassages:\n${context}` },
       ],
-      max_tokens: 1200,
+      max_tokens: 3072,
       reasoning_effort: "low",
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;

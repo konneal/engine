@@ -774,7 +774,7 @@ async function scoreJudge(
           { role: "system", content: systemPrompt.trimEnd() },
           { role: "user", content: userPrompt },
         ],
-        max_tokens: 1200,
+        max_tokens: 3072,
         reasoning_effort: "low",
       });
       const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
