@@ -340,7 +340,31 @@ async function handleAsk(
   // retrieval reuses it when the understanding leaves the query as-is
   const warmQuery = retrievalQuery(q.query, prev);
   const warmEmbed = embedWarm(env, warmQuery);
-  const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history);
+  // cross-turn entity memory: resolved entities for this conversation
+  // (present when the client passes conversation_id) make pronoun
+  // follow-ups O(1) — "it / the 2017 one" resolve against the map
+  const conversationId = typeof body?.conversation_id === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(body.conversation_id) ? body.conversation_id : null;
+  let convEntities: Array<{ entity: string; kind: string }> = [];
+  if (conversationId) {
+    try {
+      const rows = await env.DB.prepare("SELECT entity, kind FROM conversation_entities WHERE conversation_id = ?1 LIMIT 12").bind(conversationId).all();
+      convEntities = (rows.results ?? []) as any;
+      if (convEntities.length) console.log("entity map:", convEntities.length, "entries");
+    } catch {
+      /* memory is additive */
+    }
+  }
+  const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history, convEntities);
+  if (conversationId && understanding) {
+    const now = Date.now();
+    const ents: Array<[string, string]> = [];
+    if (understanding.docidentifier) ents.push([understanding.docidentifier, "document"]);
+    for (const t of understanding.defined_terms) ents.push([t, "term"]);
+    if (ents.length) {
+      const upsert = (e: string, k: string) => env.DB.prepare("INSERT OR REPLACE INTO conversation_entities (conversation_id, entity, kind, ts) VALUES (?1, ?2, ?3, ?4)").bind(conversationId, e, k, now).run();
+      ctx.waitUntil(Promise.allSettled(ents.map(([e, k]) => upsert(e, k))));
+    }
+  }
   console.log("understand:", understanding?.intent ?? "null", understanding?.doc_number ? `doc#${understanding.doc_number}${understanding.edition ? "@" + understanding.edition : ""}` : "nodoc", "|", q.query.slice(0, 50));
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);

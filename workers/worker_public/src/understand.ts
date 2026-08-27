@@ -74,12 +74,16 @@ export async function understandQuery(
   model: string,
   query: string,
   history: Array<{ role: string; content: string }>,
+  entities: Array<{ entity: string; kind: string }> = [],
 ): Promise<QueryUnderstanding | null> {
   const convo = history
     .slice(-6)
     .map((h) => `${h.role === "user" ? "User" : "Assistant"}: ${h.content.slice(0, 600)}`)
     .join("\n");
-  const user = `${convo ? "Conversation so far:\n" + convo + "\n\n" : ""}Question: ${query}`;
+  const entityLine = entities.length
+    ? `Entities already established in this conversation: ${entities.map((e) => e.entity).join("; ")}. Resolve pronouns and shorthand against these.\n\n`
+    : "";
+  const user = `${convo ? "Conversation so far:\n" + convo + "\n\n" : ""}${entityLine}Question: ${query}`;
   const body = {
     messages: [
       { role: "system", content: SYSTEM },
