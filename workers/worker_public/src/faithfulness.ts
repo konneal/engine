@@ -20,7 +20,7 @@ export async function scoreFaithfulness(
   if (!answer || !passages.length) return null;
   const context = passages
     .slice(0, 8)
-    .map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 400)}`)
+    .map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 900)}`)
     .join("\n");
 
   const timeout = new Promise<null>((r) => setTimeout(() => r(null), 15000));

@@ -64,9 +64,12 @@ for (const c of run) {
   try {
     const a = await ask(c.query);
     const answer = a.answer ?? "";
-    // full passages via search (citation snippets are ~200 chars and
-    // under-measure context precision)
-    const passages = await searchPassages(c.query);
+    // judge against the passages the answer was ACTUALLY built from (the
+    // non-stream response carries them); fall back to a fresh search for
+    // older deployments
+    const passages = (a.context ?? []).length
+      ? a.context.map((p) => `${p.doc_id}${p.clause_anchor ? " §" + p.clause_anchor : ""}: ${p.text}`)
+      : await searchPassages(c.query);
     row.refused = answer.includes(REFUSAL);
     row.answer_chars = answer.length;
     row.passage_count = passages.length;

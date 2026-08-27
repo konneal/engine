@@ -604,7 +604,15 @@ async function handleAsk(
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }
   telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
-  return json({ ...out, ...(exempt ? {} : { quota }), ...corsHeaders(req) });
+  // grounding transparency for integrators (and the eval battery): the
+  // passages the answer was actually built from — response-only, never
+  // stored in the answer cache
+  const contextOut = used.map((h: Hit) => ({
+    doc_id: h.metadata.doc_id,
+    clause_anchor: h.metadata.clause_anchor,
+    text: h.text.slice(0, 1200),
+  }));
+  return json({ ...out, context: contextOut, ...(exempt ? {} : { quota }), ...corsHeaders(req) });
 }
 
 function sseResponse(events: unknown[], cors: Record<string, string>): Response {
@@ -758,14 +766,14 @@ async function scoreJudge(
   userPrompt: string,
 ): Promise<number | null> {
   try {
-    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 8000));
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 15000));
     const call = (async () => {
       const res: any = await ai.run(model, {
         messages: [
           { role: "system", content: systemPrompt.trimEnd() },
           { role: "user", content: userPrompt },
         ],
-        max_tokens: 900,
+        max_tokens: 1200,
         reasoning_effort: "low",
       });
       const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;

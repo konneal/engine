@@ -81,7 +81,10 @@ questions (present when understanding produced them).
 - Conversational turns (greetings, identity, capability) are answered directly without citations; off-topic SUBJECT questions are still treated as knowledge questions
 
 **Non-stream response** (`stream:false`): the same fields as one JSON
-object: `{ answer, citations, model, query_hash, follow_ups, similar?, quota?, cached? }`.
+object: `{ answer, citations, model, query_hash, follow_ups, similar?, quota?, cached? }`
+plus `context`: the passages the answer was actually built from
+(`[{doc_id, clause_anchor, text}]`, response-only, never cached) — grounding
+transparency for integrators and the eval battery.
 
 ### 2.2 Behavior guarantees
 - Refusals are never cached or served from the semantic cache
