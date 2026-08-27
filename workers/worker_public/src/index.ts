@@ -372,8 +372,9 @@ async function handleAsk(
 
   // semantic cache: near-duplicate of a recently answered question —
   // serves the stored answer with a `similar: true` marker (checked only
-  // for standalone knowledge questions; contextual turns always run live)
-  if (understanding?.intent !== "conversational" && !contextual) {
+  // for standalone knowledge questions; contextual turns always run live;
+  // fresh=true regenerates, bypassing this cache too)
+  if (understanding?.intent !== "conversational" && !contextual && body?.fresh !== true) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
       const sc = await semanticCacheGet(env, warmVec);
