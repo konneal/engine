@@ -185,6 +185,8 @@ class MkoBundle:
         self.units = [MkoUnit(**json.loads(line)) for line in self._lines("units.jsonl")]
         self.edges = [MkoEdge(**json.loads(line)) for line in self._lines("edges.jsonl")]
         self.glossary = MkoGlossary(**json.loads(self._text("glossary.json")))
+        self.bibliography = [json.loads(line) for line in self._lines("bibliography.jsonl")] \
+            if "bibliography.jsonl" in self._files else []
         self.units_by_id = {u.id: u for u in self.units}
 
     def _text(self, name: str) -> str:
@@ -354,6 +356,33 @@ def to_glossary(bundle: MkoBundle, doc: DocRecord) -> list[dict]:
     ]
 
 
+def _biblio_node(bundle: "MkoBundle", citeas: str) -> str | None:
+    """Preferred doc node id for a cited document: the native pubid
+    rendering when the bibliography parsed one, else the raw citeas."""
+    for entry in bundle.bibliography:
+        if entry.get("citeas") == citeas and entry.get("pubid_render"):
+            return _cite_node(entry["pubid_render"])
+    return None
+
+
+def to_bibliography(bundle: MkoBundle, doc: DocRecord) -> list[dict]:
+    """Cited-document records: native Relaton item + native pubid parse,
+    keyed to the reference unit — the resolvable objects behind cites
+    edges."""
+    return [
+        {
+            "doc_id": doc.doc_id,
+            "docidentifier": doc.docidentifier,
+            "unit": entry.get("unit"),
+            "citeas": entry.get("citeas"),
+            "pubid": entry.get("pubid"),
+            "pubid_render": entry.get("pubid_render"),
+            "bibitem": entry.get("bibitem"),
+        }
+        for entry in bundle.bibliography
+    ]
+
+
 def _cite_node(cited: str) -> str | None:
     """Node id for a cited document: OIML ids use the graph.py convention,
     anything else gets the same shape generically (doc:<SLUG>)."""
@@ -411,10 +440,21 @@ def to_graph_sql(bundle: MkoBundle, doc: DocRecord) -> str:
                 edges.add((sec_node(src), f"concept:{concept}", "defines"))
         elif edge.kind == "cites":
             src = bundle.units_by_id.get(edge.from_)
-            target = _cite_node(CITES_TARGET_RE.sub("", edge.to))
+            raw = CITES_TARGET_RE.sub("", edge.to)
+            target = _biblio_node(bundle, raw) or _cite_node(raw)
             if src and target and target != doc_node:
                 nodes.setdefault(target, "doc")
                 edges.add((sec_node(src), target, "cites"))
+
+    # Cross-document relations from the bibliographic record, with the
+    # Relaton relation type verbatim (obsoletes, hasSuccessor, hasPart,
+    # updates, ...) — the G-ETSI-C edges between documents.
+    if doc_node:
+        for rel in bundle.document.relations:
+            target = _cite_node(rel.to) if rel.to else None
+            if target and target != doc_node and rel.type:
+                nodes.setdefault(target, "doc")
+                edges.add((doc_node, target, rel.type))
 
     out = []
     for nid, kind in nodes.items():

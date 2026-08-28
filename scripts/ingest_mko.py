@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ingest.mko import (  # noqa: E402
     MkoBundle,
+    to_bibliography,
     to_chunks,
     to_doc_record,
     to_glossary,
@@ -39,6 +40,7 @@ def main(argv: list[str]) -> int:
     ARTIFACTS.mkdir(exist_ok=True)
     all_chunks: list[dict] = []
     all_glossary: list[dict] = []
+    all_bibliography: list[dict] = []
     graph_fragments: list[str] = []
 
     for raw in argv:
@@ -47,9 +49,11 @@ def main(argv: list[str]) -> int:
         doc = to_doc_record(bundle)
         chunks = to_chunks(bundle, doc)
         glossary = to_glossary(bundle, doc)
+        bibliography = to_bibliography(bundle, doc)
         graph_sql = to_graph_sql(bundle, doc)
         all_chunks.extend(c.model_dump() for c in chunks)
         all_glossary.extend(glossary)
+        all_bibliography.extend(bibliography)
         graph_fragments.append(graph_sql)
         by_type: dict[str, int] = {}
         for u in bundle.units:
@@ -57,6 +61,7 @@ def main(argv: list[str]) -> int:
         types = ", ".join(f"{k}={v}" for k, v in sorted(by_type.items()))
         print(f"  {bundle.slug}: {len(bundle.units)} units ({types}) -> "
               f"{len(chunks)} chunks, {len(glossary)} terms, "
+              f"{len(bibliography)} cited docs, "
               f"{graph_sql.count(chr(10))} graph rows")
 
     chunks_out = ARTIFACTS / "mko_chunks.jsonl"
@@ -65,10 +70,13 @@ def main(argv: list[str]) -> int:
             f.write(json.dumps(c) + "\n")
     glossary_out = ARTIFACTS / "mko_glossary.json"
     glossary_out.write_text(json.dumps(all_glossary, ensure_ascii=False, indent=1), encoding="utf-8")
+    biblio_out = ARTIFACTS / "mko_bibliography.json"
+    biblio_out.write_text(json.dumps(all_bibliography, ensure_ascii=False, indent=1), encoding="utf-8")
     graph_out = ARTIFACTS / "mko_graph.sql"
     graph_out.write_text("".join(graph_fragments), encoding="utf-8")
     print(f"wrote {chunks_out} ({len(all_chunks)} chunks), "
-          f"{glossary_out} ({len(all_glossary)} terms), {graph_out}")
+          f"{glossary_out} ({len(all_glossary)} terms), "
+          f"{biblio_out} ({len(all_bibliography)} cited docs), {graph_out}")
     return 0
 
 
