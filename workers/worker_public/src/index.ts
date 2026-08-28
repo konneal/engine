@@ -797,6 +797,36 @@ async function scoreJudge(
   }
 }
 
+/** Ops access to the Vectorize binding (get/upsert by id) for offline
+ *  passes like embedding smoothing (G-ETSI-4) — the binding is the
+ *  credential, admin-token gated exactly like /admin/enrich. */
+async function handleVectors(env: Env, req: Request): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const mode = body?.mode;
+  try {
+    if (mode === "get") {
+      const ids = Array.isArray(body?.ids) ? body.ids.filter((x: unknown) => typeof x === "string").slice(0, 100) : [];
+      if (!ids.length) return err(400, "invalid_input", "ids: 1-100 required");
+      const vectors = await env.VECTORIZE.getByIds(ids);
+      return json({ vectors: (vectors ?? []).map((v: any) => ({ id: v.id, values: v.values, metadata: v.metadata ?? null })) });
+    }
+    if (mode === "upsert") {
+      const vectors = Array.isArray(body?.vectors)
+        ? body.vectors.filter((v: any) => v && typeof v.id === "string" && Array.isArray(v.values))
+        : [];
+      if (!vectors.length || vectors.length > 100) return err(400, "invalid_input", "vectors: 1-100 required");
+      await env.VECTORIZE.upsert(vectors);
+      return json({ ok: true, upserted: vectors.length });
+    }
+    return err(400, "invalid_input", "mode must be get or upsert");
+  } catch (e) {
+    return err(502, "vectorize_failed", String(e).slice(0, 200));
+  }
+}
+
 async function handleJudge(env: Env, req: Request): Promise<Response> {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
@@ -1088,6 +1118,7 @@ export default {
     }
 
     if (req.method === "POST" && (path === "/admin/enrich" || path === "/v1/admin/enrich")) return handleEnrich(env, ctx, req);
+    if (req.method === "POST" && (path === "/admin/vectors")) return handleVectors(env, req);
     if (req.method === "POST" && (path === "/admin/judge" || path === "/v1/admin/judge")) return handleJudge(env, req);
     if (req.method === "POST" && path === "/v1/admin/keys") return handleCreateKey(env, req);
     if (req.method === "GET" && path === "/v1/admin/keys") return handleListKeys(env, req);
