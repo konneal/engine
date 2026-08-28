@@ -5,6 +5,12 @@
 scraping for the clean corpus. Wire contract: MN 116 (metanorma/docs PR
 #9, sources/116).
 
+This pipeline is the first concrete realization of the ETSI-informed
+redesign gaps ([REDESIGN-NORMATIVE-RAG-ETSI.md](REDESIGN-NORMATIVE-RAG-ETSI.md)):
+native section `part_of` (G-ETSI-2), native `cites` edges (G-ETSI-3),
+atomic typed tables (G-ETSI-5) — from the producer, with no recovery
+heuristics.
+
 ## What MKO is
 
 One Metanorma document → one `<short>.mko/` bundle of typed,
@@ -60,12 +66,20 @@ the ingest side does not change.
 canonical: OIML R 60-1 (edition 2)
 ```
 
+*Counting notes (verified against the artifacts): the 539 graph rows are
+242 edges (147 `part_of`, 36 `cites`, 59 `defines`) + 297 node inserts;
+figures and references become bibliography/graph objects, not chunks, so
+135 chunks = clause 68 + term 59 + table 6 + example 2 (3 clause units
+merge/empty; the source XML carries 63 raw `<term>` tags, 4 of them
+nested/boilerplate).*
+
 - 59 Glossarist-native concepts (designations, definition, sources,
   `language_code: eng`) — the glossary-heavy load-cell vocabulary lands
   directly in the terminology lane, no scraping.
 - 6 tables as typed payloads (columns/rows), atomic — G-ETSI-5.
 - 539 graph rows: 147 `part_of` (section parthood — G-ETSI-2), 36
-  `cites` (12 references + term sources — G-ETSI-3), 59 `defines`.
+  `cites` (12 references + term sources — G-ETSI-3), 59 `defines`
+  (edges total 242; the remaining rows are node inserts).
 - 12 cited documents (OIML V 1:2013, R 111, …) as native Relaton items —
   the citation targets are addressable objects, not strings.
 
