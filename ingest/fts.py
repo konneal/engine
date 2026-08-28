@@ -1,9 +1,14 @@
 """Load the full-corpus lexical index (D1 chunks + FTS5) for BM25 prefilter.
 
 G-ETSI-1 (arXiv:2604.09868 §II-B5): sparse retrieval must scan the whole
-corpus, not merely re-rank dense hits. Body from artifacts/chunks.jsonl;
-contextual preambles from artifacts/enriched-contexts.jsonl when present
-(Anthropic contextual BM25).
+corpus, not merely re-rank dense hits. Sources:
+
+- artifacts/chunks.jsonl — dirty + synthetic lanes (clean-corpus rows are
+  skipped: replaced by the MKO producer-native chunks)
+- artifacts/mko_chunks.jsonl — MKO chunks (the live clean corpus), remapped
+  to the serving lanes (corpus "oiml", tier "curated", producer "mko")
+- contextual preambles from artifacts/enriched-contexts.jsonl when present
+  (Anthropic contextual BM25)
 """
 from __future__ import annotations
 
@@ -18,6 +23,7 @@ from pathlib import Path
 from .config import ARTIFACTS
 
 CHUNKS = ARTIFACTS / "chunks.jsonl"
+MKO_CHUNKS = ARTIFACTS / "mko_chunks.jsonl"
 CONTEXTS = ARTIFACTS / "enriched-contexts.jsonl"
 BATCH = 50
 
@@ -42,50 +48,72 @@ def _load_contexts() -> dict[str, str]:
     return out
 
 
+def _insert_sql(rec: dict, contexts: dict[str, str]) -> tuple[str, bool] | None:
+    md = dict(rec.get("metadata") or {})
+    if md.get("corpus") == "mko":
+        md["corpus"] = "oiml"
+        md["tier"] = "curated"
+        md["producer"] = "mko"
+    body = rec.get("text") or md.get("chunk_text") or ""
+    body = re.sub(r"\s+", " ", body).strip()
+    if not body:
+        return None
+    ctx = contexts.get(rec["id"])
+    fts = f"{ctx.strip()} {body}" if ctx else body
+    fts = fts[:4000]
+    display = body[:2800]
+    sql = (
+        "INSERT OR REPLACE INTO chunks "
+        "(id, doc_id, docidentifier, doctype, doc_number, edition, language, "
+        "clause_anchor, clause_title, status, superseded_by, corpus, tier, text, fts_text) VALUES ("
+        f"'{_esc(str(rec['id']))}',"
+        f"'{_esc(str(md.get('doc_id') or rec.get('doc_id') or ''))}',"
+        f"'{_esc(str(md.get('docidentifier') or ''))}',"
+        f"'{_esc(str(md.get('doctype') or ''))}',"
+        f"'{_esc(str(md.get('doc_number') or ''))}',"
+        f"'{_esc(str(md.get('edition') or ''))}',"
+        f"'{_esc(str(md.get('language') or 'en'))}',"
+        f"'{_esc(str(md.get('clause_anchor') or ''))}',"
+        f"'{_esc(str(md.get('clause_title') or ''))}',"
+        f"'{_esc(str(md.get('status') or 'unknown'))}',"
+        f"'{_esc(str(md.get('superseded_by') or ''))}',"
+        f"'{_esc(str(md.get('corpus') or ''))}',"
+        f"'{_esc(str(md.get('tier') or ''))}',"
+        f"'{_esc(display)}',"
+        f"'{_esc(fts)}'"
+        ");"
+    )
+    return sql, bool(ctx)
+
+
 def build_rows(limit: int | None = None) -> tuple[list[str], int, int]:
     contexts = _load_contexts()
     inserts: list[str] = []
     n_ctx = 0
     n = 0
+    # dirty + synthetic lanes (clean superseded by MKO)
     with CHUNKS.open(encoding="utf-8") as src:
         for line in src:
             if limit is not None and n >= limit:
                 break
             rec = json.loads(line)
-            md = rec.get("metadata") or {}
-            cid = rec["id"]
-            body = rec.get("text") or md.get("chunk_text") or ""
-            body = re.sub(r"\s+", " ", body).strip()
-            if not body:
+            if (rec.get("metadata") or {}).get("corpus") == "clean":
                 continue
-            ctx = contexts.get(cid)
-            if ctx:
-                n_ctx += 1
-            fts = f"{ctx.strip()} {body}" if ctx else body
-            fts = fts[:4000]
-            display = body[:2800]
-            inserts.append(
-                "INSERT OR REPLACE INTO chunks "
-                "(id, doc_id, docidentifier, doctype, doc_number, edition, language, "
-                "clause_anchor, clause_title, status, superseded_by, corpus, tier, text, fts_text) VALUES ("
-                f"'{_esc(cid)}',"
-                f"'{_esc(str(md.get('doc_id') or rec.get('doc_id') or ''))}',"
-                f"'{_esc(str(md.get('docidentifier') or ''))}',"
-                f"'{_esc(str(md.get('doctype') or ''))}',"
-                f"'{_esc(str(md.get('doc_number') or ''))}',"
-                f"'{_esc(str(md.get('edition') or ''))}',"
-                f"'{_esc(str(md.get('language') or 'en'))}',"
-                f"'{_esc(str(md.get('clause_anchor') or ''))}',"
-                f"'{_esc(str(md.get('clause_title') or ''))}',"
-                f"'{_esc(str(md.get('status') or 'unknown'))}',"
-                f"'{_esc(str(md.get('superseded_by') or ''))}',"
-                f"'{_esc(str(md.get('corpus') or ''))}',"
-                f"'{_esc(str(md.get('tier') or ''))}',"
-                f"'{_esc(display)}',"
-                f"'{_esc(fts)}'"
-                ");"
-            )
-            n += 1
+            row = _insert_sql(rec, contexts)
+            if row:
+                inserts.append(row[0])
+                n_ctx += row[1]
+                n += 1
+    # MKO producer-native clean corpus
+    if MKO_CHUNKS.is_file():
+        with MKO_CHUNKS.open(encoding="utf-8") as src:
+            for line in src:
+                rec = json.loads(line)
+                row = _insert_sql(rec, contexts)
+                if row:
+                    inserts.append(row[0])
+                    n_ctx += row[1]
+                    n += 1
     return inserts, n, n_ctx
 
 
@@ -112,31 +140,23 @@ def apply(limit: int | None = None, resume: bool = False) -> None:
     inserts, n, n_ctx = build_rows(limit)
     print(f"fts: prepared {n} rows ({n_ctx} with context preamble)", flush=True)
 
-    skip = 0
-    if resume:
-        # rows are file-ordered; skip the leading batches already loaded
-        current = _count_rows()
-        skip = (current // BATCH) * BATCH
-        print(f"fts: resume — skipping first {skip} rows ({current} present)", flush=True)
-    else:
-        with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as tf:
-            tf.write("DELETE FROM chunks;\n")
-            clear_path = Path(tf.name)
-        print("fts: clearing…", flush=True)
-        _run_sql(clear_path)
-        clear_path.unlink(missing_ok=True)
+    with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as tf:
+        tf.write("DELETE FROM chunks;\n")
+        clear_path = Path(tf.name)
+    print("fts: clearing…", flush=True)
+    _run_sql(clear_path)
+    clear_path.unlink(missing_ok=True)
 
-    inserts = inserts[skip:]
     total = len(inserts)
     for i in range(0, total, BATCH):
         batch = inserts[i : i + BATCH]
         with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as tf:
             tf.write("\n".join(batch) + "\n")
             bpath = Path(tf.name)
-        print(f"fts: {skip + min(i + BATCH, skip + total)}/{skip + total}", flush=True)
+        print(f"fts: {min(i + BATCH, total)}/{total}", flush=True)
         _run_sql(bpath)
         bpath.unlink(missing_ok=True)
-    print(f"fts: done ({total} new rows; total should be {skip + total})", flush=True)
+    print(f"fts: done ({total} rows)", flush=True)
 
 
 def _count_rows() -> int:
