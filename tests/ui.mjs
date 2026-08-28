@@ -205,6 +205,19 @@ if ((await chipSet.count()) >= 1) {
   check("follow-up chip asks the question", false, "no chips rendered");
 }
 
+// — dark mode regression (2026-08-28 incident: a mangled `.dark { display:
+//    none }` rule from a site-shell component blanked the whole page in
+//    dark) — assert the page still LAYS OUT with html.dark set —
+await page.evaluate(() => document.documentElement.classList.add("dark"));
+await page.waitForTimeout(300);
+const darkState = await page.evaluate(() => ({
+  htmlDisplay: getComputedStyle(document.documentElement).display,
+  bodyH: Math.round(document.body.getBoundingClientRect().height),
+}));
+check("dark mode renders (html not display:none)", darkState.htmlDisplay !== "none");
+check("dark mode has layout (body height > 100)", darkState.bodyH > 100, `bodyH=${darkState.bodyH}`);
+await page.evaluate(() => document.documentElement.classList.remove("dark"));
+
 check("no uncaught page errors", errors.length === 0, errors[0] ?? "");
 
 await browser.close();
