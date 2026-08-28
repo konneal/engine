@@ -117,7 +117,16 @@ def run(limit: int | None = None, batch: int = 5, concurrency: int = 3, force: b
             r = json.loads(line)
             if r["metadata"].get("corpus") in SKIP_CORPORA or r["id"] in done:
                 continue
-            todo.append({"id": r["id"], "text": r["text"], "metadata": r["metadata"]})
+            md = r["metadata"]
+            if md.get("corpus") == "mko":
+                # serving lanes + Vectorize scalar-only metadata (the typed
+                # table/term/formula payloads stay in chunk_text/artifacts)
+                md = dict(md)
+                md["corpus"] = "oiml"
+                md["tier"] = "curated"
+                md["producer"] = "mko"
+                md = {k: v for k, v in md.items() if isinstance(v, (str, int, float, bool))}
+            todo.append({"id": r["id"], "text": r["text"], "metadata": md})
             if limit and len(todo) >= limit:
                 break
     total = len(todo)

@@ -169,7 +169,28 @@ def main() -> int:
     for i in range(0, len(old), 100):
         cf.vectorize_delete(old[i : i + 100])
         print(f"  deleted {min(i + 100, len(old))}/{len(old)}", flush=True)
-    print("done: MKO clean corpus live; HTML-path clean chunks retired")
+
+    # retire stale MKO ids: previously upserted vectors whose ids are no
+    # longer in the artifact (producer id churn between exports)
+    current = {c["id"] for c in chunks}
+    embedded_ids = set()
+    with MKO_EMBED.open(encoding="utf-8") as f:
+        for line in f:
+            embedded_ids.add(json.loads(line)["id"])
+    stale = sorted(embedded_ids - current)
+    if stale:
+        print(f"deleting {len(stale)} stale MKO ids…")
+        for i in range(0, len(stale), 100):
+            cf.vectorize_delete(stale[i : i + 100])
+        # compact the embeddings file to current ids only
+        keep = []
+        with MKO_EMBED.open(encoding="utf-8") as f:
+            for line in f:
+                if json.loads(line)["id"] in current:
+                    keep.append(line)
+        MKO_EMBED.write_text("".join(keep), encoding="utf-8")
+        print(f"compacted mko_embeddings.jsonl to {len(keep)} ids")
+    print("done: MKO clean corpus live; HTML-path + stale chunks retired")
     return 0
 
 
