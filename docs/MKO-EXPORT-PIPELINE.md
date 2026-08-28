@@ -66,6 +66,21 @@ the ingest side does not change.
 canonical: OIML R 60-1 (edition 2)
 ```
 
+## Full-corpus validation (2026-08-28)
+
+All **37** compiled sample documents (R/D/B/G/E + OIML-CS admin + parts
++ amendments) export and ingest:
+
+```
+37/37 bundles → 3053 chunks, 113 native Glossarist concepts,
+342 cited documents (native Relaton + pubid), ~11k graph rows
+```
+
+Includes the amendment cases: R 60/A1 keeps its 17 terms in an annex
+(recovered into the glossary), and the OIML-CS admin documents keep
+their whole body in `<preface>` (walked as clauses). Clause text now
+carries list content in document order, not just paragraphs.
+
 *Counting notes (verified against the artifacts): the 539 graph rows are
 242 edges (147 `part_of`, 36 `cites`, 59 `defines`) + 297 node inserts;
 figures and references become bibliography/graph objects, not chunks, so
@@ -105,8 +120,8 @@ registry).
 2. **pubid has no OIML flavor**: OIML identifiers ("OIML R 60-1:2017")
    are not pubid-parsed → `pubid: null` in bibliography lines. Doc node
    ids still normalize (`doc:OIML-R-60-1-2017` — same shape as
-   `graph.py#norm_id`, so the graphs join). An OIML pubid flavor would
-   make citation joins exact; worth an upstream ask.
+   `graph.py#norm_id`, so the graphs join). Upstream ask filed:
+   pubid/pubid#342.
 3. **Document-level relations**: the samples' semantic XML embeds no
    relaton `<relation>` elements, so `doc:` edges are empty for them;
    the relaton-data-oiml join stays authoritative for
