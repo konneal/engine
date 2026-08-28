@@ -129,15 +129,40 @@ class MkoEdge(BaseModel):
 
 
 class MkoGlossaryTerm(BaseModel):
-    unit: str = ""
-    concept: str = ""
-    designations: list[str] = Field(default_factory=list)
-    definition: str = ""
-    sources: list[str] = Field(default_factory=list)
+    """Native Glossarist concept (glossary.json concepts[] entries)."""
+
+    data: dict = Field(default_factory=dict)
+
+    @property
+    def concept(self) -> str:
+        return self.data.get("id", "").removesuffix(f"-{self.language_code}")
+
+    @property
+    def language_code(self) -> str:
+        return self.data.get("language_code", "eng")
+
+    @property
+    def designations(self) -> list[str]:
+        return [t.get("designation", "") for t in self.data.get("terms", [])
+                if t.get("designation")]
+
+    @property
+    def definition(self) -> str:
+        parts = self.data.get("definition") or []
+        return " ".join(p.get("content", "") for p in parts).strip()
+
+    @property
+    def sources(self) -> list[str]:
+        out = []
+        for s in self.data.get("sources", []):
+            ref = ((s.get("origin") or {}).get("ref") or {}).get("source", "")
+            if ref:
+                out.append(ref)
+        return out
 
 
 class MkoGlossary(BaseModel):
-    terms: list[MkoGlossaryTerm] = Field(default_factory=list)
+    concepts: list[MkoGlossaryTerm] = Field(default_factory=list)
 
 
 class MkoBundle:
@@ -319,13 +344,13 @@ def to_glossary(bundle: MkoBundle, doc: DocRecord) -> list[dict]:
         {
             "doc_id": doc.doc_id,
             "docidentifier": doc.docidentifier,
-            "unit": t.unit,
             "concept": t.concept,
+            "language_code": t.language_code,
             "designations": t.designations,
             "definition": t.definition,
             "sources": t.sources,
         }
-        for t in bundle.glossary.terms
+        for t in bundle.glossary.concepts
     ]
 
 
