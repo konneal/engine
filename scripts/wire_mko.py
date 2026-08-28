@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -41,6 +42,19 @@ def serving_chunk(rec: dict) -> dict:
     return {"id": rec["id"], "metadata": md}
 
 
+def _load_mko_contexts() -> dict[str, str]:
+    """Contextual preambles keyed by chunk id (the enrichment protocol)."""
+    path = ARTIFACTS / "enriched-contexts.jsonl"
+    out: dict[str, str] = {}
+    if path.exists():
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                rec = json.loads(line)
+                if rec.get("id") and rec.get("context"):
+                    out[rec["id"]] = rec["context"].strip()
+    return out
+
+
 def old_clean_ids() -> list[str]:
     out = []
     with OLD_CHUNKS.open(encoding="utf-8") as f:
@@ -55,11 +69,25 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--embed", action="store_true", help="embed + upsert + delete old clean ids")
     ap.add_argument("--check", action="store_true", help="counts only")
+    ap.add_argument("--verify", action="store_true", help="invariant gate: contexts cover every MKO chunk; fails loudly otherwise")
     args = ap.parse_args()
 
     chunks = [json.loads(l) for l in MKO_CHUNKS.open(encoding="utf-8")]
     old = old_clean_ids()
     print(f"mko chunks: {len(chunks)} ({len({c['doc_id'] for c in chunks})} docs) | old clean chunks to replace: {len(old)}")
+    if args.verify:
+        contexts = _load_mko_contexts()
+        missing = [c["id"] for c in chunks if c["id"] not in contexts]
+        embedded = sum(1 for _ in MKO_EMBED.open(encoding="utf-8")) if MKO_EMBED.exists() else 0
+        print(f"verify: contexts {len(contexts)} | mko chunks {len(chunks)} | embeddings {embedded}")
+        if missing:
+            print(f"FAIL: {len(missing)} chunks lack contextual preambles (e.g. {missing[:3]})")
+            return 1
+        if embedded and embedded < len(chunks):
+            print(f"FAIL: embeddings ({embedded}) < chunks ({len(chunks)}) — embed incomplete")
+            return 1
+        print("verify: OK — enrichment coverage complete")
+        return 0
     if args.check:
         return 0
 
@@ -78,8 +106,24 @@ def main() -> int:
         with MKO_EMBED.open("a", encoding="utf-8") as out:
             import time
 
+            contexts = _load_mko_contexts()
+            unenriched = [c["id"] for c in todo if c["id"] not in contexts]
+            if unenriched and not os.environ.get("ALLOW_UNENRICHED"):
+                raise SystemExit(
+                    f"REFUSING: {len(unenriched)} chunks have no contextual preamble. "
+                    "Run `ENRICH_SOURCE=artifacts/mko_chunks.jsonl python -m ingest.cli enrich` first — "
+                    "un-enriched upserts regress retrieval (the 2026-08-28 incident). "
+                    "Override with ALLOW_UNENRICHED=1 if you truly mean it."
+                )
+
             def embed_batch(items, attempts=3):
-                texts = [c["metadata"].get("chunk_text") or c.get("text", "") for c in items]
+                # the enrichment protocol embeds CONTEXT+text, never bare text
+                texts = [
+                    f"{contexts[c['id']]} {c['metadata'].get('chunk_text') or c.get('text', '')}".strip()
+                    if c["id"] in contexts
+                    else c["metadata"].get("chunk_text") or c.get("text", "")
+                    for c in items
+                ]
                 last = None
                 for a in range(attempts):
                     try:

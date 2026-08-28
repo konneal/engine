@@ -31,7 +31,7 @@ import httpx
 
 from .config import ARTIFACTS
 
-CHUNKS_PATH = ARTIFACTS / "chunks.jsonl"
+CHUNKS_PATH = Path(os.environ.get("ENRICH_SOURCE", ARTIFACTS / "chunks.jsonl"))
 STATE_PATH = ARTIFACTS / "enrich-state.json"
 RECORDS_PATH = ARTIFACTS / "enriched-contexts.jsonl"
 
