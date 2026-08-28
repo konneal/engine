@@ -64,7 +64,29 @@ def main(argv: list[str]) -> int:
               f"{len(bibliography)} cited docs, "
               f"{graph_sql.count(chr(10))} graph rows")
 
+    # Incremental diff by unit content hash (MN 116 stable ids): only
+    # new/changed units need embedding on re-ingest.
     chunks_out = ARTIFACTS / "mko_chunks.jsonl"
+    changed_out = ARTIFACTS / "mko_changed.jsonl"
+    prev = {}
+    if chunks_out.exists():
+        for line in chunks_out.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                c = json.loads(line)
+                prev[(c["doc_id"], c["metadata"].get("unit_id"))] = c["metadata"].get("unit_hash")
+    changed = []
+    seen = set()
+    for c in all_chunks:
+        key = (c["doc_id"], c["metadata"].get("unit_id"))
+        seen.add(key)
+        if prev.get(key) != c["metadata"].get("unit_hash"):
+            changed.append(c)
+    removed = sum(1 for k in prev if k not in seen)
+    print(f"diff: {len(changed)} new/changed, "
+          f"{len(all_chunks) - len(changed)} unchanged, {removed} removed")
+    with changed_out.open("w", encoding="utf-8") as f:
+        for c in changed:
+            f.write(json.dumps(c) + "\n")
     with chunks_out.open("w", encoding="utf-8") as f:
         for c in all_chunks:
             f.write(json.dumps(c) + "\n")
