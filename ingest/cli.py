@@ -271,7 +271,7 @@ def probe() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingest")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None), ("fts", None)]:
+    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None), ("fts", None), ("mko", None)]:
         sp = sub.add_parser(name)
         sp.add_argument("--limit", type=int, default=None)
         sp.add_argument("--corpus", default=None)
@@ -280,6 +280,10 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--rpm", type=int, default=45)
         sp.add_argument("--force", action="store_true")
         sp.add_argument("--resume", action="store_true")
+        sp.add_argument("--skip-export", action="store_true")
+        sp.add_argument("--dry", action="store_true")
+        sp.add_argument("--skip-fts", action="store_true")
+        sp.add_argument("--skip-graph", action="store_true")
     args = parser.parse_args(argv)
     if args.cmd == "parse":
         build(args.corpus, args.limit)
@@ -299,6 +303,14 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "fts":
         from .fts import apply as fts_apply
         fts_apply(limit=args.limit, resume=args.resume)
+    elif args.cmd == "mko":
+        from .mko_pipeline import run_mko
+        run_mko(
+            skip_export=args.skip_export,
+            dry=args.dry,
+            skip_fts=args.skip_fts,
+            skip_graph=args.skip_graph,
+        )
     return 0
 
 

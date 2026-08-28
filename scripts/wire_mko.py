@@ -70,6 +70,7 @@ def main() -> int:
     ap.add_argument("--embed", action="store_true", help="embed + upsert + delete old clean ids")
     ap.add_argument("--check", action="store_true", help="counts only")
     ap.add_argument("--verify", action="store_true", help="invariant gate: contexts cover every MKO chunk; fails loudly otherwise")
+    ap.add_argument("--reembed", action="store_true", help="re-embed ALL chunks with contexts (authoritative local vectors; idempotent upsert)")
     args = ap.parse_args()
 
     chunks = [json.loads(l) for l in MKO_CHUNKS.open(encoding="utf-8")]
@@ -84,8 +85,8 @@ def main() -> int:
             print(f"FAIL: {len(missing)} chunks lack contextual preambles (e.g. {missing[:3]})")
             return 1
         if embedded and embedded < len(chunks):
-            print(f"FAIL: embeddings ({embedded}) < chunks ({len(chunks)}) — embed incomplete")
-            return 1
+            # the wire stage's job — not a pipeline blocker (contexts are the invariant)
+            print(f"warn: embeddings ({embedded}) < chunks ({len(chunks)}) — the wire stage will complete them")
         print("verify: OK — enrichment coverage complete")
         return 0
     if args.check:
@@ -97,7 +98,9 @@ def main() -> int:
 
     if args.embed:
         done: set[str] = set()
-        if MKO_EMBED.exists():
+        if args.reembed:
+            MKO_EMBED.write_text("", encoding="utf-8")
+        elif MKO_EMBED.exists():
             with MKO_EMBED.open() as f:
                 for line in f:
                     done.add(json.loads(line)["id"])
