@@ -19,7 +19,7 @@ export const LIMITS = {
   maxInputChars: 8000,
   maxOutputTokens: 3072, // qwen3-30b-a3b always reasons; 768 starved the answer entirely
   retrieveK: 50, // Vectorize caps topK at 50 when returnMetadata=all
-  rerankKeep: 8,
+  rerankKeep: 10, // 8 crowded out dirty-lane goldens once 3k enriched MKO clean chunks entered the pool
   cacheTtlSec: 6 * 3600,
   // context-window budget (estimated tokens) for the assembled prompt —
   // system + summary + history slice + passages must fit or the model
