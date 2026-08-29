@@ -23,6 +23,12 @@ run_worker_first = ["/", "/api/"]
 [ai]
 binding = "AI"
 
+# Figure/image assets for answer contract v2 (TODO.remaining/03) — served
+# at /assets/u/<unit>.<ext> with immutable caching; keys are unit-keyed.
+[[r2_buckets]]
+binding = "UNIT_ASSETS"
+bucket_name = "rag-public-assets"
+
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "idx_oiml_public_v2"

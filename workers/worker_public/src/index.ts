@@ -24,6 +24,7 @@ export interface Env {
   DB: D1Database;
   ASSETS: Fetcher;
   INDEX_VERSION: string;
+  UNIT_ASSETS: R2Bucket;
   ANON_DAY_ASK: string;
   ANON_DAY_SEARCH: string;
   KEY_DAY_ASK_DEFAULT: string;
@@ -1247,6 +1248,14 @@ export default {
 
     if (req.method === "POST" && (path === "/admin/enrich" || path === "/v1/admin/enrich")) return handleEnrich(env, ctx, req);
     if (req.method === "POST" && (path === "/admin/vectors")) return handleVectors(env, req);
+    // unit assets (answer contract v2): immutable, unit-keyed figure images
+    const assetMatch = path.match(/^\/assets\/(u:[A-Za-z0-9_-]+)\.(png|jpe?g|gif|svg|webp)$/);
+    if (req.method === "GET" && assetMatch) {
+      const obj = await env.UNIT_ASSETS.get(assetMatch[1] + "." + assetMatch[2]);
+      if (!obj) return new Response("not found", { status: 404 });
+      const types: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", svg: "image/svg+xml", webp: "image/webp" };
+      return new Response(obj.body, { headers: { "content-type": types[assetMatch[2]] ?? "application/octet-stream", "cache-control": "public, max-age=31536000, immutable", ...corsHeaders(req) } });
+    }
     if (req.method === "POST" && (path === "/api/research" || path === "/v1/research")) {
       // member-only: a valid RAG session cookie is required (research spend stays with humans)
       const session = env.SESSION_SECRET ? await sessionFrom(req, env as any) : null;

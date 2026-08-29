@@ -94,6 +94,14 @@ transparency for integrators and the eval battery.
 - ISO/IEC corpus: federated for signed-in members only; leakage is
   structurally impossible for anonymous/key tiers
 
+### 2.3 `POST /api/research` (members only)
+```jsonc
+{ "query": "trace the creep and return requirements across R 60-1 and R 76-1", "max_iterations": 3 }
+```
+Bounded agentic loop (≤3 retrieve→judge→refine iterations) over the same gated retrieval; returns `{ answer, citations, model, blocks?, research: { iterations, passages, elapsed_ms } }`. Not streamed; expect up to ~90s.
+
+**Blocks (answer contract v2):** answers may reference typed MKO units as `[[u:<id>]]` tokens inside `text`; the response carries `blocks: [{ unit_id, type: table|formula|figure|term, docidentifier, edition?, payload }]` — producer-validated payloads (MN 116), never model-retyped data. Invalid references are dropped server-side before rendering.
+
 ## 3. Retrieval-only
 
 ### `POST /api/search` · `POST /v1/search`

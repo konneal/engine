@@ -107,6 +107,11 @@ nested/boilerplate).*
 - 12 cited documents (OIML V 1:2013, R 111, …) as native Relaton items —
   the citation targets are addressable objects, not strings.
 
+## Answer contract v2 stages (live)
+
+- `to_payload_sql` → `artifacts/mko_unit_payloads.sql` → D1 `unit_payloads` (573 typed units; `mirror` stripped for serving size, 60KB cap)
+- Figure assets → R2 `rag-public-assets` at unit-keyed keys, served at `/assets/u:<id>.<ext>` (immutable); `unit_payloads.payload.uri` updated to the canonical route (producer `uri` is null today — upstream asset-contract ask, metanorma-document#50)
+
 ## How the artifacts feed the existing stages
 
 `artifacts/mko_chunks.jsonl` uses the **same chunk schema** the
