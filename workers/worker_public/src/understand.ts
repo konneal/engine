@@ -109,8 +109,11 @@ export async function understandQuery(
     try {
       const got = await Promise.race([call, timeout]);
       if (got) return got;
-    } catch {
-      /* retry */
+    } catch (e) {
+      // account rate-limited: a retry in the same minute will also fail —
+      // degrade to vanilla retrieval immediately instead of burning the
+      // second attempt (TTFT surgery)
+      if (String(e).includes("3021") || String(e).includes("rate")) return null;
     }
   }
   console.warn("query understanding unavailable — vanilla retrieval");

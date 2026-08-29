@@ -356,7 +356,26 @@ async function handleAsk(
       /* memory is additive */
     }
   }
-  const understanding = cached ? null : await understandQuery(env.AI, MODELS.understand, q.query, history, convEntities);
+  // ── fast path: standalone (non-contextual) near-duplicate of a recently
+  // answered question — serve from the semantic cache WITHOUT paying the
+  // understanding call. Contextual turns never take this path (they always
+  // run understanding); fresh=true already bypassed the exact cache above.
+  let understanding: any = null;
+  if (!cached && !contextual && !q.lang) {
+    const wv0 = (await warmEmbed) ?? null;
+    if (wv0) {
+      const sc0 = await semanticCacheGet(env, wv0);
+      if (sc0) {
+        console.log("semantic cache hit (pre-understanding)");
+        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang);
+        if (wantsStream) {
+          return sseResponse([{ type: "citations", citations: sc0.citations ?? [] }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true }], corsHeaders(req));
+        }
+        return json({ ...sc0, similar: true, ...(exempt ? {} : { quota }) });
+      }
+    }
+  }
+  if (!cached) understanding = await understandQuery(env.AI, MODELS.understand, q.query, history, convEntities);
   if (conversationId && understanding) {
     const now = Date.now();
     const ents: Array<[string, string]> = [];
@@ -441,8 +460,14 @@ async function handleAsk(
 
   try {
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers });
-    // cascade final tier: joint listwise reordering for hard/member
-    // queries (cross-encoder already pruned; this orders the survivors)
+    // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
+    // they consume the same candidate list (grade is coarse: good/weak;
+    // listwise reorders survivors). Doc-scoped queries skip the grade
+    // entirely (the filter already pins the corpus; grading adds only latency).
+    const docScoped = !!(understanding?.doc_number);
+    const gradePromise = docScoped
+      ? Promise.resolve("skipped-doc-scoped" as const)
+      : gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text)).catch(() => null);
     if (retrieved.hits.length >= 4 && (member || understanding?.complexity === "complex")) {
       const reordered = await listwiseRerank(env, MODELS.listwise, understanding?.standalone_query || q.query, retrieved.hits);
       if (reordered) {
@@ -450,9 +475,7 @@ async function handleAsk(
         retrieved = { hits: reordered, filters: retrieved.filters };
       }
     }
-    // CRAG: grade the passages; a weak grade earns ONE corrective
-    // re-retrieval with the document identifier made explicit
-    const grade = await gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text));
+    const grade = await gradePromise;
     console.log("grade:", grade);
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
