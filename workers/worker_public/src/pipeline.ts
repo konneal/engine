@@ -64,6 +64,29 @@ export function retrievalQuery(query: string, prev?: string): string {
   return query;
 }
 
+/** Typed-chunk selection for the pin: among a doc's typed units, prefer
+ *  tables, then the one whose text best overlaps the QUERY (the first
+ *  candidate is wrong as often as right — annex example tables outrank
+ *  nothing). Lexical-overlap heuristic over title + serialized rows. */
+function pickTypedChunk(query: string, candidates: Hit[]): Hit | null {
+  if (!candidates.length) return null;
+  const tables = candidates.filter((h) => h.metadata.block === "table");
+  const pool = tables.length ? tables : candidates;
+  const terms = query.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((t) => t.length > 2);
+  let best: Hit | null = null;
+  let bestScore = -1;
+  for (const h of pool) {
+    const hay = `${h.metadata.clause_title ?? ""} ${h.text}`.toLowerCase();
+    let score = 0;
+    for (const t of terms) if (hay.includes(t)) score++;
+    if (score > bestScore) {
+      bestScore = score;
+      best = h;
+    }
+  }
+  return best ?? pool[0];
+}
+
 // colloquial process questions ("how do I get a device certified to R 60")
 // share almost no vocabulary with the B-series prose that answers them —
 // expand the retrieval query with the corpus's own terms so the window
@@ -413,7 +436,7 @@ export async function retrieve(
     const sameDocTyped = (h: Hit) =>
       !!h.metadata.unit_id && !!h.metadata.block && h.metadata.doc_number === filters.doc_number;
     if (!has(finalHits, sameDocTyped)) {
-      const typed = hits.find(sameDocTyped);
+      const typed = pickTypedChunk(query, hits.filter(sameDocTyped));
       if (typed) {
         finalHits = [...finalHits.slice(0, LIMITS.rerankKeep - 1), typed];
         console.log("typed pin:", typed.metadata.docidentifier, "§", typed.metadata.clause_anchor, `(${typed.metadata.block})`);

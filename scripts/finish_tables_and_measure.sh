@@ -29,10 +29,11 @@ echo "[fts] done $(date)" >> "$LOG"
 
 # 4. ship: INDEX_VERSION v2.62-tables + deploy
 python3 - <<'PY'
+import re
 from pathlib import Path
 p = Path("workers/worker_public/wrangler.toml")
 s = p.read_text()
-s = s.replace('INDEX_VERSION = "public-v2.61-mkoid"', 'INDEX_VERSION = "public-v2.62-tables"')
+s = re.sub(r'INDEX_VERSION = "[^"]*"', 'INDEX_VERSION = "public-v2.62-tables"', s)
 p.write_text(s)
 PY
 (cd workers/worker_public && CLOUDFLARE_ACCOUNT_ID=06cad8ae9a017c856ab496c6bca9a9d8 npx wrangler deploy) >> "$LOG" 2>&1
