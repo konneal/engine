@@ -96,3 +96,11 @@ export async function contractV2(
   const blocks = await resolveBlocks(db, refs);
   return { text, blocks, dropped };
 }
+
+/** Detect table-retyping: a markdown table in the answer while a typed
+ *  table unit was available to reference. Enforcement signal for the
+ *  corrective regen (same pattern as quote-anchor violations). */
+export function tableRetyped(text: string, availableTable: boolean): boolean {
+  if (!availableTable) return false;
+  return /(^|\n)\s*\|[^\n]+\|\s*(\n\s*\|[-: |]+\|\s*)?(\n|$)/.test(text) && (text.match(/\|/g) ?? []).length >= 6;
+}

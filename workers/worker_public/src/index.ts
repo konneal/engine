@@ -15,7 +15,7 @@ import enrichmentPrompt from "../prompts/enrichment.md";
 import { reflect } from "./reflect";
 import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
-import { contractV2 } from "./refs";
+import { contractV2, tableRetyped } from "./refs";
 
 export interface Env {
   AI: any;
@@ -363,7 +363,7 @@ async function handleAsk(
   // understanding call. Contextual turns never take this path (they always
   // run understanding); fresh=true already bypassed the exact cache above.
   let understanding: any = null;
-  if (!cached && !contextual && !q.lang) {
+  if (!cached && !contextual && !q.lang && body?.fresh !== true) {
     const wv0 = (await warmEmbed) ?? null;
     if (wv0) {
       const sc0 = await semanticCacheGet(env, wv0);
@@ -539,7 +539,9 @@ async function handleAsk(
           const canonical = c2.text;
           // streamed answers can't be regenerated mid-flight; enforcement
           // is that an unverified answer is never served from cache again
-          const streamed = checkQuoteAnchors(canonical, usedHits.map((h: Hit) => h.text));
+          const streamedAnchors = checkQuoteAnchors(canonical, usedHits.map((h: Hit) => h.text));
+          const streamedRetyped = tableRetyped(canonical, usedHits.some((h: Hit) => h.metadata.unit_id && h.metadata.block === "table"));
+          const streamed = { total: streamedAnchors.total, violations: streamedRetyped ? ["table-retyped"] : streamedAnchors.violations };
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified — not caching");
           }
@@ -570,19 +572,26 @@ async function handleAsk(
   }
   if (answer) answer = canonicalRefusal(answer);
 
-  // ── Deterministic quote-anchor check ──
+  // ── Deterministic quote-anchor + table-retyping check ──
   // One corrective regeneration when an anchor quotes text absent from
-  // the passages; the retry wins only if it verifies better.
+  // the passages or a typed table was retyped as markdown; the retry
+  // wins only if it verifies better.
   let used = usedHits;
   if (answer && !answer.includes(REFUSAL_ANSWER)) {
     const anchors = checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
-    if (anchors.violations.length > 0) {
-      console.log("anchors:", anchors.violations.length, "of", anchors.total, "unverified — regenerating");
-      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: ANCHOR_CORRECTION_NOTE }]);
+    const hasTableUnit = used.some((h: Hit) => h.metadata.unit_id && h.metadata.block === "table");
+    const retyped = tableRetyped(answer, hasTableUnit);
+    if (anchors.violations.length > 0 || retyped) {
+      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "— regenerating");
+      const note = retyped
+        ? "Correction notice: your draft reproduced a table as markdown although a typed table unit was available. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:<unit id>]] from the passage header where the table belongs. Do not render any table as markdown."
+        : ANCHOR_CORRECTION_NOTE;
+      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }]);
       if (corrected) {
         const correctedAnswer = canonicalRefusal(corrected);
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
-        if (retryAnchors.violations.length < anchors.violations.length) {
+        const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
+        if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped)) {
           answer = correctedAnswer;
         }
       }

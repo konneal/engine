@@ -325,6 +325,7 @@ export async function retrieve(
             hits = [...families, ...hits.filter((h) => h.metadata.clause_anchor !== "family")];
           }
         }
+
       }
     } catch {
       // vector order is the fallback, by design
@@ -400,7 +401,26 @@ export async function retrieve(
     }
     if (diversified.length >= LIMITS.rerankKeep + 2) break;
   }
-  return { hits: diversified.slice(0, LIMITS.rerankKeep), filters: filters ?? {} };
+
+  // answer contract v2 — typed-chunk pin (FINAL position): doc-scoped
+  // queries get ONE typed unit chunk (table first) guaranteed a slot.
+  // Prose outranks serialized tables under the cross-encoder AND the
+  // per-doc diversity cap counts typed chunks against the same doc key —
+  // without this guarantee the model never sees a unit id to reference.
+  let finalHits = diversified.slice(0, LIMITS.rerankKeep);
+  if (filters?.doc_number) {
+    const has = (arr: Hit[], pred: (h: Hit) => boolean) => arr.some(pred);
+    const sameDocTyped = (h: Hit) =>
+      !!h.metadata.unit_id && !!h.metadata.block && h.metadata.doc_number === filters.doc_number;
+    if (!has(finalHits, sameDocTyped)) {
+      const typed = hits.find(sameDocTyped);
+      if (typed) {
+        finalHits = [...finalHits.slice(0, LIMITS.rerankKeep - 1), typed];
+        console.log("typed pin:", typed.metadata.docidentifier, "§", typed.metadata.clause_anchor, `(${typed.metadata.block})`);
+      }
+    }
+  }
+  return { hits: finalHits, filters: filters ?? {} };
 }
 
 export interface HistoryTurn {

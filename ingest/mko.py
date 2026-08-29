@@ -243,12 +243,21 @@ def to_doc_record(bundle: MkoBundle, corpus: str = "mko") -> DocRecord:
         for u in bundle.units
         if u.type in ("clause", "annex") and (u.text or u.title)
     ]
+    # doc_number from the canonical ("OIML R 60-1" → "60"): the
+    # Vectorize doc_number filter and the graph lane key on it — without
+    # the parse, every MKO chunk is invisible to doc-scoped retrieval
+    m = re.match(r"^[A-Z]+\s+(?:R|D|B|G|E|V)\s*(\d+)", bundle.canonical) or re.match(r"^[A-Z]+\s+([A-Z])\s*(\d+)", bundle.canonical)
+    doc_number = ""
+    m2 = re.search(r"(?:R|D|B|G|E|V)\s*-?\s*(\d+)", bundle.canonical)
+    if m2:
+        doc_number = str(int(m2.group(1)))
     return DocRecord(
         doc_id=f"{corpus}:{bundle.slug}",
         slug=bundle.slug,
         corpus=corpus,
         tier="mko",
         docidentifier=bundle.canonical,
+        doc_number=doc_number,
         doctype=_doctype(bundle),
         edition=doc.edition,
         language=(doc.languages or ["en"])[0],
@@ -300,6 +309,16 @@ def _unit_chunk(bundle: MkoBundle, unit: MkoUnit, doc: DocRecord) -> Chunk | Non
     crumb = f"{breadcrumb}\n\n" if breadcrumb else ""
     full = (header + crumb + _unit_label(unit, doc.docidentifier) + "\n\n" + text).strip()
     anchor = unit.number or unit.anchor or unit.id
+    # typed units cite their PARENT CLAUSE (number + title): a table is
+    # retrieved/ cited as "§4.1.2", not "§table-1" — clause-anchored
+    # reranking and citation practice both key on the clause number
+    clause_anchor = anchor
+    clause_title = unit.title
+    if unit.type in ("table", "formula", "figure", "requirement", "note", "example") and unit.parent:
+        parent = bundle.units_by_id.get(unit.parent)
+        if parent is not None:
+            clause_anchor = parent.number or parent.anchor or clause_anchor
+            clause_title = parent.title or clause_title
     meta: dict = {
         "chunk_text": full[:2800],
         "doc_id": doc.doc_id,
@@ -308,8 +327,8 @@ def _unit_chunk(bundle: MkoBundle, unit: MkoUnit, doc: DocRecord) -> Chunk | Non
         "doc_number": doc.doc_number,
         "edition": doc.edition,
         "language": doc.language,
-        "clause_anchor": anchor,
-        "clause_title": unit.title,
+        "clause_anchor": clause_anchor,
+        "clause_title": clause_title,
         "block": unit.type,
         "tier": doc.tier,
         "corpus": doc.corpus,
