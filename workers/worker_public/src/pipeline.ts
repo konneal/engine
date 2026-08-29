@@ -34,6 +34,9 @@ export interface ChunkMeta {
   text_ref: string;
   status?: string;
   superseded_by?: string;
+  /** answer contract v2: typed MKO units carry their unit id + block type */
+  unit_id?: string;
+  block?: string;
 }
 
 export interface Hit {
@@ -568,7 +571,10 @@ export function buildMessages(
   for (const h of hits) {
     const st = h.metadata.status === "withdrawn" || h.metadata.status === "superseded" ? ` [${h.metadata.status}]` : "";
     const label = `${h.metadata.docidentifier || h.metadata.doc_id}:${h.metadata.edition || ""} §${h.metadata.clause_anchor || ""}${st}`.replace(/(:|§)+$/g, "");
-    const head = `[${usedHits.length + 1}] ${label} ${h.metadata.clause_title ? "— " + h.metadata.clause_title : ""}\n`;
+    // answer contract v2: typed passages declare their unit id so the
+    // model can reference [[u:<id>]] instead of retyping the object
+    const unitTag = (h.metadata as any).unit_id ? ` unit ${(h.metadata as any).unit_id}${(h.metadata as any).block ? ` (${(h.metadata as any).block})` : ""}` : "";
+    const head = `[${usedHits.length + 1}] ${label}${unitTag} ${h.metadata.clause_title ? "— " + h.metadata.clause_title : ""}\n`;
     const body = clipToTokens(h.text, LIMITS.maxPassageTokens);
     const t = estTokens(head) + estTokens(body);
     if (t <= remain) {

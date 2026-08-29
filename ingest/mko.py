@@ -393,6 +393,47 @@ def _cite_node(cited: str) -> str | None:
     return f"doc:{slug}" if slug else None
 
 
+TYPED_UNIT_FIELDS = ("table", "formula", "figure", "term", "requirement")
+
+
+def _sq(x: str) -> str:
+    return str(x).replace(chr(39), chr(39) * 2)
+
+
+def to_payload_sql(bundle: "MkoBundle", doc: DocRecord) -> list[str]:
+    """Typed unit payloads as D1 unit_payloads rows (answer contract v2):
+    the worker resolves model [[u:<id>]] references against these — the
+    payload data never passes through the LLM."""
+    import json as _json
+
+    rows: list[str] = []
+    for u in bundle.units:
+        if u.type not in TYPED_UNIT_FIELDS or not u.payload:
+            continue
+        # the lossless `mirror` renderer tree is fidelity/provenance, not a
+        # serving form — strip it (SQLITE_TOOBIG on big tables otherwise);
+        # the TS renderer consumes columns/rows, latex/description, alt/uri
+        slim = {k: v for k, v in u.payload.items() if k != "mirror"}
+        body = _json.dumps(slim, ensure_ascii=False)
+        if len(body) > 60000:
+            continue
+        rows.append(
+            "INSERT OR REPLACE INTO unit_payloads "
+            "(unit_id, doc_id, docidentifier, edition, clause_anchor, type, payload) VALUES ("
+            + ",".join([
+                "'" + _sq(u.id) + "'",
+                "'" + _sq(doc.doc_id) + "'",
+                "'" + _sq(doc.docidentifier) + "'",
+                "'" + _sq(doc.edition or "") + "'",
+                "''",
+                "'" + _sq(u.type) + "'",
+                "'" + _sq(body) + "'",
+            ])
+            + ");\n"
+        )
+    return rows
+
+
 def to_graph_sql(bundle: MkoBundle, doc: DocRecord) -> str:
     """Section-level graph fragment for D1 (graph_nodes/graph_edges).
 

@@ -28,6 +28,7 @@ from ingest.mko import (  # noqa: E402
     to_doc_record,
     to_glossary,
     to_graph_sql,
+    to_payload_sql,
 )
 
 ARTIFACTS = Path(__file__).resolve().parents[1] / "artifacts"
@@ -42,6 +43,7 @@ def main(argv: list[str]) -> int:
     all_glossary: list[dict] = []
     all_bibliography: list[dict] = []
     graph_fragments: list[str] = []
+    payload_rows: list[str] = []
 
     for raw in argv:
         bundle_path = Path(raw).expanduser()
@@ -51,6 +53,7 @@ def main(argv: list[str]) -> int:
         glossary = to_glossary(bundle, doc)
         bibliography = to_bibliography(bundle, doc)
         graph_sql = to_graph_sql(bundle, doc)
+        payload_rows.extend(to_payload_sql(bundle, doc))
         all_chunks.extend(c.model_dump() for c in chunks)
         all_glossary.extend(glossary)
         all_bibliography.extend(bibliography)
@@ -96,6 +99,9 @@ def main(argv: list[str]) -> int:
     biblio_out.write_text(json.dumps(all_bibliography, ensure_ascii=False, indent=1), encoding="utf-8")
     graph_out = ARTIFACTS / "mko_graph.sql"
     graph_out.write_text("".join(graph_fragments), encoding="utf-8")
+    payloads_out = ARTIFACTS / "mko_unit_payloads.sql"
+    payloads_out.write_text("".join(payload_rows), encoding="utf-8")
+    print(f"wrote {payloads_out} ({len(payload_rows)} typed units)")
     print(f"wrote {chunks_out} ({len(all_chunks)} chunks), "
           f"{glossary_out} ({len(all_glossary)} terms), "
           f"{biblio_out} ({len(all_bibliography)} cited docs), {graph_out}")

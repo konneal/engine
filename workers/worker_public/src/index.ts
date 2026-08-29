@@ -15,6 +15,7 @@ import enrichmentPrompt from "../prompts/enrichment.md";
 import { reflect } from "./reflect";
 import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
+import { contractV2 } from "./refs";
 
 export interface Env {
   AI: any;
@@ -527,9 +528,14 @@ async function handleAsk(
           } catch {
             // stream ended prematurely — deliver what we have
           }
-          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] });
-          telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
-          const canonical = canonicalRefusal(full);
+          const canonical0 = canonicalRefusal(full);
+          // answer contract v2: validate [[u:]] refs, resolve typed blocks
+          const c2 = canonical0.includes(REFUSAL_ANSWER)
+            ? { text: canonical0, blocks: [], dropped: [] as string[] }
+            : await contractV2(env.DB, canonical0, usedHits);
+          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2.blocks });
+          telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang);
+          const canonical = c2.text;
           // streamed answers can't be regenerated mid-flight; enforcement
           // is that an unverified answer is never served from cache again
           const streamed = checkQuoteAnchors(canonical, usedHits.map((h: Hit) => h.text));
@@ -612,13 +618,17 @@ async function handleAsk(
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
   const finalCites = citations(used);
+  const c2ns = answer.includes(REFUSAL_ANSWER)
+    ? { text: answer, blocks: [] as Awaited<ReturnType<typeof contractV2>>["blocks"], dropped: [] as string[] }
+    : await contractV2(env.DB, answer, used);
+  answer = c2ns.text;
   const finalAnchors = answer.includes(REFUSAL_ANSWER)
     ? { total: 0, violations: [] as string[] }
     : checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
   if (finalAnchors.violations.length > 0) {
     console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified — not caching");
   }
-  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] };
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2ns.blocks };
   const cacheable = !contextual && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
