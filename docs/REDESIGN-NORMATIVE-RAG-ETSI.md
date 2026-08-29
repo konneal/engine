@@ -455,3 +455,31 @@ arXiv:2405.21047), monthly cost table (CF-only ~$10/mo today; Modal CPU
 micro-service +$110-135/mo is the first justified step if TTFT
 consistency is product-critical; GPUs $580-2,840/mo eval-gated), and the
 MN 116 "consumer references & excerpts" clause to draft upstream.
+
+
+---
+
+## Status board (2026-08-29, end of day — the reconciled plan)
+
+| Plan item | Status |
+|---|---|
+| E0 ETSI metrics (R/AP/MRR + `--repeat`) | ✅ live |
+| E1 full-corpus FTS prefilter | ✅ live (R@5 +9pp) |
+| E2 section graph (parthood/cites/defines in D1) | ✅ live via MKO graph (3,561 section nodes) |
+| E2 embedding smoothing | ⏸ tested, inconclusive at current eval power, rolled back — revisit with `--repeat 3` baselines |
+| E3 atomic typed tables — clean corpus | ✅ live (MKO: 371 table chunks) |
+| E3 atomic typed tables — dirty corpus | ☐ task #20 (~$16 enrichment) |
+| E4 producer-native path (#592/MN 116/MKO) | ✅ MKO live for all 36 clean docs; upstream: preface-walk PR #49, MN 116 spec PR #9, incremental re-ingest PR #48; remaining: OIML pubid flavor, relations embedding, collections, multilingual alignment |
+| E5 deep-research (G10) | ◐ server v1 live (member-gated); UI pending — task #21 |
+| Vision-unified answers (glm-5.3-flash default) | ◐ model live all tiers; image-parts + contract v2 pending — task #22 |
+| Figure assets → R2 + vision captions | ☐ task #23 |
+| Answer contract v2 (SymGen refs + blocks + validation) | ☐ task #22 — the next big quality/rendering step |
+| TTFT pipeline surgery (parallelize/trim pre-generation) | ☐ **URGENT** — measured 25–32s (47s under rate-limit haze); the serial understand→grade chain is the bottleneck, not the model |
+| Modal CPU micro-service | deferred (conditional on TTFT consistency after surgery) |
+| glm-5.3-flash price confirmation | ☐ check spend ledger next day |
+| Turnstile | blocked on user sitekey |
+| 36/224 relaton families missing successor edges | upstream PRs, needs user authorization |
+
+Priorities: 1) TTFT surgery, 2) answer contract v2, 3) figures + captions,
+4) dirty tables, 5) research UI, 6) calm-window `--repeat 3` baseline +
+price check.
