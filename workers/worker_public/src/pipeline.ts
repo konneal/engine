@@ -68,17 +68,28 @@ export function retrievalQuery(query: string, prev?: string): string {
  *  tables, then the one whose text best overlaps the QUERY (the first
  *  candidate is wrong as often as right — annex example tables outrank
  *  nothing). Lexical-overlap heuristic over title + serialized rows. */
-function pickTypedChunk(query: string, candidates: Hit[]): Hit | null {
+function pickTypedChunk(query: string, candidates: Hit[], ranked: Hit[]): Hit | null {
   if (!candidates.length) return null;
   const tables = candidates.filter((h) => h.metadata.block === "table");
   const pool = tables.length ? tables : candidates;
   const terms = query.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((t) => t.length > 2);
+  // the top-ranked PROSE passage usually sits in the answer clause: a
+  // typed chunk from that same clause is the answering object, not a
+  // same-topic example from an annex
+  const topProse = ranked.find((h) => !h.metadata.unit_id);
+  const topAnchor = topProse?.metadata.clause_anchor ?? "";
   let best: Hit | null = null;
   let bestScore = -1;
   for (const h of pool) {
     const hay = `${h.metadata.clause_title ?? ""} ${h.text}`.toLowerCase();
     let score = 0;
     for (const t of terms) if (hay.includes(t)) score++;
+    if (topAnchor && h.metadata.clause_anchor === topAnchor) score += terms.length; // dominates
+    // blank annex FORMS (empty value cells) are not answer tables
+    const cells = h.text.split("|").map((c) => c.trim());
+    const filled = cells.filter((c) => c.length > 0).length;
+    const density = cells.length ? filled / cells.length : 0;
+    score += density * 2;
     if (score > bestScore) {
       bestScore = score;
       best = h;
@@ -436,7 +447,7 @@ export async function retrieve(
     const sameDocTyped = (h: Hit) =>
       !!h.metadata.unit_id && !!h.metadata.block && h.metadata.doc_number === filters.doc_number;
     if (!has(finalHits, sameDocTyped)) {
-      const typed = pickTypedChunk(query, hits.filter(sameDocTyped));
+      const typed = pickTypedChunk(query, hits.filter(sameDocTyped), hits);
       if (typed) {
         finalHits = [...finalHits.slice(0, LIMITS.rerankKeep - 1), typed];
         console.log("typed pin:", typed.metadata.docidentifier, "§", typed.metadata.clause_anchor, `(${typed.metadata.block})`);
