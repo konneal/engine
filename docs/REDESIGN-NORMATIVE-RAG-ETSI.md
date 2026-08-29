@@ -412,3 +412,46 @@ arXiv:2409.04701; Merola & Singh contextual vs late arXiv:2504.19754.
 Phase E0 + E1 start now. No re-ingest required for E0/E1 (FTS can be built
 from existing `artifacts/chunks.jsonl` / live chunk texts). E2/E3 need an
 index rebuild window and explicit go on the ≈$50 re-enrichment for E3.
+
+
+---
+
+## Postscript (2026-08-29): vision-unified answer contract
+
+User decision: unify text and figure understanding in ONE vision-enabled
+answer model instead of a forked vision lane.
+
+**Model**: `@cf/zai-org/glm-5.3-flash` — natively multimodal (320B/18B
+active), GLM family, flash tier, in the Workers AI catalog. Single answer
+model: prose + tables/equations as text, figures as IMAGE PARTS in the
+message content. Fallback ladder: qwen3.8-27b (text-only; figures degrade
+to their ingest-time description). Price unconfirmed (flash-tier
+expected) — eval-gate before defaulting the member lane.
+
+**Pipeline changes**
+
+1. INGEST (MKO stage 2.5): figure assets → R2 public bucket at stable
+   unit-keyed URLs; FigurePayload.uri rewritten to the canonical URL.
+   One-time vision captioning of EVERY figure into `description`
+   (quality-first lane; moondream 3.1 or glm-5.3-flash; ≈cents for the
+   clean corpus) so text-only tiers and the anon lane still explain
+   figures.
+2. SERVE: buildMessages appends an image part per figure unit among
+   usedHits when the routed model is vision-capable; understanding's
+   figure-presence signal routes to the VL model for members.
+3. OUTPUT contract unchanged: discursive prose + `[[u:]]` references;
+   figure blocks render <img> (canonical URL) + description; references
+   validated against usedHits; payloads served from KV by unit id — the
+   LLM still never re-types table/equation/figure DATA (input yes,
+   output by reference; verbatim quotes remain anchor-checked).
+4. EVAL GATE: new golden cases ("what does Figure A.x show?") must pass
+   with the VL model before the member lane defaults to it; TTFT watched
+   (image tokens add prefill).
+
+**Also from the same review (2026-08-29)**: answer contract v2 (SymGen-style
+symbolic references, arXiv:2311.09188; validation per JSONSchemaBench
+arXiv:2501.10868 — post-hoc, not constrained decoding, per
+arXiv:2405.21047), monthly cost table (CF-only ~$10/mo today; Modal CPU
+micro-service +$110-135/mo is the first justified step if TTFT
+consistency is product-critical; GPUs $580-2,840/mo eval-gated), and the
+MN 116 "consumer references & excerpts" clause to draft upstream.
