@@ -83,6 +83,15 @@ def run_mko(skip_export: bool = False, dry: bool = False, skip_fts: bool = False
         return
 
     print("3. ENRICH (rounds until coverage)", flush=True)
+    # incremental: when the ingest diff exists, enrich only what changed
+    # (unchanged ids are already enriched — KV contexts + done-set skip them)
+    changed_path = ARTIFACTS / "mko_changed.jsonl"
+    enrich_source = "artifacts/mko_chunks.jsonl"
+    if changed_path.exists():
+        n_changed = sum(1 for l in changed_path.open(encoding="utf-8") if l.strip())
+        if n_changed:
+            enrich_source = "artifacts/mko_changed.jsonl"
+            print(f"  incremental: {n_changed} changed chunks (mko_changed.jsonl)", flush=True)
     for rnd in range(1, ENRICH_ROUNDS + 1):
         m = missing_contexts()
         if m == 0:
@@ -91,7 +100,7 @@ def run_mko(skip_export: bool = False, dry: bool = False, skip_fts: bool = False
         print(f"  round {rnd}: {m} chunks missing contexts", flush=True)
         r = _run([".venv/bin/python", "-m", "ingest.cli", "enrich",
                   "--rpm", "45", "--batch", "5", "--concurrency", "3"],
-                 extra_env={"ENRICH_SOURCE": "artifacts/mko_chunks.jsonl"})
+                 extra_env={"ENRICH_SOURCE": enrich_source})
         _step(f"enrich-{rnd}", r)
     else:
         raise SystemExit(f"enrichment coverage incomplete after {ENRICH_ROUNDS} rounds — investigate")
