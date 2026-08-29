@@ -938,6 +938,52 @@ async function handleResearch(env: Env, ctx: ExecutionContext, req: Request, ses
 /** Ops access to the Vectorize binding (get/upsert by id) for offline
  *  passes like embedding smoothing (G-ETSI-4) — the binding is the
  *  credential, admin-token gated exactly like /admin/enrich. */
+/** One-time figure captioning (TODO.remaining/03): fetch the unit's asset
+ *  from R2, describe it with the vision-capable answer model, store the
+ *  description into unit_payloads. Admin-gated; idempotent. */
+async function handleCaption(env: Env, req: Request): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const unitId = typeof body?.unit_id === "string" ? body.unit_id : "";
+  const context = typeof body?.context === "string" ? body.context.slice(0, 400) : "";
+  if (!unitId) return err(400, "invalid_input", "unit_id required");
+  try {
+    const row = await env.DB.prepare("SELECT payload, docidentifier FROM unit_payloads WHERE unit_id = ?1").bind(unitId).first<any>();
+    if (!row) return err(404, "not_found", "no unit_payload row for that id");
+    const payload = JSON.parse(String(row.payload));
+    const uri = payload.uri ?? "";
+    const m = uri.match(/^\/assets\/(.+)/);
+    if (!m) return err(400, "invalid_input", "payload has no /assets/ uri (upload the asset first)");
+    const obj = await env.UNIT_ASSETS.get(m[1]);
+    if (!obj) return err(404, "not_found", `asset ${m[1]} not in R2`);
+    const buf = await obj.arrayBuffer();
+    const ext = m[1].split(".").pop()?.toLowerCase() ?? "png";
+    const mime = ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const res: any = await env.AI.run(MODELS.member, {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `Describe this figure from ${row.docidentifier}${context ? ` (${context})` : ""} for a reader who cannot see it: what is plotted/shown, the axes or structure, and the normative point it makes. 2-3 plain sentences.` },
+            { type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } },
+          ],
+        },
+      ],
+      max_tokens: 1024,
+    });
+    const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+    if (!text?.trim()) return err(502, "generation_failed", "vision model returned no description");
+    const desc = text.trim().slice(0, 600);
+    await env.DB.prepare("UPDATE unit_payloads SET payload = json_set(payload, '$.description', ?1) WHERE unit_id = ?2").bind(desc, unitId).run();
+    return json({ ok: true, unit_id: unitId, description: desc });
+  } catch (e) {
+    return err(502, "caption_failed", String(e).slice(0, 200));
+  }
+}
+
 async function handleVectors(env: Env, req: Request): Promise<Response> {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
@@ -1257,6 +1303,7 @@ export default {
 
     if (req.method === "POST" && (path === "/admin/enrich" || path === "/v1/admin/enrich")) return handleEnrich(env, ctx, req);
     if (req.method === "POST" && (path === "/admin/vectors")) return handleVectors(env, req);
+    if (req.method === "POST" && path === "/admin/caption") return handleCaption(env, req);
     // unit assets (answer contract v2): immutable, unit-keyed figure images
     const assetMatch = path.match(/^\/assets\/(u:[A-Za-z0-9_-]+)\.(png|jpe?g|gif|svg|webp)$/);
     if (req.method === "GET" && assetMatch) {
