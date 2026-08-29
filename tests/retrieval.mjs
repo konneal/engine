@@ -26,6 +26,7 @@ const K = process.argv.includes("--k") ? Number(process.argv[process.argv.indexO
 const cases = [
   ...JSON.parse(readFileSync(new URL("./golden/cases.json", import.meta.url), "utf8")),
   ...JSON.parse(readFileSync(new URL("./golden/retrieval-probes.json", import.meta.url), "utf8")),
+  ...JSON.parse(readFileSync(new URL("./golden/table-cases.json", import.meta.url), "utf8")),
 ];
 
 async function search(query, topK) {

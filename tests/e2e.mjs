@@ -133,6 +133,21 @@ test("anon ask endpoint works (refusal path)", async () => {
   if (!json.answer.includes(REFUSAL)) throw new Error(`expected refusal, got: ${json.answer.slice(0, 120)}`);
 });
 
+test("contract v2: table question returns typed block, not retyped markdown", async () => {
+  const { status, json } = await ask("What is the minimum number of load cell verification intervals for each accuracy class in OIML R 60-1?", { fresh: true });
+  if (status !== 200) throw new Error(`status ${status}`);
+  const blocks = Array.isArray(json.blocks) ? json.blocks : [];
+  const mdTable = /(^|\n)\s*\|[^\n]+\|\s*(\n\s*\|[-: |]+\|)?/.test(json.answer) && (json.answer.match(/\|/g) ?? []).length >= 6;
+  if (mdTable && blocks.length === 0) throw new Error("answer retyped a table as markdown while no block was returned");
+  if (blocks.length) {
+    const t = blocks.find((b) => b.type === "table");
+    if (!t) throw new Error(`blocks present but no table block (got ${blocks.map((b) => b.type)})`);
+    if (!t.payload || !Array.isArray(t.payload.columns) || !Array.isArray(t.payload.rows) || t.payload.rows.length === 0) {
+      throw new Error("table block payload missing columns/rows");
+    }
+  }
+});
+
 test("auth: bad key rejected", async () => {
   const res = await fetch(`${BASE}/v1/ask`, {
     method: "POST",
