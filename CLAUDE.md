@@ -49,7 +49,7 @@ config:
 |------|-------|-------|
 | Embeddings (index + query) | `@cf/qwen/qwen3-embedding-0.6b` ($0.012/M, 100+ languages) | same model both sides (mandatory); fallback `@cf/baai/bge-m3` (same price); whole-corpus embed ≈ $0.15 |
 | Reranker | `@cf/baai/bge-reranker-base` ($0.003/M) | ≈$0.00003/query; fallback: skip, vector order; GLM listwise rerank for the deep internal pool |
-| Standard QA (members) | qwen3.8-27b ($0.45/$3.20 per M) | ≈$0.004/answer; thinking off/low for latency |
+| Standard QA (ALL tiers, default since 2026-08-29) | glm-5.3-flash (natively multimodal, 320B/18B active; price TBD flash-tier) | unified answer model incl. future vision image-parts; understanding stays qwen3-30b-a3b; fallback qwen3-30b-a3b |
 | Anon tier / cheap / judge | qwen3-30b-a3b-fp8 ($0.051/$0.335 per M — MoE, 3B active) | the "cheap Qwen"; A/B alternates glm-4.7-flash ($0.06/$0.40), granite-4.0-h-micro ($0.017/$0.112); deepseek-v4-flash is NOT cheap on CF ($0.44/$1.32 — hot-path CRAG grader only, cached $0.014); promotion-gate judge = deepseek-v4-pro (quality-first lane); ≈$0.0003/answer |
 | Research / agents | glm-5.2 primary ($1.40/$0.26-cached/$4.40); kimi-k2.6 alternate ($0.95/$0.16/$4.00); deepseek-v4-flash-0731 doc-as-context (1.31M ctx, $0.44/$0.014-cached/$1.32; deepseek-v4-pro-0813 for hard reasoning); kimi-k3 benched ($3/$15 — too expensive) | prompt caching mandatory for dossier loops — cached input 5–15× cheaper |
 | Index-time enrichment / graph (quality-first lane) | deepseek-v4-pro-0813 default; **glm-5.2** for hardest slices (kimi-k3 benched — too expensive) | one-time ≈$40–100 total, prompt-cache doc prefixes |

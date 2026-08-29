@@ -1,8 +1,15 @@
 export const MODELS = {
   embed: "@cf/qwen/qwen3-embedding-0.6b",
   rerank: "@cf/baai/bge-reranker-base",
-  anon: "@cf/qwen/qwen3-30b-a3b-fp8",
-  member: "@cf/qwen/qwen3.8-27b", // Standard QA tier for signed-in members
+  // ANSWER MODEL (all tiers, user decision 2026-08-29): glm-5.3-flash —
+  // natively multimodal (vision-unified contract), GLM family, flash tier.
+  // Vision image-parts land with answer contract v2; text answers work now.
+  anon: "@cf/zai-org/glm-5.3-flash",
+  member: "@cf/zai-org/glm-5.3-flash",
+  // hot-path understanding/summarize stays on the cheap Qwen (cost-first lane)
+  understand: "@cf/qwen/qwen3-30b-a3b-fp8",
+  // generation fallback when the answer model is unavailable
+  fallback: "@cf/qwen/qwen3-30b-a3b-fp8",
   grader: "@cf/deepseek-ai/deepseek-v4-flash-0731", // CRAG grader + judges (unsuffixed slug was retired → silent 5018s)
   // contextual enrichment is the QUALITY-FIRST lane (one-time spend over
   // the corpus, its quality persists into every future retrieval)
@@ -10,6 +17,8 @@ export const MODELS = {
   // final-tier listwise reranker for hard/member queries (cascade:
   // cross-encoder prunes, listwise orders jointly)
   listwise: "@cf/zai-org/glm-4.7-flash",
+  // deep-research loop (G10): bounded agentic iterations, members-only
+  research: "@cf/zai-org/glm-5.3-flash",
 } as const;
 
 export const LIMITS = {

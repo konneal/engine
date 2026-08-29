@@ -13,6 +13,7 @@ import { embed } from "./ai";
 import { scoreFaithfulness } from "./faithfulness";
 import enrichmentPrompt from "../prompts/enrichment.md";
 import { reflect } from "./reflect";
+import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
 
 export interface Env {
@@ -321,7 +322,7 @@ async function handleAsk(
   // continuity block (below) instead of silently dropped
   const budget = num(env as any, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
   const { kept: keptHistory, overflow } = splitHistory(history, budget);
-  const summary = overflow.length >= 2 ? ((await summarizeHistory(env.AI, MODELS.anon, overflow)) ?? undefined) : undefined;
+  const summary = overflow.length >= 2 ? ((await summarizeHistory(env.AI, MODELS.understand, overflow)) ?? undefined) : undefined;
   let retrieved;
   // fresh=true (regenerate) skips the cache read; contextual follow-ups skip
   // the cache entirely — the answer depends on the conversation, not the query
@@ -332,7 +333,7 @@ async function handleAsk(
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang);
     if (wantsStream) {
       // a cache hit must still speak SSE — the chat client parses a stream
-      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.anon, query_hash: cached.value.query_hash }], corsHeaders(req));
+      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash }], corsHeaders(req));
     }
     return json({ ...cached.value, cached: true, quota });
   }
@@ -355,7 +356,7 @@ async function handleAsk(
       /* memory is additive */
     }
   }
-  const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history, convEntities);
+  const understanding = cached ? null : await understandQuery(env.AI, MODELS.understand, q.query, history, convEntities);
   if (conversationId && understanding) {
     const now = Date.now();
     const ents: Array<[string, string]> = [];
@@ -429,7 +430,7 @@ async function handleAsk(
       }
     }
     let answer = await generateOnce(env, model, messages);
-    if (answer === null && model !== MODELS.anon) answer = await generateOnce(env, MODELS.anon, messages);
+    if (answer === null) answer = await generateOnce(env, MODELS.fallback, messages);
     if (answer === null) {
       telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
@@ -534,8 +535,8 @@ async function handleAsk(
   }
 
   let answer = await generateOnce(env, model, messages);
-  if (answer === null && model !== MODELS.anon) {
-    answer = await generateOnce(env, MODELS.anon, messages);
+  if (answer === null) {
+    answer = await generateOnce(env, MODELS.fallback, messages);
   }
   if (answer) answer = canonicalRefusal(answer);
 
@@ -594,7 +595,7 @@ async function handleAsk(
   if (finalAnchors.violations.length > 0) {
     console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified — not caching");
   }
-  const out = { answer, citations: finalCites, model: MODELS.anon, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] };
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] };
   const cacheable = !contextual && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
@@ -655,7 +656,7 @@ async function handleSearch(
     return err(429, "quota_exceeded", `Daily search limit reached (${quota.limit}). Try again tomorrow.`);
   }
 
-  const understanding = await understandQuery(env.AI, MODELS.anon, q.query, []);
+  const understanding = await understandQuery(env.AI, MODELS.understand, q.query, []);
   const graphDocNumbers = await graphExpand(env, understanding);
   let retrieved;
   try {
@@ -795,6 +796,100 @@ async function scoreJudge(
   } catch {
     return null;
   }
+}
+
+/** Deep-research mode (G10 v1): bounded agentic loop for members —
+ *  retrieve → sufficiency judge → re-retrieve targeting the gap → answer
+ *  from the ACCUMULATED evidence. ≤ max_iterations rounds; every
+ *  iteration's retrieval goes through the same gated pipeline as a
+ *  normal ask. Workflows (durable, resumable) is the documented upgrade
+ *  path when runs outgrow a single request. */
+async function handleResearch(env: Env, ctx: ExecutionContext, req: Request, session: any): Promise<Response> {
+  if (!session) {
+    return err(403, "forbidden", "Deep research is a member feature — sign in with your OIML SMART account.");
+  }
+  const body = await readJson(req);
+  const q = validateQuery(body);
+  if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
+  const maxIters = Math.min(Math.max(Number(body?.max_iterations) || 3, 1), 3);
+
+  const started = Date.now();
+  const queryHash = await sha256Hex(q.query);
+  const understanding = await understandQuery(env.AI, MODELS.understand, q.query, [], []);
+  const graphDocNumbers = await graphExpand(env, understanding);
+  const eNote = await editionNote(env, understanding);
+
+  const accumulated = new Map<string, Hit>();
+  let iterations = 0;
+  let focus = understanding?.standalone_query?.trim() || q.query;
+  let judge: { sufficient: boolean; missing: string } | null = null;
+
+  for (let i = 0; i < maxIters; i++) {
+    iterations = i + 1;
+    let retrieved: { hits: Hit[] };
+    try {
+      retrieved = await retrieve(env, q.query, {
+        understanding: i === 0 ? understanding : ({ ...understanding, standalone_query: focus, query_variants: [], hypothetical_answer: undefined } as any),
+        graphDocNumbers,
+      });
+    } catch {
+      break;
+    }
+    for (const h of retrieved.hits.slice(0, LIMITS.rerankKeep)) {
+      if (!accumulated.has(h.id)) accumulated.set(h.id, h);
+    }
+    const passages = [...accumulated.values()];
+    judge = await (async () => {
+      try {
+        const res: any = await env.AI.run(MODELS.grader, {
+          messages: [
+            { role: "system", content: researchPromptText.trimEnd() },
+            { role: "user", content: `Research question: ${q.query}\n\nCollected passages (${passages.length}):\n${passages.map((h, n) => `[${n + 1}] ${h.metadata.docidentifier ?? ""} §${h.metadata.clause_anchor ?? ""}: ${h.text.slice(0, 700)}`).join("\n")}` },
+          ],
+          max_tokens: 3072,
+          reasoning_effort: "low",
+        });
+        const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+        let parsed: any = null;
+        for (const m of (text ?? "").matchAll(/\{[^{}]*\}/g)) {
+          try {
+            const obj = JSON.parse(m[0]);
+            if (typeof obj.sufficient === "boolean") parsed = obj;
+          } catch { /* keep scanning */ }
+        }
+        return parsed ? { sufficient: parsed.sufficient, missing: String(parsed.missing ?? "") } : null;
+      } catch {
+        return null;
+      }
+    })();
+    console.log("research iter", iterations, "passages", passages.length, "sufficient:", judge?.sufficient);
+    if (!judge || judge.sufficient || !judge.missing) break;
+    focus = `${focus} ${judge.missing}`.slice(0, LIMITS.maxInputChars);
+  }
+
+  const used = [...accumulated.values()];
+  if (!used.length) {
+    return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
+  }
+  const { messages, usedHits } = buildMessages(q.query, used, q.lang, [], eNote || undefined, undefined, LIMITS.inputTokenBudget);
+  let answer = await generateOnce(env, MODELS.research, messages);
+  if (answer === null) answer = await generateOnce(env, MODELS.fallback, messages);
+  if (answer === null) {
+    telemetry(env, ctx, "member", "research", MODELS.research, false, 0, queryHash, q.lang);
+    return err(502, "generation_failed", "The generation model is unavailable; please retry.");
+  }
+  answer = canonicalRefusal(answer);
+  const anchors = checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
+  if (anchors.violations.length) console.log("research anchors:", anchors.violations.length, "unverified");
+  const out = {
+    answer,
+    citations: citations(usedHits),
+    model: MODELS.research,
+    query_hash: queryHash,
+    research: { iterations, passages: used.length, elapsed_ms: Date.now() - started, sufficient: judge?.sufficient ?? null },
+  };
+  telemetry(env, ctx, "member", "research", MODELS.research, true, answer.length, queryHash, q.lang);
+  return json({ ...out, ...corsHeaders(req) });
 }
 
 /** Ops access to the Vectorize binding (get/upsert by id) for offline
@@ -1119,6 +1214,11 @@ export default {
 
     if (req.method === "POST" && (path === "/admin/enrich" || path === "/v1/admin/enrich")) return handleEnrich(env, ctx, req);
     if (req.method === "POST" && (path === "/admin/vectors")) return handleVectors(env, req);
+    if (req.method === "POST" && (path === "/api/research" || path === "/v1/research")) {
+      // member-only: a valid RAG session cookie is required (research spend stays with humans)
+      const session = env.SESSION_SECRET ? await sessionFrom(req, env as any) : null;
+      return handleResearch(env, ctx, req, session);
+    }
     if (req.method === "POST" && (path === "/admin/judge" || path === "/v1/admin/judge")) return handleJudge(env, req);
     if (req.method === "POST" && path === "/v1/admin/keys") return handleCreateKey(env, req);
     if (req.method === "GET" && path === "/v1/admin/keys") return handleListKeys(env, req);

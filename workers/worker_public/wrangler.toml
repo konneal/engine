@@ -44,7 +44,7 @@ binding = "INTERNAL_SERVICE"
 service = "rag-internal"
 
 [vars]
-INDEX_VERSION = "public-v2.58-mko-enriched"
+INDEX_VERSION = "public-v2.59-glm53"
 ANON_DAY_ASK = "20"
 ANON_DAY_SEARCH = "50"
 KEY_DAY_ASK_DEFAULT = "2000"
