@@ -110,6 +110,7 @@ class MkoUnit(BaseModel):
     type: str
     anchor: str = ""
     number: str = ""
+    cite_as: str = ""
     title: str = ""
     parent: str = ""
     breadcrumb: list[str] = Field(default_factory=list)
@@ -251,6 +252,10 @@ def to_doc_record(bundle: MkoBundle, corpus: str = "mko") -> DocRecord:
     m2 = re.search(r"(?:R|D|B|G|E|V)\s*-?\s*(\d+)", bundle.canonical)
     if m2:
         doc_number = str(int(m2.group(1)))
+    # producer-parsed identity wins when present (metanorma-document#52)
+    ids = getattr(bundle.document.ids, "__dict__", {}) if bundle.document else {}
+    if getattr(bundle.document.ids, "number", None):
+        doc_number = str(bundle.document.ids.number)
     return DocRecord(
         doc_id=f"{corpus}:{bundle.slug}",
         slug=bundle.slug,
@@ -314,7 +319,9 @@ def _unit_chunk(bundle: MkoBundle, unit: MkoUnit, doc: DocRecord) -> Chunk | Non
     # reranking and citation practice both key on the clause number
     clause_anchor = anchor
     clause_title = unit.title
-    if unit.type in ("table", "formula", "figure", "requirement", "note", "example") and unit.parent:
+    if unit.cite_as:
+        clause_anchor = unit.cite_as  # producer-derived (metanorma-document#52)
+    elif unit.type in ("table", "formula", "figure", "requirement", "note", "example") and unit.parent:
         parent = bundle.units_by_id.get(unit.parent)
         if parent is not None:
             clause_anchor = parent.number or parent.anchor or clause_anchor
