@@ -37,11 +37,11 @@ async function searchPassages(query) {
   return (d.results ?? []).map((r) => `${r.docidentifier}${r.clause_anchor ? " §" + r.clause_anchor : ""}: ${(r.snippet ?? "").slice(0, 500)}`);
 }
 
-async function ask(query) {
+async function ask(query, context) {
   const res = await fetch(`${BASE}/v1/ask`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
-    body: JSON.stringify({ query, stream: false, fresh: true }),
+    body: JSON.stringify({ query, stream: false, fresh: true, ...(context ? { context } : {}) }),
   });
   if (!res.ok) throw new Error(`ask ${res.status}`);
   return await res.json();
@@ -62,7 +62,7 @@ const rows = [];
 for (const c of run) {
   let row = { id: c.id, query: c.query };
   try {
-    const a = await ask(c.query);
+    const a = await ask(c.query, c.context);
     const answer = a.answer ?? "";
     // judge against the passages the answer was ACTUALLY built from (the
     // non-stream response carries them); fall back to a fresh search for

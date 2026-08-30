@@ -73,8 +73,49 @@ Request:
   "stream": true,            // SSE (default for /api/ask); false → single JSON
   "fresh":  false,           // true skips the answer cache (regenerate)
   "prev":   "previous user question",          // optional, helps follow-up retrieval
-  "history": [ {"role":"user","content":"..."}, {"role":"assistant","content":"..."} ]  // last ≤20 turns
+  "history": [ {"role":"user","content":"..."}, {"role":"assistant","content":"..."} ],  // last ≤20 turns
+  "context": {                          // optional, the declared context (see §2.1.1)
+    "kind":  "entity",                  // "page" | "entity" | "document" (absent = none)
+    "label": "this certificate R60/2021-A-EX1-26.01",   // ≤120 chars, echoed for display
+    "route": "/app/standards/r60/certificates/…",       // optional, page/entity
+    "doc":   "urn:oiml:pub:r:60-1:2021",                // optional, entity/document: scopes retrieval
+    "edition": "2021"                   // optional 4-digit override
+  }
 }
+```
+
+#### 2.1.1 The declared context (the panel's opt-in chips)
+
+The estate's assistant panel (site-shell's `AiBubble`) lets the user pin a
+context per message — the page they're on, the entity the page carries, or
+a corpus document. The service applies it honestly:
+
+- `doc` accepts the URN provenance form (`urn:oiml:pub:r:60-1:2021`) or the
+  plain docidentifier (`OIML R 60-1:2021` / `R 60`). A resolvable document
+  scopes retrieval to the publication FAMILY (the same filter a named
+  document in the query gets — an entity's clause provenance spans parts).
+  The family must exist in the publications registry, else the answer runs
+  on the general corpus and says so.
+- A document named **in the question** always wins over the declared chip —
+  the context informs, never overrides the user's explicit words.
+- The entity's own data is NOT in scope (that is TODO.ai-platform/03's
+  live-data exchange); the grounding is the governing publication's clauses.
+- A declared context bypasses both answer caches (the answer depends on the
+  declaration, not just the query) and is never written into them.
+- Conversational turns (greetings, identity) never ground in a declared
+  context — the echo reports `none`.
+
+Every ask response — the SSE `citations`/`done` events and the JSON body —
+echoes what was APPLIED, so the panel's context line never invents a
+grounding:
+
+```jsonc
+"context_applied": {
+  "kind": "entity",                       // the declared kind, or "none"
+  "label": "this certificate R60/2021-A-EX1-26.01",
+  "scoped_to": "OIML R 60:2021",          // null when the declaration did not scope retrieval
+  "note": "question-document-wins"        // only when a doc-carrying declaration
+}                                         // did not scope: also "document-not-in-corpus"
 ```
 
 **SSE protocol** (`text/event-stream`, each line `data: {json}`):

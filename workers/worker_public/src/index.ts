@@ -16,6 +16,7 @@ import { reflect } from "./reflect";
 import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
 import { contractV2, tableRetyped } from "./refs";
+import { NO_CONTEXT, appliedContext, contextNote, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 
 export interface Env {
   AI: any;
@@ -345,6 +346,12 @@ async function handleAsk(
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
 
+  // The declared context (TODO.ai-platform/02): the panel's opt-in chips.
+  // A declared context makes the answer depend on MORE than the query, so
+  // it bypasses both answer caches (read AND write) exactly as a
+  // contextual (history-carrying) turn does.
+  const declaredCtx = parseContext(body);
+
   const member = tier === "member" ? await sessionFrom(req, env as any) : null;
 
   const exempt = tier === "anon" ? await isExemptIp(env, clientIp(req)) : false;
@@ -391,18 +398,19 @@ async function handleAsk(
   const { kept: keptHistory, overflow } = splitHistory(history, budget);
   const summary = overflow.length >= 2 ? ((await summarizeHistory(env.AI, MODELS.understand, overflow)) ?? undefined) : undefined;
   let retrieved;
-  // fresh=true (regenerate) skips the cache read; contextual follow-ups skip
-  // the cache entirely — the answer depends on the conversation, not the query
-  const cached = body?.fresh === true || contextual ? null : await cacheGet(env, ns, q.query, q.lang);
+  // fresh=true (regenerate) skips the cache read; contextual follow-ups and
+  // declared-context asks skip the cache entirely — the answer depends on
+  // the conversation / the declared context, not the query alone
+  const cached = body?.fresh === true || contextual || declaredCtx ? null : await cacheGet(env, ns, q.query, q.lang);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang);
     if (wantsStream) {
       // a cache hit must still speak SSE — the chat client parses a stream
-      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash }], corsHeaders(req));
+      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota, context_applied: NO_CONTEXT }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, context_applied: NO_CONTEXT }], corsHeaders(req));
     }
-    return json({ ...cached.value, cached: true, quota });
+    return json({ ...cached.value, cached: true, quota, context_applied: NO_CONTEXT });
   }
 
   // warm the folded-query embedding concurrently with understanding —
@@ -425,10 +433,11 @@ async function handleAsk(
   }
   // ── fast path: standalone (non-contextual) near-duplicate of a recently
   // answered question — serve from the semantic cache WITHOUT paying the
-  // understanding call. Contextual turns never take this path (they always
-  // run understanding); fresh=true already bypassed the exact cache above.
+  // understanding call. Contextual turns and declared-context asks never
+  // take this path (they always run understanding + live retrieval);
+  // fresh=true already bypassed the exact cache above.
   let understanding: any = null;
-  if (!cached && !contextual && !q.lang && body?.fresh !== true) {
+  if (!cached && !contextual && !declaredCtx && !q.lang && body?.fresh !== true) {
     const wv0 = (await warmEmbed) ?? null;
     if (wv0) {
       const sc0 = await semanticCacheGet(env, wv0);
@@ -436,9 +445,9 @@ async function handleAsk(
         console.log("semantic cache hit (pre-understanding)");
         telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang);
         if (wantsStream) {
-          return sseResponse([{ type: "citations", citations: sc0.citations ?? [] }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true }], corsHeaders(req));
+          return sseResponse([{ type: "citations", citations: sc0.citations ?? [], context_applied: NO_CONTEXT }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true, context_applied: NO_CONTEXT }], corsHeaders(req));
         }
-        return json({ ...sc0, similar: true, ...(exempt ? {} : { quota }) });
+        return json({ ...sc0, similar: true, context_applied: NO_CONTEXT, ...(exempt ? {} : { quota }) });
       }
     }
   }
@@ -470,6 +479,36 @@ async function handleAsk(
     understanding = await understandingP;
     console.log("stage: understand+optimistic", Date.now() - t0, "ms");
   }
+  // ── The declared context's document scope (TODO.ai-platform/02) ──
+  // The entity/document chip's corpus reference pins retrieval to that
+  // publication FAMILY by writing the same understanding fields a named
+  // document in the query would — the whole doc-scoped machinery (the
+  // Vectorize filter, the family boost, the typed pin, the grade skip)
+  // keys off them. A document named IN THE QUESTION wins over the chip:
+  // the context informs, it never overrides the user's explicit words —
+  // and context_applied's note says which way it went, never silently.
+  const docScope = declaredCtx ? await resolveDocScope(env, declaredCtx) : null;
+  let ctxApplied;
+  if (!declaredCtx) {
+    ctxApplied = NO_CONTEXT;
+  } else if (docScope && !understanding?.doc_number) {
+    understanding = {
+      ...(understanding ?? syntheticUnderstanding(docScope)),
+      docidentifier: docScope.label,
+      doc_number: docScope.doc_number,
+      edition: docScope.edition ?? understanding?.edition ?? null,
+    };
+    ctxApplied = appliedContext(declaredCtx, docScope);
+    console.log("context scope:", docScope.label, `(${declaredCtx.kind})`);
+  } else if (docScope) {
+    ctxApplied = appliedContext(declaredCtx, null, "question-document-wins");
+    console.log("context scope: the question names doc#" + understanding.doc_number, "— it wins over the declared", docScope.label);
+  } else if (declaredCtx.doc) {
+    ctxApplied = appliedContext(declaredCtx, null, "document-not-in-corpus");
+    console.log("context scope:", declaredCtx.doc, "not in the corpus — the general corpus answers");
+  } else {
+    ctxApplied = appliedContext(declaredCtx, null);
+  }
   if (conversationId && understanding) {
     const now = Date.now();
     const ents: Array<[string, string]> = [];
@@ -486,9 +525,10 @@ async function handleAsk(
 
   // semantic cache: near-duplicate of a recently answered question —
   // serves the stored answer with a `similar: true` marker (checked only
-  // for standalone knowledge questions; contextual turns always run live;
-  // fresh=true regenerates, bypassing this cache too)
-  if (understanding?.intent !== "conversational" && !contextual && body?.fresh !== true) {
+  // for standalone knowledge questions; contextual turns and
+  // declared-context asks always run live; fresh=true regenerates,
+  // bypassing this cache too)
+  if (understanding?.intent !== "conversational" && !contextual && !declaredCtx && body?.fresh !== true) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
       const sc = await semanticCacheGet(env, warmVec);
@@ -496,9 +536,9 @@ async function handleAsk(
         console.log("semantic cache hit");
         telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang);
         if (wantsStream) {
-          return sseResponse([{ type: "citations", citations: sc.citations ?? [] }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true }], corsHeaders(req));
+          return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: NO_CONTEXT }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, context_applied: NO_CONTEXT }], corsHeaders(req));
         }
-        return json({ ...sc, similar: true, ...(exempt ? {} : { quota }) });
+        return json({ ...sc, similar: true, context_applied: NO_CONTEXT, ...(exempt ? {} : { quota }) });
       }
     }
   }
@@ -506,7 +546,9 @@ async function handleAsk(
   // Conversational route, decided by query UNDERSTANDING (any language, any
   // phrasing) — not string matching. No retrieval: nothing in the corpus
   // answers "who are you". The model speaks for itself from the service
-  // facts in identityNote (composed from the DATASETS catalog).
+  // facts in identityNote (composed from the DATASETS catalog). A declared
+  // context is honestly NOT applied here (nothing grounds a conversational
+  // turn) — the echo reports none.
   if (understanding?.intent === "conversational") {
     const queryHash = await sha256Hex(q.query);
     const messages = [
@@ -522,7 +564,7 @@ async function handleAsk(
         const sse = new ReadableStream({
           async start(controller) {
             const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-            send({ type: "citations", citations: [], ...(exempt ? {} : { quota }) });
+            send({ type: "citations", citations: [], context_applied: NO_CONTEXT, ...(exempt ? {} : { quota }) });
             let full = "";
             try {
               for await (const tok of sseTokens(stream)) {
@@ -532,7 +574,7 @@ async function handleAsk(
             } catch {
               // stream ended prematurely — deliver what we have
             }
-            send({ type: "done", model, query_hash: queryHash });
+            send({ type: "done", model, query_hash: queryHash, context_applied: NO_CONTEXT });
             telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
             controller.close();
           },
@@ -549,7 +591,7 @@ async function handleAsk(
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
     telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
-    return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], ...(exempt ? {} : { quota }) });
+    return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: NO_CONTEXT, ...(exempt ? {} : { quota }) });
   }
 
   try {
@@ -587,7 +629,7 @@ async function handleAsk(
   const { hits } = retrieved;
   if (hits.length === 0) {
     const answer = REFUSAL_ANSWER;
-    const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query) };
+    const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
     telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang);
     return json({ ...out, ...(exempt ? {} : { quota }) });
   }
@@ -600,7 +642,7 @@ async function handleAsk(
     hits,
     q.lang,
     keptHistory,
-    [processNote, eNote].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope)].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
@@ -615,7 +657,7 @@ async function handleAsk(
       const sse = new ReadableStream({
         async start(controller) {
           const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-          send({ type: "citations", citations: cites, ...(exempt ? {} : { quota }) });
+          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(exempt ? {} : { quota }) });
           let full = "";
           try {
             for await (const tok of sseTokens(stream)) {
@@ -630,7 +672,7 @@ async function handleAsk(
           const c2 = canonical0.includes(REFUSAL_ANSWER)
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
             : await contractV2(env.DB, canonical0, usedHits);
-          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2.blocks });
+          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2.blocks, context_applied: ctxApplied });
           telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang);
           const canonical = c2.text;
           // streamed answers can't be regenerated mid-flight; enforcement
@@ -641,7 +683,7 @@ async function handleAsk(
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified — not caching");
           }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !canonical.includes(REFUSAL_ANSWER)) {
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(REFUSAL_ANSWER)) {
             const wv = (await warmEmbed) ?? null;
             if (wv) semanticCachePut(env, ctx, wv, { answer: canonical, citations: cites, model, query_hash: queryHash });
             ctx.waitUntil(
@@ -734,8 +776,8 @@ async function handleAsk(
   if (finalAnchors.violations.length > 0) {
     console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified — not caching");
   }
-  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2ns.blocks };
-  const cacheable = !contextual && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2ns.blocks, context_applied: ctxApplied };
+  const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) semanticCachePut(env, ctx, warmVec, out);

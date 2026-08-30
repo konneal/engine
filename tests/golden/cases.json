@@ -167,5 +167,87 @@
       "answer_any": "[Ff]orm|test report",
       "citation_any": "R 60"
     }
+  },
+  {
+    "id": "ctx-entity-r60",
+    "query": "What metrological requirements govern this certificate's instrument?",
+    "context": {
+      "kind": "entity",
+      "label": "this certificate R60/2021-A-EX1-26.01",
+      "route": "/app/standards/r60/certificates/R60/2021-A-EX1-26.01",
+      "doc": "urn:oiml:pub:r:60-1:2021"
+    },
+    "expect": {
+      "answer_any": [
+        "load cell"
+      ],
+      "citation_all": "R ?60",
+      "context_kind": "entity",
+      "context_scoped_to": "OIML R 60:2021"
+    }
+  },
+  {
+    "id": "ctx-document-r111",
+    "query": "What are the maximum permissible errors for class E2 weights?",
+    "context": {
+      "kind": "document",
+      "label": "OIML R 111",
+      "doc": "OIML R 111"
+    },
+    "expect": {
+      "answer_any": [
+        "\\d"
+      ],
+      "citation_all": "R ?111",
+      "context_kind": "document",
+      "context_scoped_to": "OIML R 111"
+    }
+  },
+  {
+    "id": "ctx-page-console",
+    "query": "What is OIML R 60?",
+    "context": {
+      "kind": "page",
+      "label": "the IA console",
+      "route": "/app/ia/applications"
+    },
+    "expect": {
+      "answer_any": [
+        "load cell"
+      ],
+      "citation_any": "R 60",
+      "context_kind": "page"
+    }
+  },
+  {
+    "id": "ctx-question-doc-wins",
+    "query": "What does OIML R 76 say about maximum permissible errors?",
+    "context": {
+      "kind": "entity",
+      "label": "this certificate R60/2021-A-EX1-26.01",
+      "doc": "urn:oiml:pub:r:60-1:2021"
+    },
+    "expect": {
+      "citation_all": "R ?76",
+      "context_kind": "entity",
+      "context_note": "question-document-wins"
+    }
+  },
+  {
+    "id": "ctx-doc-not-in-corpus",
+    "query": "What is OIML R 60 about?",
+    "context": {
+      "kind": "document",
+      "label": "OIML R 999",
+      "doc": "OIML R 999"
+    },
+    "expect": {
+      "answer_any": [
+        "load cell"
+      ],
+      "citation_any": "R 60",
+      "context_kind": "document",
+      "context_note": "document-not-in-corpus"
+    }
   }
 ]

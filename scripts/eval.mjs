@@ -29,7 +29,7 @@ async function runCase(c) {
     res = await fetch(`${BASE}/v1/ask`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
-      body: JSON.stringify({ query: c.query, stream: false }),
+      body: JSON.stringify({ query: c.query, stream: false, ...(c.context ? { context: c.context } : {}) }),
     });
   } catch (e) {
     fail(`request failed: ${e.message}`);
@@ -66,6 +66,25 @@ async function runCase(c) {
     cites.length && cites.every((x) => re(c.expect.citation_all).test(`${x.docidentifier ?? ""} ${x.doc_id ?? ""}`))
       ? pass(`all citations ~/${c.expect.citation_all}/`)
       : fail(`citation outside /${c.expect.citation_all}/: ${citeText.slice(0, 120)}`);
+  }
+  // ── the declared-context legs (TODO.ai-platform/02): the response's
+  // context_applied echo must say what grounded the answer — the chip
+  // kind, the publication the declaration actually scoped retrieval to,
+  // and the honest degradation note when it could not. ──
+  if (c.expect.context_kind !== undefined) {
+    body.context_applied?.kind === c.expect.context_kind
+      ? pass(`context kind "${c.expect.context_kind}"`)
+      : fail(`context_applied.kind = ${JSON.stringify(body.context_applied?.kind)} (expected "${c.expect.context_kind}")`);
+  }
+  if (c.expect.context_scoped_to !== undefined) {
+    body.context_applied?.scoped_to === c.expect.context_scoped_to
+      ? pass(`context scoped to "${c.expect.context_scoped_to}"`)
+      : fail(`context_applied.scoped_to = ${JSON.stringify(body.context_applied?.scoped_to)} (expected "${c.expect.context_scoped_to}")`);
+  }
+  if (c.expect.context_note !== undefined) {
+    body.context_applied?.note === c.expect.context_note
+      ? pass(`context note "${c.expect.context_note}"`)
+      : fail(`context_applied.note = ${JSON.stringify(body.context_applied?.note)} (expected "${c.expect.context_note}")`);
   }
 
   return {
