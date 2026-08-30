@@ -21,6 +21,7 @@ export function isAllowedBubbleOrigin(origin: string): boolean {
   if (origin === "https://oimlsmart.org") return true;
   if (/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.oimlsmart\.org$/.test(origin)) return true;
   if (/^http:\/\/localhost(:\d{1,5})?$/.test(origin)) return true;
+  if (/^http:\/\/127\.0\.0\.1(:\d{1,5})?$/.test(origin)) return true;
   return false;
 }
 

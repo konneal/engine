@@ -53,7 +53,13 @@ const err = (status: number, code: string, message: string) =>
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin") ?? "";
   const allowed =
-    origin === "https://oimlsmart.org" || /^https:\/\/[a-z0-9-]+\.oimlsmart\.org$/.test(origin);
+    origin === "https://oimlsmart.org" ||
+    /^https:\/\/[a-z0-9-]+\.oimlsmart\.org$/.test(origin) ||
+    // the local dev posture: the platform and the minisites develop on
+    // localhost ports against the live service (the bubble bridge admits
+    // the same class; anon quota is per-IP, member auth needs the token)
+    /^http:\/\/localhost(:\d{1,5})?$/.test(origin) ||
+    /^http:\/\/127\.0\.0\.1(:\d{1,5})?$/.test(origin);
   return allowed
     ? {
         "access-control-allow-origin": origin,

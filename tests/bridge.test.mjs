@@ -19,6 +19,7 @@ test("origin allowlist: the estate pattern + localhost only", () => {
     "https://ai.oimlsmart.org",
     "http://localhost:5190",
     "http://localhost",
+    "http://127.0.0.1:4173",
   ]) {
     assert.equal(isAllowedBubbleOrigin(ok), true, ok);
   }
