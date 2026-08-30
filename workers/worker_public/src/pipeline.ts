@@ -65,14 +65,16 @@ export function retrievalQuery(query: string, prev?: string): string {
   return query;
 }
 
-/** Typed-chunk selection for the pin: among a doc's typed units, prefer
- *  tables, then the one whose text best overlaps the QUERY (the first
- *  candidate is wrong as often as right — annex example tables outrank
- *  nothing). Lexical-overlap heuristic over title + serialized rows. */
+/** Typed-chunk selection for the pin: among a doc's typed units pick the
+ *  one whose text best overlaps the QUERY (the first candidate is wrong as
+ *  often as right — annex example tables outrank nothing). Lexical-overlap
+ *  heuristic over title + serialized rows; tables, figures and formulas
+ *  compete on the same score so a figure question can pin the figure
+ *  (which then feeds multimodal generation), while table-value questions
+ *  still pin their table on overlap. */
 function pickTypedChunk(query: string, candidates: Hit[], ranked: Hit[]): Hit | null {
   if (!candidates.length) return null;
-  const tables = candidates.filter((h) => h.metadata.block === "table");
-  const pool = tables.length ? tables : candidates;
+  const pool = candidates;
   const terms = query.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((t) => t.length > 2);
   // the top-ranked PROSE passage usually sits in the answer clause: a
   // typed chunk from that same clause is the answering object, not a
