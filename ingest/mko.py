@@ -46,7 +46,8 @@ SUPERSEDED_BY_TYPES = {"obsoletedBy", "hasSuccessor", "succeededBy", "updates"}
 CITES_TARGET_RE = re.compile(r"^ext:")
 
 CHUNKED_UNIT_TYPES = {"clause", "annex", "term", "table", "formula",
-                      "requirement", "sourcecode", "note", "example"}
+                      "requirement", "sourcecode", "note", "example",
+                      "figure"}
 
 
 class MkoManifestComponent(BaseModel):
