@@ -400,7 +400,32 @@ async function handleAsk(
       }
     }
   }
-  if (!cached) understanding = await understandQuery(env.AI, MODELS.understand, q.query, history, convEntities);
+  // ── Option C: optimistic parallel retrieval ──
+  // The dense lane (folded-query embed + unfiltered Vectorize query) runs
+  // CONCURRENTLY with understanding instead of after it — the serial
+  // understand→retrieve chain collapses to max(understand, dense). The
+  // warm embedding IS the folded-query vector retrieve() would compute,
+  // and the query is issued with retrieve's exact parameters (topK,
+  // no filter), so when understanding emits no filter the optimistic
+  // results replace the primary dense query bit-for-bit; with a filter
+  // they union in as discounted candidates covering filter misses.
+  let optimisticVec: number[] | null = null;
+  let optimisticHits: Hit[] = [];
+  if (!cached) {
+    const understandingP = understandQuery(env.AI, MODELS.understand, q.query, history, convEntities);
+    try {
+      optimisticVec = (await warmEmbed) ?? null;
+      if (optimisticVec) {
+        const ores = await env.VECTORIZE.query(optimisticVec, { topK: LIMITS.retrieveK, returnMetadata: "all" });
+        optimisticHits = (ores.matches ?? []).map((m: any) => ({
+          id: m.id, score: m.score, metadata: m.metadata, text: (m.metadata?.chunk_text ?? ""),
+        })) as Hit[];
+      }
+    } catch {
+      // optimistic path is additive; retrieve() runs its own dense lane
+    }
+    understanding = await understandingP;
+  }
   if (conversationId && understanding) {
     const now = Date.now();
     const ents: Array<[string, string]> = [];
@@ -484,7 +509,8 @@ async function handleAsk(
   }
 
   try {
-    retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers });
+    retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
+      optimisticHits, optimisticVec });
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
     // they consume the same candidate list (grade is coarse: good/weak;
     // listwise reorders survivors). Doc-scoped queries skip the grade

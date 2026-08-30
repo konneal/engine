@@ -108,7 +108,20 @@ const PROCESS_EXPANSION = " OIML Certification System OIML-CS issuing authority 
 export async function retrieve(
   env: any,
   query: string,
-  opts: { prev?: string; understanding?: QueryUnderstanding | null; queryOverride?: string; federate?: (query: string) => Promise<Hit[]>; warmEmbed?: Promise<number[] | null>; graphDocNumbers?: string[] } = {},
+  opts: {
+    prev?: string;
+    understanding?: QueryUnderstanding | null;
+    queryOverride?: string;
+    federate?: (query: string) => Promise<Hit[]>;
+    warmEmbed?: Promise<number[] | null>;
+    graphDocNumbers?: string[];
+    /** Option C: dense-lane results computed concurrently with
+     *  understanding (same folded-query vector, retrieve's exact query
+     *  parameters). With no filter they REPLACE the primary dense query;
+     *  with a filter they union in as discounted filter-miss cover. */
+    optimisticHits?: Hit[];
+    optimisticVec?: number[] | null;
+  } = {},
 ): Promise<Retrieved> {
   const u = opts.understanding ?? null;
   // Filters and process-intent come ONLY from query understanding — no
@@ -127,28 +140,64 @@ export async function retrieve(
   // arXiv:2604.09868 §II-B5). Lexical must scan the whole corpus — the
   // old keywordRank only re-ordered dense hits and could not recover
   // exact-jargon misses. Fail-open: empty lexical list leaves dense alone.
+  // Option C: when the query is unchanged (rq === folded) the optimistic
+  // vector is already resolved — never await a fresh embed for it.
   const vectorP =
-    rq === folded && opts.warmEmbed
-      ? opts.warmEmbed.then((w) => w ?? embed(env.AI, MODELS.embed, rq))
-      : embed(env.AI, MODELS.embed, rq);
+    rq === folded && opts.optimisticVec
+      ? Promise.resolve(opts.optimisticVec)
+      : rq === folded && opts.warmEmbed
+        ? opts.warmEmbed.then((w) => w ?? embed(env.AI, MODELS.embed, rq))
+        : embed(env.AI, MODELS.embed, rq);
   const lexicalP = lexicalPrefilter(env, rq).catch(() => [] as Hit[]);
   const [vector, lexicalHits] = await Promise.all([vectorP, lexicalP]);
   if (lexicalHits.length) console.log("lexical prefilter:", lexicalHits.length, "hits");
   const q: any = { topK: LIMITS.retrieveK, returnMetadata: "all" };
   if (filter) q.filter = filter;
 
+  const optimistic = opts.optimisticHits ?? [];
+  const sameLane = rq === folded; // optimistic vector === this lane's vector
   let matches: any[] = [];
-  if (filter) {
+  if (!filter && sameLane && optimistic.length) {
+    // Option C fast path: the unfiltered dense query already ran
+    // concurrently with understanding — same vector, same topK, no
+    // filter. Reusing it skips one serial Vectorize round-trip with a
+    // bit-for-bit identical candidate set.
+    matches = optimistic.map((h) => ({ id: h.id, score: h.score, metadata: h.metadata }));
+    console.log("optimistic lane: reused", matches.length, "dense hits (no re-query)");
+  } else if (filter) {
     const filtered = await env.VECTORIZE.query(vector, q);
     matches = filtered.matches ?? [];
-    if (matches.length < LIMITS.rerankKeep) {
-      const unfiltered = await env.VECTORIZE.query(vector, { topK: LIMITS.retrieveK, returnMetadata: "all" });
+    if (matches.length < LIMITS.rerankKeep && optimistic.length) {
+      // the optimistic lane IS the unfiltered query — union it instead of
+      // issuing another one (same-lane: identical parameters; otherwise
+      // discounted — a different vector's neighbours are still evidence)
       const seen = new Set(matches.map((m: any) => m.id));
-      matches = [...matches, ...(unfiltered.matches ?? []).filter((m: any) => !seen.has(m.id))];
+      const disc = sameLane ? 1 : 0.8;
+      matches = [
+        ...matches,
+        ...optimistic
+          .filter((h) => !seen.has(h.id))
+          .map((h) => ({ id: h.id, score: h.score * disc, metadata: h.metadata })),
+      ];
     }
   } else {
     const res = await env.VECTORIZE.query(vector, q);
     matches = res.matches ?? [];
+  }
+  // rq diverged from the folded query (standalone_query / override) yet the
+  // optimistic hits still carry raw-question signal — union as discounted
+  // additive candidates, like the graph lane
+  if (!sameLane && optimistic.length) {
+    const seen = new Set(matches.map((m: any) => m.id));
+    let merged = 0;
+    for (const h of optimistic) {
+      if (!seen.has(h.id)) {
+        matches.push({ id: h.id, score: h.score * 0.8, metadata: h.metadata });
+        seen.add(h.id);
+        merged++;
+      }
+    }
+    if (merged) console.log("optimistic union:", merged, "candidates (different lane)");
   }
 
   // ── HyDE (Hypothetical Document Embeddings) ──
