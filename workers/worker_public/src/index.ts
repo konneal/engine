@@ -290,8 +290,13 @@ async function summarizeHistory(
         },
         { role: "user", content: convo },
       ],
-      max_tokens: 900,
+      max_tokens: 2048,
       reasoning_effort: "low",
+      // Qwen3 thinking-mode sampling (model card) — prevents the
+      // repetition loops that eat the budget before the summary lands
+      temperature: 0.6,
+      top_p: 0.95,
+      top_k: 20,
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
     return typeof text === "string" && text.trim() ? text.trim().slice(0, 1200) : null;

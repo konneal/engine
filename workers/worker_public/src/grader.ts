@@ -30,9 +30,14 @@ export async function gradeRetrieval(
         { role: "user", content: `Question: ${query}\n\nPassages:\n${summary}` },
       ],
       // reasoning shares this budget — starved budgets silently disable
-      // the CRAG corrective layer (default "good" fires)
-      max_tokens: 700,
+      // the CRAG corrective layer (default "good" fires). DeepSeek-V4's
+      // non-think mode is severely degraded (model card: HLE 8.1 vs 34.8),
+      // so the grader keeps reasoning on with real headroom plus the
+      // card's recommended sampling.
+      max_tokens: 3072,
       reasoning_effort: "low",
+      temperature: 1.0,
+      top_p: 1.0,
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
     const m = (text ?? "").match(/"grade"\s*:\s*"(good|weak|bad)"/);

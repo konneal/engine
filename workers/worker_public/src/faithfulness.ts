@@ -36,6 +36,9 @@ export async function scoreFaithfulness(
       ],
       max_tokens: 3072,
       reasoning_effort: "low",
+      // DeepSeek-V4 card: temp 1.0 / top_p 1.0
+      temperature: 1.0,
+      top_p: 1.0,
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
     // reasoning models can emit several {...} fragments before the final

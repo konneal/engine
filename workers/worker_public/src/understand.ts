@@ -95,6 +95,12 @@ export async function understandQuery(
     // not honored, so GLM needs headroom or reasoning starves the JSON.
     max_tokens: model.includes("glm") ? 3072 : 1500,
     reasoning_effort: "low",
+    // Qwen3 thinking-mode sampling (model card): greedy/1.0 sampling
+    // degrades into repetition loops — the 10s/5s timeout nulls were the
+    // budget being eaten by loops, not by reasoning
+    temperature: 0.6,
+    top_p: 0.95,
+    top_k: 20,
   };
   // each attempt issues a FRESH call — re-racing a timed-out promise would
   // retry nothing. Generous first attempt: reasoning + the full JSON must
