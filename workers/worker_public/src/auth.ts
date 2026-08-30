@@ -12,7 +12,8 @@ import {
   validateIdToken,
   OidcError,
 } from "./oidc";
-import { clearSessionCookie, mintSessionCookie, readSession, SessionClaims } from "./session";
+import { clearSessionCookie, mintSessionCookie, mintSessionToken, readSession, SessionClaims } from "./session";
+import { bubbleConfirmPage, isAllowedBubbleOrigin } from "./bubble";
 
 const PLAIN_LANGUAGE: Record<string, string> = {
   not_configured: "Sign-in is not configured for this service yet.",
@@ -27,6 +28,7 @@ const PLAIN_LANGUAGE: Record<string, string> = {
   token_audience: "The sign-in token was not issued for this service. Sign-in was refused.",
   token_expired: "The sign-in window expired. Please sign in again.",
   token_nonce: "The sign-in response failed its replay check. Please sign in again.",
+  origin_not_allowed: "That site may not connect the assistant to your account.",
 };
 
 export function authErrorText(reason: string): string {
@@ -63,14 +65,26 @@ const redirectWithError = (reason: string) =>
 export async function handleLogin(env: any, req: Request): Promise<Response> {
   const cfg = authConfig(env);
   if (!cfg) return redirectWithError("not_configured");
+  // Bubble bridge (bubble.ts): the embedded panel's sign-in. The origin
+  // is validated NOW, at flow start, and bound to the state — the
+  // callback hands the session token to exactly that origin, never to
+  // wherever the request happens to come from later.
+  const url0 = new URL(req.url);
+  const bubbleMode = url0.searchParams.get("mode") === "bubble";
+  const bubbleOrigin = url0.searchParams.get("origin") ?? "";
+  if (bubbleMode && !isAllowedBubbleOrigin(bubbleOrigin)) return redirectWithError("origin_not_allowed");
   try {
     const meta = await discoverIssuer(cfg.issuer);
     const state = randomToken();
     const nonce = randomToken();
     const pkce = await generatePkce();
-    await env.CACHE.put(`oa:${state}`, JSON.stringify({ nonce, verifier: pkce.verifier }), {
-      expirationTtl: 600,
-    });
+    await env.CACHE.put(
+      `oa:${state}`,
+      JSON.stringify({ nonce, verifier: pkce.verifier, ...(bubbleMode ? { mode: "bubble", origin: bubbleOrigin } : {}) }),
+      {
+        expirationTtl: 600,
+      },
+    );
     const url = buildAuthorizationUrl(meta, {
       clientId: cfg.clientId,
       redirectUri: cfg.redirectUri,
@@ -129,12 +143,29 @@ export async function handleCallback(env: any, req: Request): Promise<Response> 
       jwksUri: meta.jwks_uri,
     });
     const roles = Array.isArray(claims.roles) ? claims.roles.map(String) : [];
-    const cookie = await mintSessionCookie(cfg.sessionSecret, {
+    const sessionClaims = {
       sub: claims.sub,
       name: typeof claims.name === "string" ? claims.name : undefined,
       email: typeof claims.email === "string" ? claims.email : undefined,
       roles,
-    });
+    };
+    const cookie = await mintSessionCookie(cfg.sessionSecret, sessionClaims);
+    // Bubble bridge: hand the session to the embedded panel as a Bearer
+    // token via the confirm page — postMessage to the validated origin
+    // ONLY, and only on the user's explicit click (bubble.ts). The
+    // cookie still sets, so ai.oimlsmart.org itself is signed in too.
+    if (stored.mode === "bubble" && typeof stored.origin === "string" && isAllowedBubbleOrigin(stored.origin)) {
+      const { token, expiresAt } = await mintSessionToken(cfg.sessionSecret, sessionClaims);
+      return new Response(
+        bubbleConfirmPage({
+          name: sessionClaims.name ?? sessionClaims.email ?? "member",
+          origin: stored.origin,
+          token,
+          expiresAt,
+        }),
+        { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "set-cookie": cookie } },
+      );
+    }
     return new Response(null, { status: 302, headers: { location: "/", "set-cookie": cookie } });
   } catch (e) {
     if (e instanceof OidcError) console.error("auth callback:", e.reason, "—", e.message.slice(0, 200));

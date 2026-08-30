@@ -15,7 +15,8 @@
     "test:golden": "node scripts/eval.mjs",
     "test:e2e": "node tests/e2e.mjs",
     "lint:wrangler": "python3 scripts/lint_wrangler.py",
-    "test:ui": "node tests/ui.mjs"
+    "test:ui": "node tests/ui.mjs",
+    "test:bridge": "node --test tests/bridge.test.mjs"
   },
   "devDependencies": {
     "jsdom": "^29.1.1",

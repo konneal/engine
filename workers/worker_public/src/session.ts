@@ -29,15 +29,19 @@ async function hmac(secret: string, data: string): Promise<string> {
     .replace(/=+$/, "");
 }
 
-export async function mintSessionCookie(secret: string, claims: Omit<SessionClaims, "exp" | "iat">): Promise<string> {
+export async function mintSessionToken(secret: string, claims: Omit<SessionClaims, "exp" | "iat">): Promise<{ token: string; expiresAt: number }> {
   const full: SessionClaims = { ...claims, iat: Date.now(), exp: Date.now() + SESSION_TTL_SEC * 1000 };
   const payload = btoa(JSON.stringify(full))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
   const sig = await hmac(secret, payload);
-  const value = `${payload}.${sig}`;
-  return `${SESSION_COOKIE}=${value}; Path=/; Max-Age=${SESSION_TTL_SEC}; HttpOnly; Secure; SameSite=Lax`;
+  return { token: `${payload}.${sig}`, expiresAt: full.exp };
+}
+
+export async function mintSessionCookie(secret: string, claims: Omit<SessionClaims, "exp" | "iat">): Promise<string> {
+  const { token } = await mintSessionToken(secret, claims);
+  return `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_TTL_SEC}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 export function parseCookies(req: Request): Record<string, string> {
@@ -52,7 +56,15 @@ export function parseCookies(req: Request): Record<string, string> {
 
 export async function readSession(req: Request, secret: string | undefined): Promise<SessionClaims | null> {
   if (!secret) return null;
-  const raw = parseCookies(req)[SESSION_COOKIE];
+  // The cookie is the same-origin posture; the Bearer form is the bubble
+  // bridge (bubble.ts) — the same signed payload, sent cross-origin by
+  // the embedded panel. Cookie first so a stale stored token never
+  // shadows a live cookie session on the ai property itself.
+  let raw: string | undefined = parseCookies(req)[SESSION_COOKIE];
+  if (!raw) {
+    const m = (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
+    raw = m?.[1]?.trim();
+  }
   if (!raw) return null;
   const [payload, sig] = raw.split(".");
   if (!payload || !sig) return null;

@@ -38,6 +38,29 @@ curl -X POST https://ai.oimlsmart.org/v1/admin/keys \
 Response includes the plaintext `key` — store it now. List/revoke via
 `GET /v1/admin/keys` (revocation is a D1 update).
 
+### 1.4 The bubble bridge (the assistant embedded in estate properties)
+
+The shared chrome's assistant panel (site-shell's `AiBubble`) runs on
+OTHER origins (the platform, www, the minisites). The session cookie
+never crosses origins (`SameSite=Lax`, and the estate bans shared-domain
+cookies — the identity guide's SSO doctrine), so the panel carries the
+session as a Bearer token instead:
+
+- `GET /auth/login?mode=bubble&origin=<the page's origin>` — the panel
+  opens this in a popup. The origin is validated at flow start
+  (`https://oimlsmart.org`, `https://*.oimlsmart.org`, or
+  `http://localhost[:port]` for dev) and bound to the OIDC state.
+- `GET /auth/callback` — on a bubble flow, sets the cookie as usual AND
+  renders a confirm page ("Continue as <name> to <host>?"); only the
+  user's explicit click postMessages `{ type: "oimlsmart-ai-session",
+  token, name, expiresAt }` to the validated origin (never `*`).
+- The token is the same HMAC-signed payload the cookie carries (7-day
+  TTL). The panel sends it as `Authorization: Bearer <token>`; every
+  session-gated route (`/auth/me`, `/api/conversations*`,
+  `/api/ask|search` member tier) accepts either form. Stateless — there
+  is no server-side revocation; sign-out is the panel discarding the
+  token.
+
 ## 2. Asking questions
 
 ### 2.1 `POST /api/ask` (browser) · `POST /v1/ask` (integrators)
@@ -133,7 +156,7 @@ No generation cost — embedding + hybrid retrieval only.
 | `/api/conversations` | GET | list synced conversations |
 | `/api/conversations` | POST | create |
 | `/api/conversations/{id}` | GET | one conversation |
-| `/api/conversations/{id}` | POST | rename/update |
+| `/api/conversations/{id}` | PATCH | rename |
 | `/api/conversations/{id}` | DELETE | remove |
 | `/api/conversations/{id}/messages` | POST | append a message |
 

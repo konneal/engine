@@ -57,11 +57,25 @@ function corsHeaders(req: Request): Record<string, string> {
   return allowed
     ? {
         "access-control-allow-origin": origin,
-        "access-control-allow-methods": "GET, POST, OPTIONS",
+        // PATCH + DELETE: the conversations API speaks them (rename,
+        // delete) — the embedded panel preflights cross-origin.
+        "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
         "access-control-allow-headers": "authorization, content-type",
         "access-control-max-age": "86400",
       }
     : {};
+}
+
+/** CORS-complete a handler's response: the browser surface grew
+ *  piecemeal (the SSE ask paths carried the headers; the JSON + error
+ *  paths and the conversations API did not), which an embedded
+ *  cross-origin client reads as opaque network failures. One wrap at
+ *  the router keeps every browser-facing answer readable. */
+function withCors(res: Response, cors: Record<string, string>): Response {
+  if (!cors["access-control-allow-origin"]) return res;
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 async function kvIncr(cache: KVNamespace, key: string): Promise<number> {
@@ -1194,23 +1208,23 @@ export default {
 
     if (req.method === "GET" && (path === "/auth/login" || path === "/auth/login/")) return handleLogin(env as any, req);
     if (req.method === "GET" && (path === "/auth/callback" || path === "/auth/callback/")) return handleCallback(env as any, req);
-    if (req.method === "GET" && (path === "/auth/me" || path === "/auth/me/")) return handleMe(env as any, req);
+    if (req.method === "GET" && (path === "/auth/me" || path === "/auth/me/")) return withCors(await handleMe(env as any, req), cors);
     if ((req.method === "GET" || req.method === "POST") && (path === "/auth/logout" || path === "/auth/logout/")) return handleLogout(env as any, req);
 
     if (path === "/api/conversations" || path.startsWith("/api/conversations/")) {
       const session = await sessionFrom(req, env as any);
-      if (!session) return err(401, "unauthorized", "Sign in to sync your conversations across devices");
+      if (!session) return withCors(err(401, "unauthorized", "Sign in to sync your conversations across devices"), cors);
       const parts = path.split("/").filter(Boolean); // [api, conversations, id?, messages?]
       if (parts.length === 4 && parts[3] === "messages" && req.method === "POST") {
-        return handleAppendMessage(env, session.sub, req, parts[2]!);
+        return withCors(await handleAppendMessage(env, session.sub, req, parts[2]!), cors);
       }
       if (parts.length > 3) return err(404, "not_found", "Unknown route");
-      return handleConversations(env, session.sub, req, { method: req.method, id: parts[2] });
+      return withCors(await handleConversations(env, session.sub, req, { method: req.method, id: parts[2] }), cors);
     }
 
     if (req.method === "GET" && (path === "/api/datasets" || path === "/api/datasets/")) {
       const session = await sessionFrom(req, env as any);
-      return json({ datasets: datasetsFor(session), suggestions: SUGGESTIONS });
+      return json({ datasets: datasetsFor(session), suggestions: SUGGESTIONS }, 200, cors);
     }
 
     if (req.method === "GET" && (path === "/v1/admin/stats" || path === "/v1/admin/stats/")) {
@@ -1270,10 +1284,11 @@ export default {
         key = await authenticate(env, req);
         if (!key) return err(401, "unauthorized", "Provide a valid API key: Authorization: Bearer oiml_...");
       }
-      // a valid RAG session cookie upgrades the browser tier to member
+      // a valid RAG session (cookie, or the bubble bridge's Bearer token)
+      // upgrades the browser tier to member
       let tier: "anon" | "key" | "member" = isApi ? "key" : "anon";
       if (!isApi && env.SESSION_SECRET && (await sessionFrom(req, env as any))) tier = "member";
-      return handleAsk(env, ctx, req, tier, key);
+      return withCors(await handleAsk(env, ctx, req, tier, key), cors);
     }
 
     if (req.method === "POST" && (path === "/api/search" || path === "/v1/search")) {
@@ -1285,7 +1300,7 @@ export default {
       }
       let stier: "anon" | "key" | "member" = isApi ? "key" : "anon";
       if (!isApi && env.SESSION_SECRET && (await sessionFrom(req, env as any))) stier = "member";
-      return handleSearch(env, ctx, req, stier, key);
+      return withCors(await handleSearch(env, ctx, req, stier, key), cors);
     }
 
     if (req.method === "POST" && path === "/api/feedback") {
@@ -1293,7 +1308,7 @@ export default {
       const queryHash = typeof body?.query_hash === "string" ? body.query_hash : "";
       const rating = Number(body?.rating);
       if (!/^[a-f0-9]{64}$/.test(queryHash) || ![1, -1].includes(rating)) {
-        return err(400, "invalid_input", "query_hash and rating (1 or -1) are required");
+        return withCors(err(400, "invalid_input", "query_hash and rating (1 or -1) are required"), cors);
       }
       await env.DB.prepare("INSERT INTO feedback (query_hash, rating, ts) VALUES (?1,?2,?3)")
         .bind(queryHash, rating, new Date().toISOString())
