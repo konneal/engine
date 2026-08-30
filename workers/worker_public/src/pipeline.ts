@@ -467,24 +467,47 @@ export async function retrieve(
     }
   }
 
-// Edition recency: when the query does not pin an edition, newer editions
-  // get a tie-break nudge so stale duplicate chunks don't crowd out current
-  // ones. Scaled to the live score spread — rerank scores cluster within
-  // ~0.001, so any fixed-magnitude boost would reorder everything.
+// Edition steering, family-relative: when the query does not pin an
+  // edition, chunks from an OLDER edition of a publication are demoted
+  // whenever a NEWER edition of the SAME publication is in the pool.
+  // Superseded editions match archaic phrasing strongly (their wording is
+  // what the question echoes) and the per-doc diversity cap then fills the
+  // publication's slots with them — observed: R 76-1:1992/1988 passages
+  // displacing the current R 76-1:2006 on complex unfiltered queries.
+  // Cross-publication recency is deliberately NOT touched: a 1992
+  // publication that is still current must not be demoted because some
+  // unrelated 2024 document exists. Scaled to the live rerank spread —
+  // the scores cluster within ~0.001.
   if (!filters?.edition && hits.length > 1) {
     const year = (s?: string) => (/^(19|20)\d{2}$/.test(s ?? "") ? Number(s) : null);
     const scored = hits.map((h) => h.rerank_score ?? h.score);
     const spread = Math.max(...scored) - Math.min(...scored);
     if (spread > 0) {
-      const years = hits.map((h) => year(h.metadata.edition)).filter((y): y is number => y !== null && y >= 1990);
-      const max = years.length ? Math.max(...years) : 0;
+      const newest = new Map<string, number>();
       for (const h of hits) {
         const y = year(h.metadata.edition);
-        if (y && y >= 1990 && max > 1990) {
-          h.rerank_score = (h.rerank_score ?? h.score) + spread * 0.1 * ((y - 1990) / (max - 1990));
+        if (!y || y < 1990) continue;
+        const k = `${h.metadata.docidentifier}|${h.metadata.language}`;
+        newest.set(k, Math.max(newest.get(k) ?? 0, y));
+      }
+      let demoted = 0;
+      for (const h of hits) {
+        const y = year(h.metadata.edition);
+        const max = newest.get(`${h.metadata.docidentifier}|${h.metadata.language}`);
+        if (y && max && y < max) {
+          // the older the edition relative to the family's newest, the
+          // stronger the demotion; a sibling exactly one revision back
+          // still competes when its clause is the only source (§5 of the
+          // paper: superseded editions stay citable when current ones
+          // lack the content)
+          h.rerank_score = (h.rerank_score ?? h.score) - spread * 0.4 * ((max - y) / Math.max(1, max - 1990));
+          demoted++;
         }
       }
-      hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
+      if (demoted) {
+        console.log("edition steering: demoted", demoted, "superseded-edition chunks (family-relative)");
+        hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
+      }
     }
   }
 
