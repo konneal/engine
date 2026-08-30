@@ -167,38 +167,27 @@ export async function retrieve(
   } else if (filter) {
     const filtered = await env.VECTORIZE.query(vector, q);
     matches = filtered.matches ?? [];
-    if (matches.length < LIMITS.rerankKeep && optimistic.length) {
-      // the optimistic lane IS the unfiltered query — union it instead of
-      // issuing another one (same-lane: identical parameters; otherwise
-      // discounted — a different vector's neighbours are still evidence)
+    if (matches.length < LIMITS.rerankKeep) {
+      // sparse doc filter → widen with the unfiltered ranking. Same lane:
+      // the optimistic results ARE that ranking (identical vector, no
+      // filter) — reuse them; otherwise re-query with this lane's vector.
+      const unfiltered = sameLane && optimistic.length
+        ? optimistic.map((h) => ({ id: h.id, score: h.score, metadata: h.metadata }))
+        : (await env.VECTORIZE.query(vector, { topK: LIMITS.retrieveK, returnMetadata: "all" })).matches ?? [];
       const seen = new Set(matches.map((m: any) => m.id));
-      const disc = sameLane ? 1 : 0.8;
-      matches = [
-        ...matches,
-        ...optimistic
-          .filter((h) => !seen.has(h.id))
-          .map((h) => ({ id: h.id, score: h.score * disc, metadata: h.metadata })),
-      ];
+      matches = [...matches, ...unfiltered.filter((m: any) => !seen.has(m.id))];
     }
   } else {
     const res = await env.VECTORIZE.query(vector, q);
     matches = res.matches ?? [];
   }
-  // rq diverged from the folded query (standalone_query / override) yet the
-  // optimistic hits still carry raw-question signal — union as discounted
-  // additive candidates, like the graph lane
-  if (!sameLane && optimistic.length) {
-    const seen = new Set(matches.map((m: any) => m.id));
-    let merged = 0;
-    for (const h of optimistic) {
-      if (!seen.has(h.id)) {
-        matches.push({ id: h.id, score: h.score * 0.8, metadata: h.metadata });
-        seen.add(h.id);
-        merged++;
-      }
-    }
-    if (merged) console.log("optimistic union:", merged, "candidates (different lane)");
-  }
+  // NOTE: when rq diverged (standalone_query / override) the optimistic
+  // hits are deliberately NOT unioned. Measured 2026-08-30: injecting the
+  // raw question's top-50 into a rewritten query's pool let topically
+  // close but wrong documents outscore the correct ones under the
+  // cross-encoder — recall@5 fell 94.3% → 89.7% (golden ×3). The
+  // optimistic lane may only REPLACE an identical query, never dilute a
+  // better one.
 
   // ── HyDE (Hypothetical Document Embeddings) ──
   // Embed the hypothetical answer and search with it — its vocabulary
