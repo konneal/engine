@@ -638,11 +638,12 @@ async function handleAsk(
     console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
     // they consume the same candidate list (grade is coarse: good/weak;
-    // listwise reorders survivors). Doc-scoped queries are graded TOO: the
-    // filter can be a misread (colloquial "label on a bag of flour" pinned
-    // to R 76 instead of the prepackaged-goods R 79), and the grade is the
-    // only net that catches a wrong pin.
-    const gradePromise = gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text)).catch(() => null);
+    // listwise reorders survivors). Doc-scoped queries skip the grade
+    // entirely (the filter already pins the corpus; grading adds only latency).
+    const docScoped = !!(understanding?.doc_number);
+    const gradePromise = docScoped
+      ? Promise.resolve("skipped-doc-scoped" as const)
+      : gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text)).catch(() => null);
     if (retrieved.hits.length >= 4 && (member || understanding?.complexity === "complex")) {
       const reordered = await listwiseRerank(env, MODELS.listwise, understanding?.standalone_query || q.query, retrieved.hits);
       if (reordered) {
@@ -652,19 +653,9 @@ async function handleAsk(
     }
     const grade = await gradePromise;
     console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
-    if (grade === "weak") {
-      // weak evidence → retry UNFILTERED: drop the doc/edition pins instead
-      // of appending the docidentifier. The old broaden (query + the
-      // understanding's own docidentifier) doubled down on exactly the
-      // misread that starved the evidence — a corrective retry must be
-      // able to escape the filter, and only a strictly-better grade wins.
-      const unpinned = understanding ? { ...understanding, doc_number: undefined, edition: undefined } : undefined;
-      const second = await retrieve(env, q.query, {
-        prev,
-        understanding: unpinned,
-        queryOverride: understanding?.standalone_query?.trim() || undefined,
-        federate,
-      });
+    if (grade === "weak" && understanding?.docidentifier) {
+      const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate });
       const grade2 = await gradeRetrieval(env.AI, MODELS.grader, q.query, second.hits.map((h: Hit) => h.text));
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better
     }
