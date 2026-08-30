@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill: #ffffff; stroke: #334155; stroke-width: 1.5; }
+    .mko { fill: #eff6ff; stroke: #2563eb; stroke-width: 1.5; }
+    .proc { fill: #fefce8; stroke: #a16207; stroke-width: 1.5; }
+    .store { fill: #f0fdf4; stroke: #15803d; stroke-width: 1.5; }
+    .t  { font-size: 13px; font-weight: bold; fill: #1e293b; }
+    .s  { font-size: 11px; fill: #475569; }
+    .edge { stroke: #334155; stroke-width: 1.5; fill: none; marker-end: url(#arr3); }
+    .lbl { font-size: 10.5px; fill: #64748b; }
+    .ttl { font-size: 11px; fill: #64748b; letter-spacing: 2px; }
+  </style>
+
+  <text class="ttl" x="480" y="20" text-anchor="middle">PRODUCER-NATIVE INGESTION — METANORMA KNOWLEDGE OBJECTS (MN 116)</text>
+
+  <!-- source -->
+  <rect class="box" x="30" y="40" width="220" height="64" rx="8"/>
+  <text class="t" x="140" y="64" text-anchor="middle">Metanorma authoring</text>
+  <text class="s" x="140" y="82" text-anchor="middle">document.adoc &#8212; the typed</text>
+  <text class="s" x="140" y="96" text-anchor="middle">document model is the source</text>
+
+  <!-- bundle -->
+  <rect class="mko" x="300" y="40" width="360" height="130" rx="8"/>
+  <text class="t" x="480" y="62" text-anchor="middle">MKO bundle &#8212; one per document</text>
+  <text class="s" x="480" y="82" text-anchor="middle">typed units: clauses, tables, terms,</text>
+  <text class="s" x="480" y="96" text-anchor="middle">equations, figures, requirements</text>
+  <text class="s" x="480" y="113" text-anchor="middle">section graph (part_of &#183; cites &#183; defines)</text>
+  <text class="s" x="480" y="130" text-anchor="middle">Glossarist glossary &#183; Relaton bibliography</text>
+
+  <path class="edge" d="M 250 72 L 300 72"/>
+
+  <!-- chunking -->
+  <rect class="proc" x="710" y="40" width="220" height="130" rx="8"/>
+  <text class="t" x="820" y="64" text-anchor="middle">Chunking</text>
+  <text class="s" x="820" y="84" text-anchor="middle">clause-boundary chunks;</text>
+  <text class="s" x="820" y="98" text-anchor="middle">tables / equations / figures</text>
+  <text class="s" x="820" y="112" text-anchor="middle">stay atomic typed units</text>
+  <text class="s" x="820" y="129" text-anchor="middle">stable ids = content hash</text>
+  <text class="s" x="820" y="146" text-anchor="middle">provenance on every chunk</text>
+
+  <path class="edge" d="M 660 105 L 710 105"/>
+
+  <!-- enrichment -->
+  <rect class="proc" x="300" y="220" width="360" height="76" rx="8"/>
+  <text class="t" x="480" y="243" text-anchor="middle">Contextual enrichment (one-time)</text>
+  <text class="s" x="480" y="260" text-anchor="middle">a model writes a 2&#8211;3 sentence preamble situating</text>
+  <text class="s" x="480" y="274" text-anchor="middle">each chunk; embed preamble + chunk (&#8776;$0.002/chunk)</text>
+
+  <path class="edge" d="M 820 170 L 820 195 L 480 220"/>
+
+  <!-- embed -->
+  <rect class="proc" x="300" y="340" width="360" height="52" rx="8"/>
+  <text class="t" x="480" y="361" text-anchor="middle">Embed &#8594; index</text>
+  <text class="s" x="480" y="377" text-anchor="middle">same embedding model serves queries (mandatory)</text>
+
+  <path class="edge" d="M 480 296 L 480 340"/>
+
+  <!-- stores -->
+  <rect class="store" x="30" y="440" width="200" height="72" rx="8"/>
+  <text class="t" x="130" y="463" text-anchor="middle">Vectorize</text>
+  <text class="s" x="130" y="480" text-anchor="middle">dense lane,</text>
+  <text class="s" x="130" y="494" text-anchor="middle">metadata-filterable</text>
+
+  <rect class="store" x="260" y="440" width="200" height="72" rx="8"/>
+  <text class="t" x="360" y="463" text-anchor="middle">D1 + FTS5</text>
+  <text class="s" x="360" y="480" text-anchor="middle">full-corpus BM25</text>
+  <text class="s" x="360" y="494" text-anchor="middle">over enriched text</text>
+
+  <rect class="store" x="490" y="440" width="200" height="72" rx="8"/>
+  <text class="t" x="590" y="463" text-anchor="middle">D1 unit_payloads</text>
+  <text class="s" x="590" y="480" text-anchor="middle">typed objects,</text>
+  <text class="s" x="590" y="494" text-anchor="middle">MN 116 schemas</text>
+
+  <rect class="store" x="720" y="440" width="200" height="72" rx="8"/>
+  <text class="t" x="820" y="463" text-anchor="middle">R2 assets</text>
+  <text class="s" x="820" y="480" text-anchor="middle">figures, immutable,</text>
+  <text class="s" x="820" y="494" text-anchor="middle">/assets/u:&#8230;.&lt;ext&gt;</text>
+
+  <path class="edge" d="M 400 392 L 160 440"/>
+  <path class="edge" d="M 450 392 L 360 440"/>
+  <path class="edge" d="M 510 392 L 590 440"/>
+  <path class="edge" d="M 560 392 L 810 440"/>
+
+  <text class="s" x="480" y="556" text-anchor="middle">Incremental re-ingest: bundles diff by (document, unit id) + content hash &#8212;</text>
+  <text class="s" x="480" y="572" text-anchor="middle">a synonym change re-processes 34 of 3 053 chunks; a no-change rebuild reports zero</text>
+</svg>
