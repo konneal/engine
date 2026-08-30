@@ -411,6 +411,7 @@ async function handleAsk(
   // they union in as discounted candidates covering filter misses.
   let optimisticVec: number[] | null = null;
   let optimisticHits: Hit[] = [];
+  const t0 = Date.now();
   if (!cached) {
     const understandingP = understandQuery(env.AI, MODELS.understand, q.query, history, convEntities);
     try {
@@ -425,6 +426,7 @@ async function handleAsk(
       // optimistic path is additive; retrieve() runs its own dense lane
     }
     understanding = await understandingP;
+    console.log("stage: understand+optimistic", Date.now() - t0, "ms");
   }
   if (conversationId && understanding) {
     const now = Date.now();
@@ -509,8 +511,10 @@ async function handleAsk(
   }
 
   try {
+    const tR = Date.now();
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
       optimisticHits, optimisticVec });
+    console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
     // they consume the same candidate list (grade is coarse: good/weak;
     // listwise reorders survivors). Doc-scoped queries skip the grade
@@ -527,7 +531,7 @@ async function handleAsk(
       }
     }
     const grade = await gradePromise;
-    console.log("grade:", grade);
+    console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate });

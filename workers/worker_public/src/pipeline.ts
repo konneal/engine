@@ -386,11 +386,13 @@ export async function retrieve(
     }
   }
   hits.sort((a, b) => b.score - a.score);
+  const tRerank = Date.now();
 
   if (hits.length > 1) {
     // 1. cross-encoder rerank (semantic precision)
     try {
       const scores = await rerank(env.AI, MODELS.rerank, query, hits.map((h) => h.text));
+      console.log("stage: rerank", Date.now() - tRerank, "ms over", hits.length, "candidates");
       if (scores) {
         hits.forEach((h, i) => (h.rerank_score = scores[i]));
         hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
