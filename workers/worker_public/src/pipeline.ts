@@ -493,12 +493,17 @@ export async function retrieve(
   // without this guarantee the model never sees a unit id to reference.
   let finalHits = diversified.slice(0, LIMITS.rerankKeep);
   if (filters?.doc_number) {
-    const has = (arr: Hit[], pred: (h: Hit) => boolean) => arr.some(pred);
     const sameDocTyped = (h: Hit) =>
       !!h.metadata.unit_id && !!h.metadata.block && h.metadata.doc_number === filters.doc_number;
-    if (!has(finalHits, sameDocTyped)) {
+    {
+      // the pin guarantees the BEST query-overlap typed unit a slot — not
+      // merely "some" typed unit. Otherwise a doc-scoped figure question
+      // keeps an unrelated dirty-lane table (typed ⇒ pin skipped) and the
+      // figure unit never reaches the model, leaving the multimodal path
+      // and [[u:…]] references unreachable. Table-value questions are
+      // unaffected: their table wins the overlap score outright.
       const typed = pickTypedChunk(query, hits.filter(sameDocTyped), hits);
-      if (typed) {
+      if (typed && !finalHits.some((h) => h.id === typed.id)) {
         finalHits = [...finalHits.slice(0, LIMITS.rerankKeep - 1), typed];
         console.log("typed pin:", typed.metadata.docidentifier, "§", typed.metadata.clause_anchor, `(${typed.metadata.block})`);
 
