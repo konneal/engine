@@ -1,0 +1,260 @@
+# Grounding legal metrology: a retrieval-augmented question-answering service over the OIML publications corpus
+
+*Draft article for the OIML Bulletin — 2026-08-30. Style: Bulletin
+technical article (MS Word single-column on submission; this is the
+authoring source). Numbers are production-measured unless noted.*
+
+---
+
+## Abstract
+
+The OIML publishes close to 900 documents — Recommendations, Basic
+publications, Guides, Documents and Expert reports — that together form
+the reference library of legal metrology. Finding what they say has
+required knowing the corpus before querying it. We describe a
+question-answering service, **OIML SMART AI** (ai.oimlsmart.org), that
+answers natural-language questions from the indexed publications with
+clause-level citations, verbatim quote anchors for normative values, and
+typed renderings of the tables and equations the answers depend on. The
+service measures every component it ships: a golden question set,
+retrieval metrics in the tradition of the information-retrieval
+literature, and judged faithfulness. We report the measured design
+decisions, the corpus-structure findings that shaped them, and the open
+path: producer-native ingestion of the Metanorma document model so that
+any Metanorma-authored corpus can be indexed the same way.
+
+---
+
+## 1. Introduction
+
+Legal metrology's knowledge lives in a large, cross-referential,
+multi-edition corpus. A typical working question — *"what is the maximum
+permissible error for a class III nonautomatic weighing instrument?"* —
+requires knowing which Recommendation applies (OIML R 76-1), which
+edition is current, which clause holds the table, and how to read the
+table's rows against the instrument's verification scale intervals.
+Every one of those steps assumes corpus knowledge the questioner may not
+have.
+
+Question answering over such corpora has been transformed by
+retrieval-augmented generation (RAG): a language model is given passages
+retrieved from a trusted corpus and may use only those. The engineering
+challenge is no longer whether a model can write fluent prose — it can —
+but whether the *right passages* are found, whether the answer stays
+*faithful* to them, and whether the reader can *verify* the result. Our
+service is built around those three properties.
+
+This article describes the architecture as deployed, the measurements
+that shaped it, and the corpus findings — including errors in the
+bibliographic record itself — that surfaced because the system keeps
+score. It closes with the producer-native ingestion path (Metanorma
+Knowledge Objects) and what it makes possible for other standards bodies.
+
+## 2. What the service does
+
+A user asks a question in any language. The service:
+
+1. **Understands the question** with a small language model — language,
+   named publication, edition, defined terms, complexity. There are no
+   keyword rules; the same model makes these judgements for every
+   question.
+2. **Retrieves** from a vector index of the corpus (clause-boundary
+   chunks with contextual preambles) *and*, in parallel, from a
+   full-corpus keyword index — exact identifiers, part numbers and
+   defined terms that vector similarity alone misses.
+3. **Ranks** the fused candidates with a cross-encoder; complex
+   questions get a second, stronger re-ranking pass.
+4. **Answers from the retrieved passages only**, under a contract that
+   requires inline citations (`[OIML R 60-1:2021 §4.4.2]`) and verbatim
+   quote anchors for normative values.
+5. **Verifies** the answer after generation: a deterministic check that
+   every quoted phrase exists in a cited passage; a separate judge that
+   scores faithfulness; a correction-and-retry when either fails. An
+   answer that cannot be verified is never written to the answer cache.
+
+When the question names a publication, answers are steered to the
+current edition by a registry derived from the bibliographic record's
+supersession links (§5). When the answer depends on a table or
+equation, the interface renders the *producer's* typed object — the
+actual rows and columns — never the model's re-typing of it (§6).
+
+If the corpus does not contain the answer, the system says so in one
+canonical sentence and redirects; refusals are never cached, because a
+refusal is a property of the moment, not of the question.
+
+## 3. Corpus and structure
+
+The indexed corpus comprises the English editions of the OIML
+publications (~900 documents, ~9.3 million words). Documents are chunked
+along clause boundaries — never arbitrary token windows — and each chunk
+carries provenance: publication identifier, edition, language, clause
+anchor, and bibliographic status.
+
+Three corpus-level findings shaped the design:
+
+**The bibliographic status field disagrees with its own record.** In 58
+of 224 publication families, the machine-readable status field claims a
+document is current while the same record's supersession links say
+otherwise. The service therefore *derives* status from the links and
+ignores the field. More consequentially, 36 of 224 families have no
+recorded successor link at all, so the current edition cannot be derived
+for them; the registry surfaces these gaps rather than guessing. Both
+numbers are the worklist for upstream bibliographic corrections — the
+kind that serving surfaces only because it keeps score.
+
+**Tables are where the normative values live.** Maximum permissible
+errors, accuracy-class limits, verification interval bounds — the values
+practitioners ask for — are tabular. Flattening tables into prose loses
+the row/column geometry that makes them answerable. The index now treats
+tables as atomic typed objects (§6).
+
+**Structure is a retrieval signal.* Standards are hierarchically
+organized with extensive cross-references; the system indexes the
+section hierarchy and the citation graph as a queryable graph (7,128
+nodes, 6,486 edges) alongside the text, so a defined term can be
+resolved to the documents that define it even when the question's
+vocabulary does not match the corpus's.
+
+## 4. Retrieval: what the measurements showed
+
+We evaluate retrieval with a golden question set (now 29 questions
+including eight table-value questions with witness rows) using
+recall@5, average precision@5, and mean reciprocal rank@5 — the protocol
+of the standards-retrieval literature. Single runs proved noisy (±5
+percentage points); all reported numbers are means over three runs on a
+quiet account.
+
+The single largest measured improvement came from making keyword
+retrieval a **full-corpus first stage** rather than a re-scoring of the
+vector results: recall@5 rose from 86% to 95%. The reason is structural
+— standards vocabulary is exact ("n_LC", "R 60-3", "creep"), and dense
+embeddings alone miss exact identifiers that a lexical scan of the whole
+corpus recovers. Fusing both rankings (reciprocal rank fusion) lifted
+precision and MRR without costing recall.
+
+The second improvement came from **contextual enrichment**: a one-time
+pass that prepends a short model-written preamble to every chunk ("this
+clause defines the accuracy-class limits for load cells") before
+embedding and indexing. This is the contextual-retrieval recipe
+validated industry-wide; our corpus measurement confirmed it, and the
+one-time cost (~$0.0017 per chunk) is amortized over every future
+answer.
+
+With the typed-table lane live (§6), the current baseline is:
+
+| Metric | Value |
+|---|---|
+| Recall@5 (mean of 3) | **96.6%** |
+| Average precision@5 | 0.82 |
+| MRR@5 | 0.85 |
+| End-to-end golden cases | 14/14 |
+
+## 5. Editions and trust
+
+Which edition applies is as consequential as what it says. The service's
+registry of publication families and editions is derived from
+supersession links, not from status fields (§3). Citations carry the
+edition and status of every source; superseded sources are marked.
+Answers to questions that name a publication are steered to the current
+edition; answers that must cite a superseded edition (the 2021 passages
+do not reproduce a table the 2017 edition carries) say so explicitly.
+
+## 6. Tables, equations, and figures as typed objects
+
+The most consequential rendering decision: the language model never
+re-types normative data. When an answer depends on a table, the model
+emits a symbolic reference to the table's unit (`[[u:table-1]]`); the
+server validates the reference against the passages actually used and
+resolves it to the producer's typed payload — columns, rows, units. The
+interface renders the exact object. Small verbatim values in prose are
+permitted and mechanically verified against the source. The payload
+never passes through the model's output, so it cannot be corrupted by
+generation.
+
+Figures are described by a vision-capable model that reads the actual
+image pixels; equations are carried in LaTeX and plain-language
+description. Both arrive as typed objects with the same validation.
+
+## 7. Models, cost, and sovereignty
+
+All models are open-weight and served on a single cloud platform
+(Cloudflare Workers AI); no corpus data is sent to proprietary model
+providers. The answer model (GLM-5.3 Flash, natively multimodal) serves
+all tiers at approximately $0.001 per answer. The full one-time corpus
+preparation — contextual enrichment of 42,000 chunks — cost
+approximately $75. Daily serving at current traffic is under $5 per
+month including infrastructure. The model policy is deliberately
+cost-first on the serving path (every question pays it) and quality-first
+on one-time work (enrichment, captioning, evaluation), where quality
+persists into every future answer.
+
+## 8. The producer-native path: Metanorma Knowledge Objects
+
+OIML publications are authored in Metanorma, a model-driven document
+system: the source of truth is a typed document model, not any rendered
+PDF or HTML. The service's newest ingestion path consumes that model
+directly — one bundle per document containing typed units (clauses,
+tables, terms, equations, figures, requirements), a section graph, a
+native Glossarist glossary, and Relaton bibliographic objects — and
+replaces HTML scraping end to end for the cleanly-authored portion of
+the corpus. The format, Metanorma Knowledge Objects (MKO), is specified
+as Metanorma note 116 with the consumer contract (symbolic unit
+references and typed excerpts) contributed from this work.
+
+This path matters beyond OIML: any standards body whose publications are
+authored in Metanorma gets structured, table-aware, graph-connected
+question answering over its corpus without scraping renderings. The
+guidelines for building such a service from scratch accompany this
+article.
+
+## 9. Evaluation as a discipline
+
+The service's answers are evaluated on three axes, continuously:
+
+- **Retrieval** (recall, precision, MRR against the golden set with
+  witness citations)
+- **Faithfulness** (an independent judge scores whether each claim is
+  supported by the retrieved passages — with the important lesson that
+  the judge must see the passages the answer was actually built from,
+  not a fresh retrieval)
+- **User feedback** (thumbs up/down on every answer, logged to the same
+  evaluation loop)
+
+Every change ships through the same gate: the suites run in CI and the
+service's cache versions flush on every retrieval change so no answer is
+served from a superseded index.
+
+## 10. Conclusions and outlook
+
+A grounded, citation-linked, typed-rendering question-answering service
+over the OIML corpus is measurable, economical, and — with the
+producer-native ingestion path — increasingly maintained by the
+documents' own structure rather than by scraping their renderings. The
+open work is equally concrete: upstream bibliographic corrections for
+the 36 families without derivable current editions; a publisher-specific
+identifier flavor so citation joins become exact; collection-level
+bundles for cross-document reasoning; and interlingual unit alignment so
+the same clause can be answered in every OIML language.
+
+The service is live at ai.oimlsmart.org. Try it, and tell us when it is
+wrong — the feedback button is the fastest path into the evaluation
+loop that everything above runs on.
+
+---
+
+### References
+
+1. Al Masoud, A., Arazzi, M., Germani, S., Nocera, A. *Exploring
+   Structural Complexity in Normative RAG with Graph-based approaches: A
+   case study on the ETSI Standards.* arXiv:2604.09868 (2026).
+2. Guttal, P., et al. *Structure-Aware Chunking for Tabular Data in
+   Retrieval-Augmented Generation.* arXiv:2605.00318 (2026).
+3. Anthropic. *Contextual Retrieval.* Engineering blog (2024).
+4. Günther, M., et al. *Late Chunking: Contextual Chunk Embeddings Using
+   Long-Context Embedding Models.* arXiv:2409.04701 (2024).
+5. Lewis, P., et al. *Retrieval-Augmented Generation for
+   Knowledge-Intensive NLP Tasks.* NeurIPS (2020).
+6. Metanorma. *MN 116: Metanorma Knowledge Objects (MKO) machine
+   serialization format.* Metanorma documentation (2026).
+7. Xu, L., et al. *Equipping Retrieval-Augmented LLMs with Document
+   Structure Awareness.* arXiv:2510.04293 (2025).
