@@ -3,6 +3,7 @@ import { LIMITS, MODELS, DATASETS } from "./config";
 import systemPromptText from "../prompts/system.md";
 import conversationalPromptText from "../prompts/conversational.md";
 import listwisePromptText from "../prompts/listwise.md";
+import { tableContext } from "./tablecontext";
 
 /** The one sanctioned refusal sentence (also in prompts/system.md).
  *  Refusals are never cached: a refusal says "retrieval found nothing",
@@ -451,6 +452,33 @@ export async function retrieve(
       if (typed) {
         finalHits = [...finalHits.slice(0, LIMITS.rerankKeep - 1), typed];
         console.log("typed pin:", typed.metadata.docidentifier, "§", typed.metadata.clause_anchor, `(${typed.metadata.block})`);
+
+        // small-to-big (the hierarchy every bundle carries): an
+        // embedded object answers WITH its clause — if the parent
+        // clause's prose passage is not already among the finals, one
+        // metadata-filtered fetch adds it. The typed unit cites; the
+        // clause grounds.
+        const anchor = typed.metadata.clause_anchor;
+        const docId = typed.metadata.doc_id;
+        const parentPresent = finalHits.some(
+          (h) => h.metadata.doc_id === docId && h.metadata.clause_anchor === anchor && !h.metadata.unit_id,
+        );
+        if (anchor && docId && !parentPresent) {
+          try {
+            const pv = await env.VECTORIZE.query(vector, {
+              topK: 4,
+              returnMetadata: "all",
+              filter: { $and: [{ doc_id: { $eq: docId } }, { clause_anchor: { $eq: anchor } }] },
+            });
+            const parent = (pv.matches ?? []).map((m: any) => ({ id: m.id, score: m.score, metadata: m.metadata, text: m.metadata?.chunk_text ?? "" })).find((h: any) => !h.metadata?.unit_id);
+            if (parent && !finalHits.some((h) => h.id === parent.id)) {
+              finalHits = [...finalHits, { ...parent, score: parent.score * 0.7 }];
+              console.log("small-to-big: parent §", anchor, "of", typed.metadata.docidentifier, "added");
+            }
+          } catch {
+            // additive lane; primary results stand
+          }
+        }
       }
     }
   }
@@ -629,7 +657,10 @@ export function buildMessages(
     // model can reference [[u:<id>]] instead of retyping the object
     const unitTag = (h.metadata as any).unit_id ? ` unit ${(h.metadata as any).unit_id}${(h.metadata as any).block ? ` (${(h.metadata as any).block})` : ""}` : "";
     const head = `[${usedHits.length + 1}] ${label}${unitTag} ${h.metadata.clause_title ? "— " + h.metadata.clause_title : ""}\n`;
-    const body = clipToTokens(h.text, LIMITS.maxPassageTokens);
+    // tables: schema-aware pruning from the producer payload; the
+    // stored text is the fallback (pruning never goes below baseline)
+    const pruned = (h.metadata as any).block === "table" ? tableContext(h.metadata, query) : null;
+    const body = clipToTokens(pruned ?? h.text, LIMITS.maxPassageTokens);
     const t = estTokens(head) + estTokens(body);
     if (t <= remain) {
       passageParts.push(head + body);
