@@ -140,13 +140,14 @@ validated industry-wide; our corpus measurement confirmed it, and the
 one-time cost (~$0.0017 per chunk) is amortized over every future
 answer.
 
-With the typed-table lane live (§6), the current baseline is:
+With the typed-table lane live (§6) and retrieval lanes running
+concurrently with query understanding, the current baseline is:
 
 | Metric | Value |
 |---|---|
-| Recall@5 (mean of 3) | **96.6%** |
-| Average precision@5 | 0.82 |
-| MRR@5 | 0.85 |
+| Recall@5 (mean of 3) | **95.4%** |
+| Average precision@5 | 0.83 |
+| MRR@5 | 0.87 |
 | End-to-end golden cases | 14/14 |
 
 ## 5. Editions and trust
