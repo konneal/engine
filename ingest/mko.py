@@ -176,7 +176,13 @@ class MkoBundle:
             with zipfile.ZipFile(path) as zf:
                 self._files = {name: zf.read(name) for name in zf.namelist()}
         elif path.is_dir():
-            self._files = {p.name: p.read_bytes() for p in path.iterdir() if p.is_file()}
+            # manifest component paths are bundle-relative ("assets/<hash>") —
+            # a flat top-level read misses every asset and verification fails
+            self._files = {
+                p.relative_to(path).as_posix(): p.read_bytes()
+                for p in path.rglob("*")
+                if p.is_file()
+            }
         else:
             raise FileNotFoundError(f"not an MKO bundle: {path}")
         self.manifest = MkoManifest(**json.loads(self._text("manifest.json")))
