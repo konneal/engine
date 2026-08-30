@@ -320,9 +320,12 @@ async function handleAsk(
   // pipeline via the service binding; rag-public never touches the
   // internal index itself, and generation/rerank stay in ONE pipeline.
   const service = env.INTERNAL_SERVICE;
-  const cookie = req.headers.get("cookie") ?? "";
+  const fedAuth = {
+    cookie: req.headers.get("cookie") ?? "",
+    authorization: req.headers.get("authorization") ?? "",
+  };
   const federate = member && service
-    ? (q2: string) => retrieveInternal(service, cookie, q2)
+    ? (q2: string) => retrieveInternal(service, fedAuth, q2)
     : undefined;
 
   const ns = tier === "key" ? `k:${key!.id}` : member ? `m:${member.sub}` : "anon";

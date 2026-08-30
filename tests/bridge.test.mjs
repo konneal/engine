@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { isAllowedBubbleOrigin, bubbleConfirmPage } from "../workers/worker_public/src/bubble.ts";
 import { mintSessionToken, readSession, SESSION_COOKIE } from "../workers/worker_public/src/session.ts";
+import { readSession as readSessionShared } from "../workers/shared/session.ts";
 
 const SECRET = "test-secret-not-real";
 
@@ -66,6 +67,15 @@ test("cookie wins over bearer; bearer serves when no cookie", async () => {
   assert.equal(both?.sub, "cookie-user");
   const bearerOnly = await readSession(bearerReq(bearerTok), SECRET);
   assert.equal(bearerOnly?.sub, "bearer-user");
+});
+
+test("the shared session module (the internal worker's copy) accepts the bearer form", async () => {
+  // worker_internal gates the federation hop with workers/shared/session.ts —
+  // the bubble member's ISO/IEC federation rides this path.
+  const { token } = await mintSessionToken(SECRET, { sub: "member-1", roles: [] });
+  const claims = await readSessionShared(bearerReq(token), SECRET);
+  assert.equal(claims?.sub, "member-1");
+  assert.equal(await readSessionShared(bearerReq("junk"), SECRET), null);
 });
 
 test("confirm page: exact targetOrigin, escaped name, no script breakout", () => {
