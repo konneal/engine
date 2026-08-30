@@ -96,6 +96,13 @@ a corpus document. The service applies it honestly:
   document in the query gets — an entity's clause provenance spans parts).
   The family must exist in the publications registry, else the answer runs
   on the general corpus and says so.
+- A DECLARED scope is a hard seal: the pipeline's soft-steer widenings (the
+  sparse-filter union, the lexical union, the sub-query lanes) are cut back
+  to the family before generation, because the panel's context line claims
+  the grounding — a citation from outside the declared publication would
+  make it a lie. (A document named in the question keeps the soft steer —
+  the widen covers sparse publications there.) If nothing survives the
+  seal, the answer refuses honestly within the scope.
 - A document named **in the question** always wins over the declared chip —
   the context informs, never overrides the user's explicit words.
 - The entity's own data is NOT in scope (that is TODO.ai-platform/03's

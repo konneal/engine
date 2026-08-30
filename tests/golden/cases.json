@@ -228,9 +228,9 @@
       "doc": "urn:oiml:pub:r:60-1:2021"
     },
     "expect": {
-      "citation_all": "R ?76",
       "context_kind": "entity",
-      "context_note": "question-document-wins"
+      "context_note": "question-document-wins",
+      "citation_any": "R ?76"
     }
   },
   {

@@ -489,6 +489,7 @@ async function handleAsk(
   // and context_applied's note says which way it went, never silently.
   const docScope = declaredCtx ? await resolveDocScope(env, declaredCtx) : null;
   let ctxApplied;
+  let declaredScoped = false;
   if (!declaredCtx) {
     ctxApplied = NO_CONTEXT;
   } else if (docScope && !understanding?.doc_number) {
@@ -499,6 +500,7 @@ async function handleAsk(
       edition: docScope.edition ?? understanding?.edition ?? null,
     };
     ctxApplied = appliedContext(declaredCtx, docScope);
+    declaredScoped = true;
     console.log("context scope:", docScope.label, `(${declaredCtx.kind})`);
   } else if (docScope) {
     ctxApplied = appliedContext(declaredCtx, null, "question-document-wins");
@@ -599,6 +601,21 @@ async function handleAsk(
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
       optimisticHits, optimisticVec });
     console.log("stage: retrieve", Date.now() - tR, "ms");
+    // The DECLARED context's scope is a HARD seal (TODO.ai-platform/02):
+    // the panel's context line claims the grounding, so no passage from
+    // outside the declared publication may reach the answer — the
+    // pipeline's soft-steer widenings (the sparse-filter union, the
+    // full-corpus lexical union, the sub-query lanes) are cut back to
+    // the scope. A document named IN THE QUESTION keeps the soft steer
+    // by design (the widen covers sparse publications there).
+    if (declaredScoped && docScope) {
+      const before = retrieved.hits.length;
+      retrieved = {
+        hits: retrieved.hits.filter((h: Hit) => h.metadata.doc_number === docScope.doc_number && (!docScope.edition || h.metadata.edition === docScope.edition)),
+        filters: retrieved.filters,
+      };
+      console.log("context seal:", before, "→", retrieved.hits.length, "hits within", docScope.label);
+    }
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
     // they consume the same candidate list (grade is coarse: good/weak;
     // listwise reorders survivors). Doc-scoped queries skip the grade
@@ -749,6 +766,11 @@ async function handleAsk(
         prev,
         understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` } as any,
       });
+      // the declared context's hard seal binds the retry exactly as the
+      // first pass (TODO.ai-platform/02)
+      if (declaredScoped && docScope) {
+        retryRetrieve.hits = retryRetrieve.hits.filter((h: Hit) => h.metadata.doc_number === docScope.doc_number && (!docScope.edition || h.metadata.edition === docScope.edition));
+      }
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
         const retryAnswer = await generateOnce(env, model, retryMessages);
