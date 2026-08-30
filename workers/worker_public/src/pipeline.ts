@@ -504,11 +504,25 @@ export async function retrieve(
     const spread = Math.max(...scored) - Math.min(...scored);
     if (spread > 0) {
       const newest = new Map<string, number>();
+      let anyYear = 0;
       for (const h of hits) {
         const y = year(h.metadata.edition);
         if (!y || y < 1990) continue;
         const k = `${h.metadata.docidentifier}|${h.metadata.language}`;
         newest.set(k, Math.max(newest.get(k) ?? 0, y));
+        anyYear = Math.max(anyYear, y);
+      }
+      // cross-publication tie-break: a current-edition publication ranks
+      // over stale ones (load-bearing — par-prepackaged: R 87:2004 must
+      // outrank 1990s texts); composed WITH the family-relative demotion
+      // below, which dominates for same-publication duplicates
+      if (anyYear > 1990) {
+        for (const h of hits) {
+          const y = year(h.metadata.edition);
+          if (y && y >= 1990) {
+            h.rerank_score = (h.rerank_score ?? h.score) + spread * 0.1 * ((y - 1990) / (anyYear - 1990));
+          }
+        }
       }
       let demoted = 0;
       for (const h of hits) {
@@ -526,6 +540,8 @@ export async function retrieve(
       }
       if (demoted) {
         console.log("edition steering: demoted", demoted, "superseded-edition chunks (family-relative)");
+        hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
+      } else if (anyYear > 1990) {
         hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
       }
     }
