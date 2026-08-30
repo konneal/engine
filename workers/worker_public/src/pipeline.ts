@@ -185,6 +185,26 @@ export async function retrieve(
   } else if (filter) {
     const filtered = await env.VECTORIZE.query(vector, q);
     matches = filtered.matches ?? [];
+    // an edition pin corroborated by (almost) nothing means the pin was a
+    // guess — understanding emits editions for families it mixes up
+    // (observed: R 76 pinned @2021, an R 60 year; the corpus holds
+    // 1988/1992/2006). The index is the ground truth for which editions
+    // EXIST: a wrong pin starves the doc filter and the widen then floods
+    // the pool with superseded editions. Drop to the doc-only filter and
+    // let family-relative steering rank editions downstream. A pin the
+    // user actually asked for survives — its edition exists in the corpus.
+    if (filters && filters.edition && matches.length < 3) {
+      const docOnly = await env.VECTORIZE.query(vector, {
+        topK: LIMITS.retrieveK,
+        returnMetadata: "all",
+        filter: toVectorizeFilter({ doc_number: filters.doc_number }),
+      });
+      if ((docOnly.matches ?? []).length > matches.length) {
+        console.log("edition pin dropped:", filters.doc_number, "@", filters.edition, "→", docOnly.matches?.length ?? 0, "doc-scoped hits (edition not in corpus)");
+        matches = docOnly.matches ?? [];
+        filters.edition = undefined;
+      }
+    }
     if (matches.length < LIMITS.rerankKeep) {
       // sparse doc filter → widen with the unfiltered ranking. Same lane:
       // the optimistic results ARE that ranking (identical vector, no
