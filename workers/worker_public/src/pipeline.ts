@@ -243,22 +243,27 @@ export async function retrieve(
   // Different phrasings surface documents the original query misses.
   // Ref: RAG-Fusion paper (Semantic Scholar b4d1da74); dev.to 2026 blueprint
   if (u?.query_variants?.length) {
-    const variantResults: Hit[][] = [];
-    for (const variant of u.query_variants.slice(0, 3)) {
-      try {
-        const vv = await embed(env.AI, MODELS.embed, variant);
-        const vres = await env.VECTORIZE.query(vv, { topK: 20, returnMetadata: "all", ...(filter ? { filter } : {}) });
-        const vhits: Hit[] = (vres.matches ?? []).map((m: any) => ({
-          id: m.id,
-          score: m.score,
-          metadata: (m.metadata ?? {}) as ChunkMeta,
-          text: (m.metadata?.chunk_text as string) ?? "",
-        }));
-        variantResults.push(vhits);
-      } catch {
-        // variant retrieval failure — the primary results stand
-      }
-    }
+    // the variants are independent queries — embed + search them in
+    // PARALLEL; a serial loop paid 2 x (embed + query) round trips on
+    // the hot path for zero quality difference (same candidate set)
+    const variantResults = (
+      await Promise.all(
+        u.query_variants.slice(0, 3).map(async (variant) => {
+          try {
+            const vv = await embed(env.AI, MODELS.embed, variant);
+            const vres = await env.VECTORIZE.query(vv, { topK: 20, returnMetadata: "all", ...(filter ? { filter } : {}) });
+            return (vres.matches ?? []).map((m: any) => ({
+              id: m.id,
+              score: m.score,
+              metadata: (m.metadata ?? {}) as ChunkMeta,
+              text: (m.metadata?.chunk_text as string) ?? "",
+            })) as Hit[];
+          } catch {
+            return [] as Hit[]; // variant retrieval failure — primary results stand
+          }
+        }),
+      )
+    ).filter((r) => r.length > 0);
     // RRF fuse: primary ranking + each variant ranking
     if (variantResults.length > 0) {
       const allRankings: Hit[][] = [
@@ -294,23 +299,25 @@ export async function retrieve(
   // Retrieve for each sub-question and merge the top results.
   // Ref: Agent-Orchestrated Adaptive RAG (arXiv 2606.05658)
   if (u?.complexity === "complex" && u.sub_queries?.length) {
-    const subResults: Hit[][] = [];
-    for (const sub of u.sub_queries.slice(0, 4)) {
-      try {
-        const sv = await embed(env.AI, MODELS.embed, sub);
-        const sres = await env.VECTORIZE.query(sv, { topK: 15, returnMetadata: "all" });
-        subResults.push(
-          (sres.matches ?? []).map((m: any) => ({
-            id: m.id,
-            score: m.score,
-            metadata: (m.metadata ?? {}) as ChunkMeta,
-            text: (m.metadata?.chunk_text as string) ?? "",
-          })),
-        );
-      } catch {
-        // sub-query failure — primary results stand
-      }
-    }
+    // sub-questions are independent — parallel rounds, same as variants
+    const subResults = (
+      await Promise.all(
+        u.sub_queries.slice(0, 4).map(async (sub) => {
+          try {
+            const sv = await embed(env.AI, MODELS.embed, sub);
+            const sres = await env.VECTORIZE.query(sv, { topK: 15, returnMetadata: "all" });
+            return (sres.matches ?? []).map((m: any) => ({
+              id: m.id,
+              score: m.score,
+              metadata: (m.metadata ?? {}) as ChunkMeta,
+              text: (m.metadata?.chunk_text as string) ?? "",
+            })) as Hit[];
+          } catch {
+            return [] as Hit[]; // sub-query failure — primary results stand
+          }
+        }),
+      )
+    ).filter((r) => r.length > 0);
     // merge sub-results into the candidate pool (union, no RRF — these
     // are complementary perspectives, not alternatives)
     const seenIds = new Set(matches.map((m: any) => m.id));
@@ -610,7 +617,10 @@ export async function listwiseRerank(
         return `[${i + 1}] ${label.replace(/(:|§)+$/g, "")} — ${h.text.replace(/\s+/g, " ").slice(0, 220)}`;
       })
       .join("\n");
-    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 6000));
+    // bounded to 2.5s: this call sits serially before generation starts —
+    // a slow reorder must never hold the first token hostage; the
+    // cross-encoder order is the fallback and is already good
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 2500));
     const call = (async () => {
       const res: any = await env.AI.run(model, {
         messages: [
