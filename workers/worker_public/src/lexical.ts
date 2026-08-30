@@ -39,7 +39,7 @@ export async function lexicalPrefilter(env: { DB: D1Database }, query: string, k
     const res = await env.DB.prepare(
       `SELECT c.id, c.doc_id, c.docidentifier, c.doctype, c.doc_number, c.edition,
               c.language, c.clause_anchor, c.clause_title, c.status, c.superseded_by,
-              c.corpus, c.tier, c.text, bm25(chunks_fts) AS rank
+              c.corpus, c.tier, c.text, c.unit_id, c.block, bm25(chunks_fts) AS rank
          FROM chunks_fts
          JOIN chunks c ON c.rowid = chunks_fts.rowid
         WHERE chunks_fts MATCH ?1
@@ -64,6 +64,10 @@ export async function lexicalPrefilter(env: { DB: D1Database }, query: string, k
         text_ref: "",
         status: String(r.status ?? "unknown"),
         superseded_by: String(r.superseded_by ?? ""),
+        // contract v2 over the lexical lane: typed chunks arriving via BM25
+        // keep their unit identity ([[u:…]] refs, typed pin, retyping check)
+        unit_id: String(r.unit_id ?? "") || undefined,
+        block: String(r.block ?? "") || undefined,
       };
       // rank is bm25 (lower better) → convert to positive score that RRF can ignore
       // (RRF uses rank position, not score). score kept for logging only.

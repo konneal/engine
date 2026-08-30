@@ -65,7 +65,8 @@ def _insert_sql(rec: dict, contexts: dict[str, str]) -> tuple[str, bool] | None:
     sql = (
         "INSERT OR REPLACE INTO chunks "
         "(id, doc_id, docidentifier, doctype, doc_number, edition, language, "
-        "clause_anchor, clause_title, status, superseded_by, corpus, tier, text, fts_text) VALUES ("
+        "clause_anchor, clause_title, status, superseded_by, corpus, tier, text, fts_text, "
+        "unit_id, block) VALUES ("
         f"'{_esc(str(rec['id']))}',"
         f"'{_esc(str(md.get('doc_id') or rec.get('doc_id') or ''))}',"
         f"'{_esc(str(md.get('docidentifier') or ''))}',"
@@ -80,7 +81,9 @@ def _insert_sql(rec: dict, contexts: dict[str, str]) -> tuple[str, bool] | None:
         f"'{_esc(str(md.get('corpus') or ''))}',"
         f"'{_esc(str(md.get('tier') or ''))}',"
         f"'{_esc(display)}',"
-        f"'{_esc(fts)}'"
+        f"'{_esc(fts)}',"
+        f"'{_esc(str(md.get('unit_id') or ''))}',"
+        f"'{_esc(str(md.get('block') or ''))}'"
         ");"
     )
     return sql, bool(ctx)
