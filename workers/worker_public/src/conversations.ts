@@ -5,6 +5,7 @@
 
 import { LIMITS } from "./config";
 import { json, err } from "./lib/http";
+import { parseAppliedContext } from "./context";
 
 const ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
 
@@ -59,11 +60,23 @@ export async function handleConversations(
   if (id && method === "GET") {
     const conv = await ownedConversation(env, sub, id);
     if (!conv) return err(404, "not_found", "No such conversation");
-    const msgs: any = await env.DB.prepare(
-      "SELECT id, role, content, citations, model, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
-    )
-      .bind(id)
-      .all();
+    // migration 0009 (the per-answer context mark) applies out of band —
+    // until it lands the column doesn't exist; fall back honestly rather
+    // than 500 the conversation load
+    let msgs: any;
+    try {
+      msgs = await env.DB.prepare(
+        "SELECT id, role, content, citations, model, context_applied, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
+      )
+        .bind(id)
+        .all();
+    } catch {
+      msgs = await env.DB.prepare(
+        "SELECT id, role, content, citations, model, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
+      )
+        .bind(id)
+        .all();
+    }
     return json({
       conversation: { id: conv.id, title: conv.title, createdAt: conv.created_at, updatedAt: conv.updated_at },
       messages: (msgs.results ?? []).map((m: any) => ({
@@ -72,6 +85,7 @@ export async function handleConversations(
         content: m.content,
         citations: m.citations ? JSON.parse(m.citations) : null,
         model: m.model,
+        context_applied: m.context_applied ? JSON.parse(m.context_applied) : null,
         at: m.created_at,
       })),
     });
@@ -117,15 +131,32 @@ export async function handleAppendMessage(env: any, sub: string, req: Request, c
     }
     citations = JSON.stringify(body.citations);
   }
+  // the per-answer context mark (TODO.ai-platform/02): the panel stores the
+  // service's context_applied echo so a resumed conversation keeps its
+  // honest context lines; validated + bounded, never trusted blindly
+  const applied = parseAppliedContext(body?.context_applied);
   const conv = await ownedConversation(env, sub, convId);
   if (!conv) return err(404, "not_found", "No such conversation");
   const now = new Date().toISOString();
   const mid = crypto.randomUUID();
-  await env.DB.batch([
-    env.DB.prepare(
-      "INSERT INTO messages (id, conversation_id, role, content, citations, model, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
-    ).bind(mid, convId, role, content, citations, typeof body?.model === "string" ? body.model.slice(0, 80) : null, now),
-    env.DB.prepare("UPDATE conversations SET updated_at = ?1 WHERE id = ?2 AND sub = ?3").bind(now, convId, sub),
-  ]);
+  try {
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO messages (id, conversation_id, role, content, citations, model, context_applied, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+      ).bind(mid, convId, role, content, citations, typeof body?.model === "string" ? body.model.slice(0, 80) : null, applied ? JSON.stringify(applied) : null, now),
+      env.DB.prepare("UPDATE conversations SET updated_at = ?1 WHERE id = ?2 AND sub = ?3").bind(now, convId, sub),
+    ]);
+  } catch (e) {
+    // migration 0009 not yet applied — store the message without the mark
+    // rather than lose it (the panel's line stays honest: unrecorded
+    // contexts render no line on resume)
+    if (!String(e).includes("context_applied")) throw e;
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO messages (id, conversation_id, role, content, citations, model, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+      ).bind(mid, convId, role, content, citations, typeof body?.model === "string" ? body.model.slice(0, 80) : null, now),
+      env.DB.prepare("UPDATE conversations SET updated_at = ?1 WHERE id = ?2 AND sub = ?3").bind(now, convId, sub),
+    ]);
+  }
   return json({ id: mid }, 201);
 }

@@ -7,6 +7,7 @@ import {
   NO_CONTEXT,
   appliedContext,
   contextNote,
+  parseAppliedContext,
   parseContext,
   parseDocRef,
   resolveDocScope,
@@ -110,4 +111,18 @@ test("contextNote: the entity note is honest about the wave-02 boundary (no enti
   const unresolved = contextNote({ kind: "document", label: "OIML R 999" }, null);
   assert.match(unresolved!, /not in the indexed corpus/);
   assert.equal(contextNote(null, null), undefined);
+});
+
+test("parseAppliedContext: the stored echo is validated + bounded, garbage dropped", () => {
+  assert.deepEqual(parseAppliedContext({ kind: "entity", label: "this certificate X", scoped_to: "OIML R 60:2021" }), {
+    kind: "entity",
+    label: "this certificate X",
+    scoped_to: "OIML R 60:2021",
+  });
+  assert.deepEqual(parseAppliedContext({ kind: "none", scoped_to: null }), { kind: "none", scoped_to: null });
+  assert.equal(parseAppliedContext({ kind: "everything" }), null);
+  assert.equal(parseAppliedContext("entity"), null);
+  assert.equal(parseAppliedContext(null), null);
+  // an unknown note never survives
+  assert.deepEqual(parseAppliedContext({ kind: "page", label: "p", note: "made-up" }), { kind: "page", label: "p", scoped_to: null });
 });

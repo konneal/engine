@@ -101,6 +101,18 @@ export function appliedContext(declared: DeclaredContext | null, scope: DocScope
   return { kind: declared.kind, label: declared.label, scoped_to: scope ? scope.label : null, ...(note ? { note } : {}) };
 }
 
+/** Validate a context_applied object arriving from a client (the
+ *  conversations API stores the echo with the message). Bounded and
+ *  shape-checked; garbage degrades to null (nothing stored). */
+export function parseAppliedContext(v: any): AppliedContext | null {
+  if (!v || typeof v !== "object") return null;
+  if (v.kind !== "page" && v.kind !== "entity" && v.kind !== "document" && v.kind !== "none") return null;
+  const label = typeof v.label === "string" && v.label.trim() ? v.label.trim().slice(0, 120) : undefined;
+  const scoped = typeof v.scoped_to === "string" && v.scoped_to.trim() ? v.scoped_to.trim().slice(0, 80) : null;
+  const note = v.note === "document-not-in-corpus" || v.note === "question-document-wins" ? v.note : undefined;
+  return { kind: v.kind, ...(label ? { label } : {}), scoped_to: scoped, ...(note ? { note } : {}) };
+}
+
 /** The prompt note the declared context contributes (rides the
  *  retrieval-note slot buildMessages already carries). The entity note
  *  is explicit about the wave-02 boundary: the entity's OWN DATA is not
