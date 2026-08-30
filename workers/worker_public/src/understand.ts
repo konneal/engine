@@ -90,8 +90,10 @@ export async function understandQuery(
       { role: "user", content: user },
     ],
     // the model always reasons; reasoning tokens share this budget — too
-    // small and the JSON is never reached (understanding silently degrades)
-    max_tokens: 1500,
+    // small and the JSON is never reached (understanding silently degrades).
+    // GLM-5 family defaults to reasoning_effort "max" when the parameter is
+    // not honored, so GLM needs headroom or reasoning starves the JSON.
+    max_tokens: model.includes("glm") ? 3072 : 1500,
     reasoning_effort: "low",
   };
   // each attempt issues a FRESH call — re-racing a timed-out promise would

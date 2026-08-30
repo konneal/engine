@@ -202,6 +202,43 @@ function embedWarm(env: Env, text: string): Promise<number[] | null> {
   return embed(env.AI, MODELS.embed, text).catch(() => null);
 }
 
+/** GLM-5.3-Flash is natively multimodal: when the used passages contain
+ *  figure units with uploaded assets, attach the actual pixels to the
+ *  generation call so the model interprets the producer's figure, not
+ *  just its stored caption. Additive — failures simply send no images. */
+async function attachFigureImages(env: Env, messages: { role: string; content: string }[], usedHits: Hit[]): Promise<void> {
+  const figures = usedHits.filter((h) => h.metadata.unit_id && h.metadata.block === "figure").slice(0, 2);
+  if (!figures.length) return;
+  const parts: unknown[] = [];
+  const names: string[] = [];
+  for (const h of figures) {
+    try {
+      const row = await env.DB.prepare("SELECT payload FROM unit_payloads WHERE unit_id = ?1").bind(h.metadata.unit_id!).first<any>();
+      const uri = row ? (JSON.parse(String(row.payload)).uri ?? "") : "";
+      const m = typeof uri === "string" ? uri.match(/^\/assets\/(.+)/) : null;
+      if (!m) continue;
+      const obj = await env.UNIT_ASSETS.get(m[1]);
+      if (!obj) continue;
+      const buf = new Uint8Array(await obj.arrayBuffer());
+      const ext = m[1].split(".").pop()?.toLowerCase() ?? "png";
+      const mime = ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
+      let binary = "";
+      for (let i = 0; i < buf.length; i += 8192) binary += String.fromCharCode(...buf.subarray(i, i + 8192));
+      parts.push({ type: "image_url", image_url: { url: `data:${mime};base64,${btoa(binary)}` } });
+      names.push(h.metadata.unit_id!);
+    } catch {
+      // additive — one unreadable asset never blocks the answer
+    }
+  }
+  if (!parts.length) return;
+  const last = messages[messages.length - 1];
+  last.content = [
+    { type: "text", text: `${last.content}\n\nThe original images of figure units ${names.join(", ")} are attached; interpret them directly when answering about these figures.` },
+    ...parts,
+  ] as unknown as string;
+  console.log("figure images attached:", names.join(", "));
+}
+
 async function generateStream(env: Env, model: string, messages: any[]): Promise<ReadableStream<Uint8Array> | null> {
   try {
     const res: any = await env.AI.run(model, {
@@ -562,6 +599,7 @@ async function handleAsk(
     summary,
     budget,
   );
+  await attachFigureImages(env, messages, usedHits);
   const queryHash = await sha256Hex(q.query);
   const cites = citations(usedHits);
 
@@ -1026,6 +1064,10 @@ async function handleCaption(env: Env, req: Request): Promise<Response> {
         },
       ],
       max_tokens: 1024,
+      // GLM-5.3-Flash defaults to reasoning_effort "max" when the parameter
+      // is absent — max-effort reasoning starves a 1024-token budget and
+      // the caption comes back empty (the u:fig-2 straggler)
+      reasoning_effort: "low",
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
     if (!text?.trim()) return err(502, "generation_failed", "vision model returned no description");
