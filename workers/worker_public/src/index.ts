@@ -1,4 +1,4 @@
-import { LIMITS, MODELS, datasetsFor, SUGGESTIONS, num, sha256Hex, today } from "./config";
+import { LIMITS, MODELS, datasetsFor, SUGGESTIONS, num, sha256Hex, today, roleModel } from "./config";
 import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, REFUSAL_ANSWER, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
@@ -413,7 +413,7 @@ async function handleAsk(
   let optimisticHits: Hit[] = [];
   const t0 = Date.now();
   if (!cached) {
-    const understandingP = understandQuery(env.AI, MODELS.understand, q.query, history, convEntities);
+    const understandingP = understandQuery(env.AI, roleModel(env, "understand"), q.query, history, convEntities);
     try {
       optimisticVec = (await warmEmbed) ?? null;
       if (optimisticVec) {

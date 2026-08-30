@@ -39,6 +39,14 @@ export const LIMITS = {
   maxPassageTokens: 900, // per-passage cap (clause chunks with tables can be huge)
 } as const;
 
+/** Per-deployment model override: <ROLE>_MODEL (e.g. UNDERSTAND_MODEL)
+ *  replaces the pinned default for that role. Ops lever for A/B-ing a
+ *  role's model without a code change; absent/invalid = the default. */
+export function roleModel(env: any, role: keyof typeof MODELS): string {
+  const ov = env[`${role.toUpperCase()}_MODEL`];
+  return typeof ov === "string" && ov.startsWith("@cf/") ? ov : MODELS[role];
+}
+
 /** The corpus catalog — single source for /api/datasets, the assistant's
  *  self-description, and per-corpus model guidance. `session: true`
  *  datasets are enabled for signed-in members (federated via the internal
