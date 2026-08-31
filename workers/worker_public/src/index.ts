@@ -16,7 +16,7 @@ import { reflect } from "./reflect";
 import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
 import { contractV2, tableRetyped } from "./refs";
-import { NO_CONTEXT, appliedContext, contextNote, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
+import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 
 export interface Env {
   AI: any;
@@ -487,12 +487,25 @@ async function handleAsk(
   // keys off them. A document named IN THE QUESTION wins over the chip:
   // the context informs, it never overrides the user's explicit words —
   // and context_applied's note says which way it went, never silently.
+  // "Named" is read from the question TEXT (namedDocumentIn), never from
+  // understand's extraction alone: the LLM also fires on domain priors
+  // ("maximum permissible errors" → R 76 with no document named — an
+  // inference must never steal the user's explicit chip) and can miss a
+  // naming the text plainly carries (the win must not depend on that
+  // flake either).
   const docScope = declaredCtx ? await resolveDocScope(env, declaredCtx) : null;
+  const named = declaredCtx ? namedDocumentIn(q.query) : null;
   let ctxApplied;
   let declaredScoped = false;
   if (!declaredCtx) {
     ctxApplied = NO_CONTEXT;
-  } else if (docScope && !understanding?.doc_number) {
+  } else if (docScope && (!named || named.doc_number === docScope.doc_number)) {
+    // the chip scopes; a same-family document named in the question
+    // agrees with it. An understand extraction the text does not name is
+    // an inference — the chip overrides it.
+    if (understanding?.doc_number && understanding.doc_number !== docScope.doc_number) {
+      console.log("context scope: understand's doc#" + understanding.doc_number, "is inferred, not named in the question — the declared", docScope.label, "scopes");
+    }
     understanding = {
       ...(understanding ?? syntheticUnderstanding(docScope)),
       docidentifier: docScope.label,
@@ -502,9 +515,21 @@ async function handleAsk(
     ctxApplied = appliedContext(declaredCtx, docScope);
     declaredScoped = true;
     console.log("context scope:", docScope.label, `(${declaredCtx.kind})`);
-  } else if (docScope) {
+  } else if (docScope && named) {
+    // the question names a DIFFERENT publication — the user's explicit
+    // words win over the chip, and retrieval follows the named document.
+    // When understand extracted the same document its fields stay (they
+    // can carry a phrased edition pin the text parse does not read).
+    if (understanding?.doc_number !== named.doc_number) {
+      understanding = {
+        ...(understanding ?? syntheticUnderstanding(named)),
+        docidentifier: named.label,
+        doc_number: named.doc_number,
+        edition: named.edition ?? null,
+      };
+    }
     ctxApplied = appliedContext(declaredCtx, null, "question-document-wins");
-    console.log("context scope: the question names doc#" + understanding.doc_number, "— it wins over the declared", docScope.label);
+    console.log("context scope: the question names", named.label, "— it wins over the declared", docScope.label);
   } else if (declaredCtx.doc) {
     ctxApplied = appliedContext(declaredCtx, null, "document-not-in-corpus");
     console.log("context scope:", declaredCtx.doc, "not in the corpus — the general corpus answers");
@@ -598,24 +623,19 @@ async function handleAsk(
 
   try {
     const tR = Date.now();
-    retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
-      optimisticHits, optimisticVec });
-    console.log("stage: retrieve", Date.now() - tR, "ms");
     // The DECLARED context's scope is a HARD seal (TODO.ai-platform/02):
     // the panel's context line claims the grounding, so no passage from
-    // outside the declared publication may reach the answer — the
-    // pipeline's soft-steer widenings (the sparse-filter union, the
-    // full-corpus lexical union, the sub-query lanes) are cut back to
-    // the scope. A document named IN THE QUESTION keeps the soft steer
-    // by design (the widen covers sparse publications there).
-    if (declaredScoped && docScope) {
-      const before = retrieved.hits.length;
-      retrieved = {
-        hits: retrieved.hits.filter((h: Hit) => h.metadata.doc_number === docScope.doc_number && (!docScope.edition || h.metadata.edition === docScope.edition)),
-        filters: retrieved.filters,
-      };
-      console.log("context seal:", before, "→", retrieved.hits.length, "hits within", docScope.label);
-    }
+    // outside the declared publication may reach the answer. The seal is
+    // applied to the CANDIDATE POOL inside retrieve — the soft-steer
+    // widenings (the sparse-filter union, the full-corpus lexical union,
+    // the sub-query lanes) can otherwise outscore the filtered dense lane
+    // under the cross-encoder and push every in-family passage out of the
+    // top-N before a post-hoc seal ever sees one. A document named IN THE
+    // QUESTION keeps the soft steer by design (the widen covers sparse
+    // publications there).
+    retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
+      sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec });
+    console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
     // they consume the same candidate list (grade is coarse: good/weak;
     // listwise reorders survivors). Doc-scoped queries skip the grade
@@ -761,16 +781,14 @@ async function handleAsk(
     const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h: Hit) => h.text));
     console.log("reflection:", reflection ? (reflection.grounded ? "grounded" : "ungrounded") : "null");
     if (reflection && !reflection.grounded && reflection.missing_info) {
-      // re-retrieve targeting what was missing
+      // re-retrieve targeting what was missing — the declared context's
+      // hard seal binds the retry exactly as the first pass
+      // (TODO.ai-platform/02)
       const retryRetrieve = await retrieve(env, q.query, {
         prev,
         understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` } as any,
+        sealScope: declaredScoped ? docScope : null,
       });
-      // the declared context's hard seal binds the retry exactly as the
-      // first pass (TODO.ai-platform/02)
-      if (declaredScoped && docScope) {
-        retryRetrieve.hits = retryRetrieve.hits.filter((h: Hit) => h.metadata.doc_number === docScope.doc_number && (!docScope.edition || h.metadata.edition === docScope.edition));
-      }
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
         const retryAnswer = await generateOnce(env, model, retryMessages);

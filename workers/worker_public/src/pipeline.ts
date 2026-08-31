@@ -117,6 +117,15 @@ export async function retrieve(
     federate?: (query: string) => Promise<Hit[]>;
     warmEmbed?: Promise<number[] | null>;
     graphDocNumbers?: string[];
+    /** The declared context's HARD seal (TODO.ai-platform/02): when the
+     *  panel's chip declares a document scope, the CANDIDATE POOL is cut
+     *  to the publication family before rerank + the top-N cut — the
+     *  soft-steer widenings below (the full-corpus lexical union, the
+     *  sparse-filter widen, the sub-query lanes) can otherwise outscore
+     *  the filtered dense lane under the cross-encoder and push every
+     *  in-family passage out of the final hits, sealing the answer to
+     *  zero despite a healthy in-family pool. */
+    sealScope?: { doc_number: string; edition?: string } | null;
     /** Option C: dense-lane results computed concurrently with
      *  understanding (same folded-query vector, retrieve's exact query
      *  parameters). With no filter they REPLACE the primary dense query;
@@ -151,7 +160,14 @@ export async function retrieve(
         ? opts.warmEmbed.then((w) => w ?? embed(env.AI, MODELS.embed, rq))
         : embed(env.AI, MODELS.embed, rq);
   const lexicalP = lexicalPrefilter(env, rq).catch(() => [] as Hit[]);
-  const [vector, lexicalHits] = await Promise.all([vectorP, lexicalP]);
+  const [vector, lexicalHits0] = await Promise.all([vectorP, lexicalP]);
+  // The declared context's seal binds the lexical lane at the SOURCE: the
+  // RRF fusion below mixes the full-corpus lexical ranking straight into
+  // the final hits — past the pool-level seal — so under a seal the
+  // lexical lane is the FAMILY's lexical hits only.
+  const lexicalHits = opts.sealScope
+    ? lexicalHits0.filter((h) => h.metadata.doc_number === opts.sealScope!.doc_number && (!opts.sealScope!.edition || h.metadata.edition === opts.sealScope!.edition))
+    : lexicalHits0;
   if (lexicalHits.length) console.log("lexical prefilter:", lexicalHits.length, "hits");
   const q: any = { topK: LIMITS.retrieveK, returnMetadata: "all" };
   if (filter) q.filter = filter;
@@ -368,6 +384,16 @@ export async function retrieve(
         seen.add(h.id);
       }
     }
+  }
+
+  // The declared context's hard seal (TODO.ai-platform/02) — pool-level,
+  // after every lane has merged, before rerank + the top-N cut. Nothing
+  // outside the declared family competes for the window; everything
+  // inside it does.
+  if (opts.sealScope) {
+    const before = hits.length;
+    hits = hits.filter((h) => h.metadata.doc_number === opts.sealScope!.doc_number && (!opts.sealScope!.edition || h.metadata.edition === opts.sealScope!.edition));
+    console.log("context seal:", before, "→", hits.length, "candidates within", `doc#${opts.sealScope.doc_number}${opts.sealScope.edition ? "@" + opts.sealScope.edition : ""}`);
   }
 
   // overview chunks repeat the title/doctype boilerplate and embed strongly

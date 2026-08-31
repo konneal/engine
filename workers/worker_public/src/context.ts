@@ -76,6 +76,28 @@ export function parseDocRef(doc: string, edition?: string): DocScope | null {
   return { doc_number: m[2], ...(ed ? { edition: ed } : {}), label: `OIML ${type} ${m[2]}${ed ? `:${ed}` : ""}` };
 }
 
+/** Read the FIRST publication the question's own text names, in the
+ *  letter+number forms the corpus speaks ("R 76", "r76-1", "OIML B 18",
+ *  "R 60:2021"). "A document named in the question wins over the declared
+ *  chip" is only honest when it is the user's own words that win — the
+ *  understand stage's doc_number is an LLM extraction that also fires on
+ *  domain priors ("maximum permissible errors" → R 76, no document named
+ *  — the merged tree's ctx-document-r111 flake) and can miss a naming the
+ *  text plainly carries; both directions are decided from the TEXT here.
+ *  A glued single digit is a class/designation ("E2 weights"), never a
+ *  naming; part designations parse but do not narrow the family. */
+export function namedDocumentIn(query: string): DocScope | null {
+  const re = /\b(OIML\s+)?([RDBGE])(\s*)0*(\d{1,3})(?:\s*[-–]\s*\d+)?(?:\s*:\s*(\d{4}))?/gi;
+  for (const m of query.matchAll(re)) {
+    const [, oimlPrefix, letter, gap, digits, edition] = m;
+    if (digits!.length === 1 && !oimlPrefix && !gap) continue;
+    const num = String(Number(digits));
+    const type = letter!.toUpperCase();
+    return { doc_number: num, ...(edition ? { edition } : {}), label: `OIML ${type} ${num}${edition ? `:${edition}` : ""}` };
+  }
+  return null;
+}
+
 /** Resolve the declared document against the publications registry: the
  *  family must exist in the corpus, else the scope honestly does not
  *  apply (the answer runs on the general corpus and context_applied's

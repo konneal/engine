@@ -10,6 +10,7 @@ import {
   parseAppliedContext,
   parseContext,
   parseDocRef,
+  namedDocumentIn,
   resolveDocScope,
 } from "../workers/worker_public/src/context.ts";
 
@@ -125,4 +126,22 @@ test("parseAppliedContext: the stored echo is validated + bounded, garbage dropp
   assert.equal(parseAppliedContext(null), null);
   // an unknown note never survives
   assert.deepEqual(parseAppliedContext({ kind: "page", label: "p", note: "made-up" }), { kind: "page", label: "p", scoped_to: null });
+});
+
+test("namedDocumentIn: only a document the question TEXT names is read — priors and classes are not namings", () => {
+  // the merged-tree flake: "maximum permissible errors" is a domain prior
+  // for R 76 — the text names nothing, so nothing is read
+  assert.equal(namedDocumentIn("What are the maximum permissible errors for class E2 weights?"), null);
+  // named forms: spaced, compact, parted, prefixed, lowercase
+  assert.deepEqual(namedDocumentIn("What does OIML R 76 say about maximum permissible errors?"), { doc_number: "76", label: "OIML R 76" });
+  assert.deepEqual(namedDocumentIn("selon la r76-1, quelles sont les EMT ?"), { doc_number: "76", label: "OIML R 76" });
+  assert.deepEqual(namedDocumentIn("B 18 rules for the OIML-CS"), { doc_number: "18", label: "OIML B 18" });
+  // a leading zero in the text still names the document; a colon edition pins
+  assert.deepEqual(namedDocumentIn("OIML R 060 metrology"), { doc_number: "60", label: "OIML R 60" });
+  assert.deepEqual(namedDocumentIn("What does R 60:2021 change?"), { doc_number: "60", edition: "2021", label: "OIML R 60:2021" });
+  // a glued single digit is an accuracy class, not a naming
+  assert.equal(namedDocumentIn("class E2 weights"), null);
+  assert.equal(namedDocumentIn("60 kg capacity load cells"), null);
+  // the first naming wins
+  assert.deepEqual(namedDocumentIn("Compare R 60 and R 76", )?.doc_number, "60");
 });

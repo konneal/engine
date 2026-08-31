@@ -104,7 +104,11 @@ a corpus document. The service applies it honestly:
   the widen covers sparse publications there.) If nothing survives the
   seal, the answer refuses honestly within the scope.
 - A document named **in the question** always wins over the declared chip —
-  the context informs, never overrides the user's explicit words.
+  the context informs, never overrides the user's explicit words. "Named" is
+  read from the question's own text (a letter+number mention like "R 76"),
+  never from the understanding stage's inference alone: a topic-prior
+  extraction is not the user's words and never steals the chip, and a naming
+  the text plainly carries wins even when the extraction misses it.
 - The entity's own data is NOT in scope (that is TODO.ai-platform/03's
   live-data exchange); the grounding is the governing publication's clauses.
 - A declared context bypasses both answer caches (the answer depends on the
