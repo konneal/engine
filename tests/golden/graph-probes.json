@@ -1,0 +1,27 @@
+[
+  {
+    "id": "graph-r60-family",
+    "query": "What documents make up the OIML R 60 family of recommendations?",
+    "expect": { "citation_any": "R ?60(-[123a])?" }
+  },
+  {
+    "id": "graph-supersedes-r60",
+    "query": "Which edition of OIML R 60-1 supersedes the earlier edition?",
+    "expect": { "citation_any": "R ?60-1" }
+  },
+  {
+    "id": "graph-cites-r111",
+    "query": "Which OIML documents refer to OIML R 111 for humidity conditioning?",
+    "expect": { "citation_any": "(R|D|B|G) ?[0-9]+" }
+  },
+  {
+    "id": "graph-in-force-d11",
+    "query": "Which edition of OIML D 11 is currently in force?",
+    "expect": { "citation_any": "D ?11" }
+  },
+  {
+    "id": "graph-r76-amendment",
+    "query": "Does OIML R 76 have amendments or parts, and which apply to non-automatic weighing instruments?",
+    "expect": { "citation_any": "R ?76(-1)?" }
+  }
+]

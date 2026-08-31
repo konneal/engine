@@ -27,6 +27,7 @@ const cases = [
   ...JSON.parse(readFileSync(new URL("./golden/cases.json", import.meta.url), "utf8")),
   ...JSON.parse(readFileSync(new URL("./golden/retrieval-probes.json", import.meta.url), "utf8")),
   ...JSON.parse(readFileSync(new URL("./golden/table-cases.json", import.meta.url), "utf8")),
+  ...JSON.parse(readFileSync(new URL("./golden/graph-probes.json", import.meta.url), "utf8")),
 ];
 
 async function search(query, topK) {
@@ -48,6 +49,21 @@ function isRelevant(result, expect) {
     return clRe.test(String(result.clause_anchor ?? "")) || clRe.test(String(result.clause_title ?? ""));
   }
   return true;
+}
+
+/** ETSI-protocol witness matching: a result is relevant when the
+ *  golden witness string's tokens are >=75% contained in the passage
+ *  text (normalized). Stricter and fairer than doc-pattern hits — a
+ *  hit must contain the ANSWER SPAN, not just come from the right
+ *  document. */
+function witnessMatch(text, witness) {
+  const norm = (s) =>
+    String(s ?? "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+  const w = norm(witness);
+  if (w.length < 2) return false;
+  const t = new Set(norm(text));
+  const contained = w.filter((tok) => t.has(tok)).length;
+  return contained / w.length >= 0.75;
 }
 
 function apAtK(relevances) {
@@ -93,7 +109,9 @@ for (const c of cases) {
     err = String(e);
   }
   const top = results.slice(0, K);
-  const relevances = top.map((r) => isRelevant(r, c.expect));
+  const relevances = c.expect?.witness
+    ? top.map((r) => witnessMatch(r.text ?? r.chunk_text ?? "", c.expect.witness) && isRelevant(r, c.expect))
+    : top.map((r) => isRelevant(r, c.expect));
   const hit = relevances.some(Boolean);
   const rank = relevances.findIndex(Boolean);
   const rAtK = hit ? 1 : 0;

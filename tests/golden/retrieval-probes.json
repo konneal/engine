@@ -2,49 +2,69 @@
   {
     "id": "par-nlc-limit",
     "query": "how many scale divisions is a load cell allowed to have",
-    "expect": { "citation_any": "R ?60" },
+    "expect": {
+      "citation_any": "R ?60",
+      "witness": "number of verification intervals"
+    },
     "note": "chunk says 'maximum number of load cell verification intervals' — no vocabulary overlap"
   },
   {
     "id": "par-mpe-class3",
     "query": "what error is a shop scale allowed to show when it gets checked",
-    "expect": { "citation_any": "R ?(76|60)" },
+    "expect": {
+      "citation_any": "R ?(76|60)",
+      "witness": "maximum permissible error"
+    },
     "note": "'shop scale' vs 'nonautomatic weighing instrument'; 'error allowed when checked' vs 'maximum permissible error on initial verification'"
   },
   {
     "id": "par-issuer",
     "query": "what does it take to become someone who hands out OIML certificates",
-    "expect": { "citation_any": "B ?(3|18|20|11)|OIML-CS" },
+    "expect": {
+      "citation_any": "B ?(3|18|20|11)|OIML-CS"
+    },
     "note": "colloquial phrasing vs 'issuing authority' requirements"
   },
   {
     "id": "par-prepackaged",
     "query": "rules for the label on a bag of flour sold by weight",
-    "expect": { "citation_any": "R ?(79|87)|B ?" },
+    "expect": {
+      "citation_any": "R ?(79|87)|B ?"
+    },
     "note": "everyday phrasing vs 'prepackaged goods / net content' terminology"
   },
   {
     "id": "par-creep",
     "query": "does the reading drift when a weight sits on it for a long time",
-    "expect": { "citation_any": "R ?60" },
+    "expect": {
+      "citation_any": "R ?60",
+      "witness": "creep"
+    },
     "note": "'reading drift under sustained load' vs 'creep' — the defined term never appears in the question"
   },
   {
     "id": "par-water-meter",
     "query": "accuracy classes for devices that measure how much water a house used",
-    "expect": { "citation_any": "R ?49" },
+    "expect": {
+      "citation_any": "R ?49",
+      "witness": "water meter"
+    },
     "note": "household water meter described from first principles vs 'water meters' terminology"
   },
   {
     "id": "par-verification-interval",
     "query": "how often do legal weighing machines need to be rechecked",
-    "expect": { "citation_any": "(R|D|B) ?" },
+    "expect": {
+      "citation_any": "(R|D|B) ?"
+    },
     "note": "'rechecked' vs 'subsequent verification / revalidation'"
   },
   {
     "id": "par-type-approval",
     "query": "paperwork a manufacturer files before selling a measuring instrument",
-    "expect": { "citation_any": "B ?(3|18|20|11)|OIML-CS|D ?" },
+    "expect": {
+      "citation_any": "B ?(3|18|20|11)|OIML-CS|D ?"
+    },
     "note": "'paperwork filed before selling' vs 'type evaluation / application' terminology"
   }
 ]
