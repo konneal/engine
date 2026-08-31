@@ -1103,15 +1103,29 @@ async function handleResearch(env: Env, ctx: ExecutionContext, req: Request, ses
       if (!accumulated.has(h.id)) accumulated.set(h.id, h);
     }
     const passages = [...accumulated.values()];
+    // Hierarchical context management (GLM-5 report, their search agents):
+    // the judge re-reads the full evidence every round and its context
+    // grows without bound. Keep-recent-k: the k most recent findings at
+    // full length, everything older as one-line digests. The final ANSWER
+    // generation below still sees the full set within the token budget —
+    // folding is judge-context only.
+    const KEEP_RECENT = 10;
+    const older = passages.slice(0, Math.max(0, passages.length - KEEP_RECENT));
+    const recent = passages.slice(-KEEP_RECENT);
+    const digest = older.length
+      ? `Earlier evidence (digest, ${older.length} passages):\n${older.map((h) => `- ${h.metadata.docidentifier ?? ""} §${h.metadata.clause_anchor ?? ""}: ${h.text.replace(/\s+/g, " ").slice(0, 160)}`).join("\n")}\n\n`
+      : "";
     judge = await (async () => {
       try {
         const res: any = await env.AI.run(MODELS.grader, {
           messages: [
             { role: "system", content: researchPromptText.trimEnd() },
-            { role: "user", content: `Research question: ${q.query}\n\nCollected passages (${passages.length}):\n${passages.map((h, n) => `[${n + 1}] ${h.metadata.docidentifier ?? ""} §${h.metadata.clause_anchor ?? ""}: ${h.text.slice(0, 700)}`).join("\n")}` },
+            { role: "user", content: `Research question: ${q.query}\n\n${digest}Collected passages (${recent.length}):\n${recent.map((h, n) => `[${n + 1}] ${h.metadata.docidentifier ?? ""} §${h.metadata.clause_anchor ?? ""}: ${h.text.slice(0, 700)}`).join("\n")}` },
           ],
           max_tokens: 3072,
           reasoning_effort: "low",
+          temperature: 1.0,
+          top_p: 1.0,
         });
         const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
         let parsed: any = null;
@@ -1128,7 +1142,10 @@ async function handleResearch(env: Env, ctx: ExecutionContext, req: Request, ses
     })();
     console.log("research iter", iterations, "passages", passages.length, "sufficient:", judge?.sufficient);
     if (!judge || judge.sufficient || !judge.missing) break;
-    focus = `${focus} ${judge.missing}`.slice(0, LIMITS.maxInputChars);
+    // fold, don't accumulate: appending every round's `missing` compounds
+    // stale wants; the next retrieval focuses on the ORIGINAL question plus
+    // what is still missing now
+    focus = `${understanding?.standalone_query?.trim() || q.query} ${judge.missing}`.slice(0, LIMITS.maxInputChars);
   }
 
   const used = [...accumulated.values()];
