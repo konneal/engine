@@ -155,6 +155,20 @@ function validateQuery(body: any): { query: string; lang?: string } | null {
   return { query, lang };
 }
 
+/** User-uploaded image for multimodal questions: a data URL
+ *  (data:image/(png|jpeg|webp|gif);base64,…) up to 6 MB of payload. The
+ *  question text still drives retrieval; the image is CONTEXT for the
+ *  answer model (photo of a nameplate, a schematic, a scale dial). Null =
+ *  no image; undefined-but-present-invalid throws at the boundary. */
+function userImageDataUrl(body: any): string | null {
+  const img = body?.image;
+  if (img == null) return null;
+  if (typeof img !== "string" || img.length > 6_000_000) return null;
+  const m = img.match(/^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$/);
+  if (!m || !m[2]) return null;
+  return img;
+}
+
 async function cacheGet(env: Env, ns: string, query: string, lang?: string) {
   const key = `a:${env.INDEX_VERSION}:${ns}:${await sha256Hex(
     `${query.toLowerCase().replace(/\s+/g, " ").trim()}|${lang ?? ""}`,
@@ -247,6 +261,8 @@ async function generateStream(env: Env, model: string, messages: any[]): Promise
       stream: true,
       max_tokens: LIMITS.maxOutputTokens,
       reasoning_effort: "low",
+      temperature: 0.6,
+      top_p: 0.95,
     });
     if (res && typeof res.getReader === "function") return res as ReadableStream<Uint8Array>;
     if (res && res.body && typeof res.body.getReader === "function") return res.body;
@@ -262,6 +278,8 @@ async function generateOnce(env: Env, model: string, messages: any[]): Promise<s
       messages,
       max_tokens: LIMITS.maxOutputTokens,
       reasoning_effort: "low",
+      temperature: 0.6,
+      top_p: 0.95,
     });
     if (typeof res?.response === "string") return res.response;
     if (typeof res?.choices?.[0]?.message?.content === "string") return res.choices[0].message.content;
@@ -392,6 +410,12 @@ async function handleAsk(
     .slice(-24)
     .map((h: any) => ({ role: h.role, content: h.content.slice(0, 4000) }));
   const contextual = history.length > 0;
+  // user-uploaded image: present-but-invalid is a boundary error (silent
+  // drop would answer a DIFFERENT question than the one the user asked)
+  const userImage = body?.image != null ? userImageDataUrl(body) : null;
+  if (body?.image != null && !userImage) {
+    return err(400, "invalid_image", "image must be a data URL (data:image/png|jpeg|webp|gif;base64,…) up to 6 MB");
+  }
   // history compaction: turns beyond the budget slice are summarized into a
   // continuity block (below) instead of silently dropped
   const budget = num(env as any, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
@@ -399,9 +423,11 @@ async function handleAsk(
   const summary = overflow.length >= 2 ? ((await summarizeHistory(env.AI, MODELS.understand, overflow)) ?? undefined) : undefined;
   let retrieved;
   // fresh=true (regenerate) skips the cache read; contextual follow-ups and
-  // declared-context asks skip the cache entirely — the answer depends on
-  // the conversation / the declared context, not the query alone
-  const cached = body?.fresh === true || contextual || declaredCtx ? null : await cacheGet(env, ns, q.query, q.lang);
+  // fresh=true (regenerate) skips the cache read; contextual follow-ups,
+  // declared-context asks and image asks skip the cache entirely — the
+  // answer depends on the conversation / declared context / image, not
+  // the query text alone
+  const cached = body?.fresh === true || contextual || declaredCtx || userImage ? null : await cacheGet(env, ns, q.query, q.lang);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
@@ -437,7 +463,7 @@ async function handleAsk(
   // take this path (they always run understanding + live retrieval);
   // fresh=true already bypassed the exact cache above.
   let understanding: any = null;
-  if (!cached && !contextual && !declaredCtx && !q.lang && body?.fresh !== true) {
+  if (!cached && !contextual && !declaredCtx && !q.lang && !userImage && body?.fresh !== true) {
     const wv0 = (await warmEmbed) ?? null;
     if (wv0) {
       const sc0 = await semanticCacheGet(env, wv0);
@@ -552,10 +578,10 @@ async function handleAsk(
 
   // semantic cache: near-duplicate of a recently answered question —
   // serves the stored answer with a `similar: true` marker (checked only
-  // for standalone knowledge questions; contextual turns and
-  // declared-context asks always run live; fresh=true regenerates,
+  // for standalone knowledge questions; contextual turns, declared-context
+  // asks and image asks always run live; fresh=true regenerates,
   // bypassing this cache too)
-  if (understanding?.intent !== "conversational" && !contextual && !declaredCtx && body?.fresh !== true) {
+  if (understanding?.intent !== "conversational" && !contextual && !declaredCtx && !userImage && body?.fresh !== true) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
       const sc = await semanticCacheGet(env, warmVec);
@@ -684,6 +710,23 @@ async function handleAsk(
     budget,
   );
   await attachFigureImages(env, messages, usedHits);
+  if (userImage) {
+    // the user's own image rides on the question message — retrieval stays
+    // text-driven; the answer model reads the image as question context
+    const last = messages[messages.length - 1];
+    const note = "\n\n(The user attached an image with this question; interpret it directly when answering.)";
+    if (Array.isArray(last.content)) {
+      const textPart = last.content.find((p: any) => p.type === "text");
+      if (textPart) textPart.text += note;
+      last.content = [...last.content, { type: "image_url", image_url: { url: userImage } }] as unknown as string;
+    } else {
+      last.content = [
+        { type: "text", text: last.content + note },
+        { type: "image_url", image_url: { url: userImage } },
+      ] as unknown as string;
+    }
+    console.log("user image attached to generation");
+  }
   const queryHash = await sha256Hex(q.query);
   const cites = citations(usedHits);
 
