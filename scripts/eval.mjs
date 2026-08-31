@@ -147,8 +147,8 @@ for (const c of cases) {
 
 // — faithfulness scoring (RAGAS-style, LLM-as-judge) —
 // The REST API call uses the same Workers AI model; the eval harness
-// runs outside a Worker, so we call directly.
-const envText = readFileSync(new URL("../.env", import.meta.url), "utf8");
+// runs outside a Worker, so we call directly. (envText is the single
+// .env read declared at the top — the live-member legs share it.)
 const CF_ACCOUNT = (envText.match(/^CLOUDFLARE_ACCOUNT_ID=(.+)$/m) ?? [])[1]?.trim();
 const CF_TOKEN = (envText.match(/^CLOUDFLARE_API_TOKEN=(.+)$/m) ?? [])[1]?.trim() ||
   (() => {
