@@ -792,9 +792,22 @@ export function buildMessages(
     budgetTokens - estTokens(system) - estTokens(retrievalNote ?? "") - estTokens(summaryBlock) - estTokens(`Question: ${query}\n\nContext passages:\n`) - historyUsed - 120; // slack for estimator error + output framing
   const passageParts: string[] = [];
   const usedHits: Hit[] = [];
+  // Passage label as the MODEL should cite it (it copies these into
+  // answers): drop OIML language markers, append the edition only when
+  // the identifier doesn't already carry it ("B 18:2025 (E)" + "2025" →
+  // no ":2025"; "PD-06 Edition 4" + "4" → no ":4"), and never show a
+  // producer UUID as a clause anchor — cite the clause title instead.
+  const passageLabel = (m: ChunkMeta): string => {
+    const id = (m.docidentifier || m.doc_id || "source").replace(/\s*\(([A-Z])\)\s*$/, "").trim();
+    const edition = m.edition && !id.includes(m.edition) ? ":" + m.edition : "";
+    const raw = String(m.clause_anchor ?? "");
+    const garbage = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(raw) || (raw.startsWith("_") && raw.length > 12);
+    const anchor = garbage || !raw ? "" : ` §${raw}`;
+    return `${id}${edition}${anchor}`;
+  };
   for (const h of hits) {
     const st = h.metadata.status === "withdrawn" || h.metadata.status === "superseded" ? ` [${h.metadata.status}]` : "";
-    const label = `${h.metadata.docidentifier || h.metadata.doc_id}:${h.metadata.edition || ""} §${h.metadata.clause_anchor || ""}${st}`.replace(/(:|§)+$/g, "");
+    const label = `${passageLabel(h.metadata)}${st}`;
     // answer contract v2: typed passages declare their unit id so the
     // model can reference [[u:<id>]] instead of retyping the object
     const unitTag = (h.metadata as any).unit_id ? ` unit ${(h.metadata as any).unit_id}${(h.metadata as any).block ? ` (${(h.metadata as any).block})` : ""}` : "";
