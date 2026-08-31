@@ -249,5 +249,46 @@
       "context_kind": "document",
       "context_note": "document-not-in-corpus"
     }
+  },
+  {
+    "id": "live-account-must-not-anonymous",
+    "query": "Where is my application?",
+    "context": {
+      "kind": "account",
+      "label": "my account"
+    },
+    "expect": {
+      "context_kind": "account",
+      "context_note": "sign-in-required",
+      "records_absent": true,
+      "allow_refusal": true
+    }
+  },
+  {
+    "id": "live-account-applications",
+    "query": "Where is my application?",
+    "context": {
+      "kind": "account",
+      "label": "my account"
+    },
+    "live_member": true,
+    "expect": {
+      "context_kind": "account",
+      "live_read": true,
+      "records_min": 1
+    }
+  },
+  {
+    "id": "live-account-waiting-on-me",
+    "query": "What's waiting on me?",
+    "context": {
+      "kind": "account",
+      "label": "my account"
+    },
+    "live_member": true,
+    "expect": {
+      "context_kind": "account",
+      "live_read": true
+    }
   }
 ]

@@ -12,8 +12,9 @@ import {
   validateIdToken,
   OidcError,
 } from "./oidc";
-import { clearSessionCookie, mintSessionCookie, mintSessionToken, readSession, SessionClaims } from "./session";
+import { clearSessionCookie, mintSessionCookie, mintSessionToken, rawSessionToken, readSession, sessionCookieFromToken, SessionClaims } from "./session";
 import { bubbleConfirmPage, isAllowedBubbleOrigin } from "./bubble";
+import { dropOpAccessToken, retainOpAccessToken } from "./livedata";
 
 const PLAIN_LANGUAGE: Record<string, string> = {
   not_configured: "Sign-in is not configured for this service yet.",
@@ -149,19 +150,29 @@ export async function handleCallback(env: any, req: Request): Promise<Response> 
       email: typeof claims.email === "string" ? claims.email : undefined,
       roles,
     };
-    const cookie = await mintSessionCookie(cfg.sessionSecret, sessionClaims);
+    // Mint ONCE — the cookie and the bubble's Bearer carry the same
+    // session token, so the live-data window (TODO.ai-platform/03) keyed
+    // off it holds for both presentations.
+    const session = await mintSessionToken(cfg.sessionSecret, sessionClaims);
+    const cookie = sessionCookieFromToken(session.token);
+    // TODO.ai-platform/03: retain the OP access token for the session's
+    // exchange window (the "my account" live-data delegation exchanges
+    // it per the identity service's RFC 8693 §9b) — KV only, TTL = the
+    // OP token's own life, never D1, never past the window.
+    if (typeof token.access_token === "string" && typeof token.expires_in === "number") {
+      await retainOpAccessToken(env, session.token, token.access_token, token.expires_in);
+    }
     // Bubble bridge: hand the session to the embedded panel as a Bearer
     // token via the confirm page — postMessage to the validated origin
     // ONLY, and only on the user's explicit click (bubble.ts). The
     // cookie still sets, so ai.oimlsmart.org itself is signed in too.
     if (stored.mode === "bubble" && typeof stored.origin === "string" && isAllowedBubbleOrigin(stored.origin)) {
-      const { token, expiresAt } = await mintSessionToken(cfg.sessionSecret, sessionClaims);
       return new Response(
         bubbleConfirmPage({
           name: sessionClaims.name ?? sessionClaims.email ?? "member",
           origin: stored.origin,
-          token,
-          expiresAt,
+          token: session.token,
+          expiresAt: session.expiresAt,
         }),
         { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "set-cookie": cookie } },
       );
@@ -207,6 +218,10 @@ export async function handleMe(env: any, req: Request): Promise<Response> {
 export async function handleLogout(env: any, req: Request): Promise<Response> {
   const cfg = authConfig(env);
   const headers: Record<string, string> = { "set-cookie": clearSessionCookie() };
+  // The live-data window closes WITH the session (TODO.ai-platform/03 —
+  // deliberately, never by the TTL alone).
+  const presented = rawSessionToken(req);
+  if (presented) await dropOpAccessToken(env, presented);
   if (cfg) {
     try {
       const meta = await discoverIssuer(cfg.issuer);

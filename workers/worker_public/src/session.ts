@@ -41,6 +41,13 @@ export async function mintSessionToken(secret: string, claims: Omit<SessionClaim
 
 export async function mintSessionCookie(secret: string, claims: Omit<SessionClaims, "exp" | "iat">): Promise<string> {
   const { token } = await mintSessionToken(secret, claims);
+  return sessionCookieFromToken(token);
+}
+
+/** The Set-Cookie value for an already-minted session token (the sign-in
+ *  mints ONCE and both the cookie and the bubble Bearer carry it —
+ *  TODO.ai-platform/03's live-data window keys off the one token). */
+export function sessionCookieFromToken(token: string): string {
   return `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_TTL_SEC}; HttpOnly; Secure; SameSite=Lax`;
 }
 
@@ -60,11 +67,7 @@ export async function readSession(req: Request, secret: string | undefined): Pro
   // bridge (bubble.ts) — the same signed payload, sent cross-origin by
   // the embedded panel. Cookie first so a stale stored token never
   // shadows a live cookie session on the ai property itself.
-  let raw: string | undefined = parseCookies(req)[SESSION_COOKIE];
-  if (!raw) {
-    const m = (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
-    raw = m?.[1]?.trim();
-  }
+  const raw = rawSessionToken(req);
   if (!raw) return null;
   const [payload, sig] = raw.split(".");
   if (!payload || !sig) return null;
@@ -79,6 +82,16 @@ export async function readSession(req: Request, secret: string | undefined): Pro
   } catch {
     return null;
   }
+}
+
+/** The raw session token as presented (the cookie wins the tie, exactly
+ *  as readSession) — the live-data window's KV key derives from it
+ *  (TODO.ai-platform/03; the key is the token's hash, never the token). */
+export function rawSessionToken(req: Request): string | null {
+  const raw =
+    parseCookies(req)[SESSION_COOKIE] ??
+    (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  return raw || null;
 }
 
 export function clearSessionCookie(): string {

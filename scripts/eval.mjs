@@ -1,11 +1,20 @@
 // Golden-set eval: the promotion gate. Runs tests/golden/cases.json
 // against the live service and writes artifacts/eval-report.json.
 // Exit 0 when the pass rate clears the threshold (default 0.9).
+//
+// TODO.ai-platform/03: cases marked "live_member": true exercise the "my
+// account" live-data delegation and require LIVE_MEMBER_TOKEN (a member
+// session Bearer for the service, in .env or the environment) — without
+// it they SKIP honestly (the post-deploy act runs them with the demo
+// member's session). The account must-NOT leg (the chip declared without
+// a member session never answers records) runs unconditionally.
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 
 const BASE = process.env.BASE_URL ?? "https://ai.oimlsmart.org";
-const KEY = (readFileSync(new URL("../.env", import.meta.url), "utf8").match(/^KEY=(.+)$/m) ?? [])[1]?.trim();
+const envText = readFileSync(new URL("../.env", import.meta.url), "utf8");
+const KEY = (envText.match(/^KEY=(.+)$/m) ?? [])[1]?.trim();
+const LIVE_MEMBER_TOKEN = (envText.match(/^LIVE_MEMBER_TOKEN=(.+)$/m) ?? [])[1]?.trim() ?? process.env.LIVE_MEMBER_TOKEN ?? null;
 const THRESHOLD = Number(process.env.GOLDEN_THRESHOLD ?? 0.9);
 const REFUSAL = "I don't have information on this in the indexed OIML publications.";
 
@@ -24,11 +33,17 @@ async function runCase(c) {
   const fail = (msg) => checks.push(`✗ ${msg}`);
   const pass = (msg) => checks.push(`✓ ${msg}`);
 
+  // The live-member legs ride the member session, never the API key.
+  const bearer = c.live_member ? LIVE_MEMBER_TOKEN : KEY;
+  if (c.live_member && !LIVE_MEMBER_TOKEN) {
+    return { id: c.id, ok: true, skipped: "LIVE_MEMBER_TOKEN not set (the post-deploy live leg)", checks: ["↷ skipped — no member session"], answer: "", citations: [] };
+  }
+
   let res;
   try {
     res = await fetch(`${BASE}/v1/ask`, {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
+      headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
       body: JSON.stringify({ query: c.query, stream: false, ...(c.context ? { context: c.context } : {}) }),
     });
   } catch (e) {
@@ -85,6 +100,33 @@ async function runCase(c) {
     body.context_applied?.note === c.expect.context_note
       ? pass(`context note "${c.expect.context_note}"`)
       : fail(`context_applied.note = ${JSON.stringify(body.context_applied?.note)} (expected "${c.expect.context_note}")`);
+  }
+  // ── the live-data legs (TODO.ai-platform/03): the live echo states
+  // WHEN the account was read + how many records grounded the answer;
+  // the records carry the links (label + url each); the must-not: the
+  // response NEVER carries records the read did not ground (and never
+  // any when the live read was not done). ──
+  if (c.expect.live_read) {
+    const live = body.context_applied?.live;
+    live && typeof live.read_at === "string" && Array.isArray(live.stores)
+      ? pass(`live read at ${live.read_at} (${live.stores.length} stores)`)
+      : fail(`context_applied.live missing or malformed: ${JSON.stringify(body.context_applied?.live)}`);
+  }
+  if (c.expect.records_min !== undefined) {
+    const records = body.records ?? [];
+    records.length >= c.expect.records_min
+      ? pass(`records ${records.length} ≥ ${c.expect.records_min}`)
+      : fail(`records ${records.length} < ${c.expect.records_min}`);
+    for (const r of records) {
+      r.label && r.url && /^https?:\/\//.test(r.url)
+        ? pass(`record linked: ${String(r.label).slice(0, 60)}`)
+        : fail(`record without an honest link: ${JSON.stringify(r).slice(0, 120)}`);
+    }
+  }
+  if (c.expect.records_absent) {
+    body.records === undefined || (Array.isArray(body.records) && body.records.length === 0)
+      ? pass("no records — the must-not holds")
+      : fail(`RECORDS LEAKED without a live read: ${JSON.stringify(body.records).slice(0, 200)}`);
   }
 
   return {

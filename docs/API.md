@@ -109,8 +109,9 @@ a corpus document. The service applies it honestly:
   never from the understanding stage's inference alone: a topic-prior
   extraction is not the user's words and never steals the chip, and a naming
   the text plainly carries wins even when the extraction misses it.
-- The entity's own data is NOT in scope (that is TODO.ai-platform/03's
-  live-data exchange); the grounding is the governing publication's clauses.
+- The entity's own data is NOT in scope (the "my account" chip's live-data
+  delegation, §2.1.2, is the record-level ground); the grounding is the
+  governing publication's clauses.
 - A declared context bypasses both answer caches (the answer depends on the
   declaration, not just the query) and is never written into them.
 - Conversational turns (greetings, identity) never ground in a declared
@@ -128,6 +129,52 @@ grounding:
   "note": "question-document-wins"        // only when a doc-carrying declaration
 }                                         // did not scope: also "document-not-in-corpus"
 ```
+
+#### 2.1.2 The "my account" context (TODO.ai-platform/03 — members only)
+
+The panel's fourth chip opts the message into the user's OWN live platform
+data — "my account — reads what you can see". The service reads the platform
+EXACTLY as the user, never wider:
+
+- The sign-in retains the OP's access token for the session's exchange
+  window only (KV keyed by the session token's hash, TTL = the OP token's
+  own expiry — never the database, never past the window; sign-out drops
+  it deliberately).
+- Each live ask exchanges it at the OP (the RFC 8693 session delegation —
+  the identity service's RP guide §9b) for a token scoped
+  `<platform>:read`, the account's standing re-judged AT the exchange (a
+  role lost mid-session narrows the next answer honestly).
+- The platform reads ride that token; the platform enforces the cones
+  exactly as for the user's own browser. The records the answer grounds in
+  map 1:1 from the platform's responses — the service can never invent or
+  widen one. Org administrators see the exchange + the reads on the audit
+  chain (the actor claim names this service), never the conversation.
+- Conversational turns never read the account (a greeting grounds in
+  nothing); an account ask whose corpus retrieval is empty still answers
+  from the records.
+
+The response gains `records` (each `{ store, id, label, url, status?, date?,
+detail? }` — the panel renders the links; the claims about a record name it)
+and the echo carries the live read:
+
+```jsonc
+"context_applied": {
+  "kind": "account",
+  "label": "my account",
+  "scoped_to": null,                      // the account context never scopes the corpus
+  "live": { "read_at": "2026-08-31T09:00:00Z", "stores": ["applications"], "records": 3 }
+}
+```
+
+When the live read cannot honestly happen the answer runs on the corpus and
+the echo says why: `"note": "sign-in-required"` (no member session),
+`"live-window-expired"` (the sign-in's window lapsed — sign in again to
+refresh), `"live-unavailable"` (the exchange refused or the platform was
+unreachable). Never a silent widening, never an invented record.
+
+The deployment wiring: `SMART_PLATFORM_API` (the platform's API base) +
+`SMART_PLATFORM_CLIENT_ID` (its client id at the OP — the delegation's
+scope target). Absent, the chip's ask answers `live-unavailable` honestly.
 
 **SSE protocol** (`text/event-stream`, each line `data: {json}`):
 1. `{"type":"citations","citations":[...],"quota":{"used":n,"limit":m}}` — arrives FIRST so chips render while the answer streams

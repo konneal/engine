@@ -128,6 +128,42 @@ test("parseAppliedContext: the stored echo is validated + bounded, garbage dropp
   assert.deepEqual(parseAppliedContext({ kind: "page", label: "p", note: "made-up" }), { kind: "page", label: "p", scoped_to: null });
 });
 
+test("the account kind (TODO.ai-platform/03): parses, echoes the live read, round-trips bounded", () => {
+  // the declaration parses (member-signed-in only — the ask path
+  // enforces; the parser just shapes)
+  assert.deepEqual(parseContext({ context: { kind: "account", label: "my account" } }), { kind: "account", label: "my account" });
+  // the applied echo carries the live read (when it happened) + the
+  // honest degradation notes (when it did not)
+  assert.deepEqual(parseAppliedContext({
+    kind: "account",
+    label: "my account",
+    scoped_to: null,
+    live: { read_at: "2026-08-31T09:00:00.000Z", stores: ["applications", "certificates"], records: 3 },
+  }), {
+    kind: "account",
+    label: "my account",
+    scoped_to: null,
+    live: { read_at: "2026-08-31T09:00:00.000Z", stores: ["applications", "certificates"], records: 3 },
+  });
+  assert.deepEqual(parseAppliedContext({ kind: "account", label: "my account", note: "live-window-expired" }), {
+    kind: "account",
+    label: "my account",
+    scoped_to: null,
+    note: "live-window-expired",
+  });
+  // a malformed live echo never survives; an oversized records count is bounded
+  assert.deepEqual(parseAppliedContext({ kind: "account", label: "x", live: { read_at: 42 } }), { kind: "account", label: "x", scoped_to: null });
+  assert.deepEqual(parseAppliedContext({ kind: "account", label: "x", live: { read_at: "t", stores: ["applications"], records: 99999 } }), {
+    kind: "account",
+    label: "x",
+    scoped_to: null,
+    live: { read_at: "t", stores: ["applications"], records: 999 },
+  });
+  // the account note is never static (the ask handler composes it from
+  // the live read's outcome)
+  assert.equal(contextNote({ kind: "account", label: "my account" }, null), undefined);
+});
+
 test("namedDocumentIn: only a document the question TEXT names is read — priors and classes are not namings", () => {
   // the merged-tree flake: "maximum permissible errors" is a domain prior
   // for R 76 — the text names nothing, so nothing is read

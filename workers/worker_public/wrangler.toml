@@ -60,6 +60,11 @@ EXEMPT_IPS = "218.188.43.254"
 OIDC_ISSUER = "https://id.oimlsmart.org"
 OIDC_REDIRECT_URI = "https://ai.oimlsmart.org/auth/callback"
 OIDC_CLIENT_ID = "oiml-rag"
+# TODO.ai-platform/03 — the "my account" live-data delegation: the platform
+# the assistant reads AS the user (the RFC 8693 exchange's scope target).
+# Absent/blank → the account chip answers live-unavailable honestly.
+SMART_PLATFORM_API = "https://demo.oimlsmart.org"
+SMART_PLATFORM_CLIENT_ID = "oiml-smart"
 
 [observability]
 enabled = true

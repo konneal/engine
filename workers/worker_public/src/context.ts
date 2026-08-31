@@ -2,7 +2,10 @@
 // panel's opt-in context chips declare what the answer grounds in —
 // the page the user is on, the entity the page carries, a corpus
 // document, or nothing (the default; an ABSENT context field IS
-// "none"). Opt-in means opt-in: no context the caller didn't declare
+// "none"). TODO.ai-platform/03 adds the member-only "account" kind:
+// the user's OWN live platform data, read through the RFC 8693
+// delegation (livedata.ts) — never ambient, member-signed-in only.
+// Opt-in means opt-in: no context the caller didn't declare
 // is ever applied, and every ask response echoes what was APPLIED
 // (context_applied) so the panel's honest context line never invents
 // a grounding. A declared context bypasses both answer caches (the
@@ -10,7 +13,7 @@
 // written into them — the caches stay context-clean by construction.
 
 export interface DeclaredContext {
-  kind: "page" | "entity" | "document";
+  kind: "page" | "entity" | "document" | "account";
   /** display label ("this certificate R60/2021-A-EX1-26.01") — echoed
    *  into context_applied for the panel's context line */
   label: string;
@@ -23,8 +26,18 @@ export interface DeclaredContext {
   edition?: string;
 }
 
+/** The account context's live-read echo (TODO.ai-platform/03): WHEN the
+ *  live data was read, WHICH stores answered, and how many records the
+ *  answer could ground in. Present only on a successful read — a failed
+ *  or refused read reports through `note` instead, never silently. */
+export interface LiveEcho {
+  read_at: string;
+  stores: string[];
+  records: number;
+}
+
 export interface AppliedContext {
-  kind: "page" | "entity" | "document" | "none";
+  kind: "page" | "entity" | "document" | "account" | "none";
   label?: string;
   /** the publication the DECLARED context actually scoped retrieval to
    *  ("OIML R 60:2021"); null when the declaration did not scope this
@@ -32,8 +45,12 @@ export interface AppliedContext {
   scoped_to?: string | null;
   /** why a doc-carrying declaration did not scope the answer:
    *  the corpus does not carry it, or the question named its own
-   *  publication (the user's explicit words always win over the chip) */
-  note?: "document-not-in-corpus" | "question-document-wins";
+   *  publication (the user's explicit words always win over the chip);
+   *  for the account kind: why the live data was NOT read (the honest
+   *  degradation — sign in, the window lapsed, the cone refused) */
+  note?: "document-not-in-corpus" | "question-document-wins" | "sign-in-required" | "live-window-expired" | "live-unavailable";
+  /** the account kind's live-read echo (TODO.ai-platform/03) */
+  live?: LiveEcho;
 }
 
 export const NO_CONTEXT: AppliedContext = { kind: "none", scoped_to: null };
@@ -44,7 +61,7 @@ export const NO_CONTEXT: AppliedContext = { kind: "none", scoped_to: null };
 export function parseContext(body: any): DeclaredContext | null {
   const c = body?.context;
   if (!c || typeof c !== "object") return null;
-  if (c.kind !== "page" && c.kind !== "entity" && c.kind !== "document") return null;
+  if (c.kind !== "page" && c.kind !== "entity" && c.kind !== "document" && c.kind !== "account") return null;
   const label = typeof c.label === "string" ? c.label.trim().slice(0, 120) : "";
   const route = typeof c.route === "string" && c.route.trim() ? c.route.trim().slice(0, 200) : undefined;
   const doc = typeof c.doc === "string" && c.doc.trim() ? c.doc.trim().slice(0, 80) : undefined;
@@ -118,9 +135,20 @@ export async function resolveDocScope(env: any, ctx: DeclaredContext): Promise<D
   return parsed;
 }
 
-export function appliedContext(declared: DeclaredContext | null, scope: DocScope | null, note?: AppliedContext["note"]): AppliedContext {
+export function appliedContext(
+  declared: DeclaredContext | null,
+  scope: DocScope | null,
+  note?: AppliedContext["note"],
+  live?: LiveEcho,
+): AppliedContext {
   if (!declared) return NO_CONTEXT;
-  return { kind: declared.kind, label: declared.label, scoped_to: scope ? scope.label : null, ...(note ? { note } : {}) };
+  return {
+    kind: declared.kind,
+    label: declared.label,
+    scoped_to: scope ? scope.label : null,
+    ...(note ? { note } : {}),
+    ...(live ? { live } : {}),
+  };
 }
 
 /** Validate a context_applied object arriving from a client (the
@@ -128,11 +156,21 @@ export function appliedContext(declared: DeclaredContext | null, scope: DocScope
  *  shape-checked; garbage degrades to null (nothing stored). */
 export function parseAppliedContext(v: any): AppliedContext | null {
   if (!v || typeof v !== "object") return null;
-  if (v.kind !== "page" && v.kind !== "entity" && v.kind !== "document" && v.kind !== "none") return null;
+  if (v.kind !== "page" && v.kind !== "entity" && v.kind !== "document" && v.kind !== "account" && v.kind !== "none") return null;
   const label = typeof v.label === "string" && v.label.trim() ? v.label.trim().slice(0, 120) : undefined;
   const scoped = typeof v.scoped_to === "string" && v.scoped_to.trim() ? v.scoped_to.trim().slice(0, 80) : null;
-  const note = v.note === "document-not-in-corpus" || v.note === "question-document-wins" ? v.note : undefined;
-  return { kind: v.kind, ...(label ? { label } : {}), scoped_to: scoped, ...(note ? { note } : {}) };
+  const note =
+    v.note === "document-not-in-corpus" || v.note === "question-document-wins" ||
+    v.note === "sign-in-required" || v.note === "live-window-expired" || v.note === "live-unavailable"
+      ? v.note
+      : undefined;
+  // The live echo round-trips bounded (the panel's context line reads
+  // it on a resumed session — the "when live data was read" honesty).
+  const live =
+    v.live && typeof v.live === "object" && typeof v.live.read_at === "string" && Array.isArray(v.live.stores) && typeof v.live.records === "number"
+      ? { read_at: v.live.read_at.slice(0, 40), stores: v.live.stores.filter((s: any) => typeof s === "string").slice(0, 8), records: Math.min(Math.max(0, v.live.records), 999) }
+      : undefined;
+  return { kind: v.kind, ...(label ? { label } : {}), scoped_to: scoped, ...(note ? { note } : {}), ...(live ? { live } : {}) };
 }
 
 /** The prompt note the declared context contributes (rides the
@@ -142,6 +180,12 @@ export function parseAppliedContext(v: any): AppliedContext | null {
  *  the governing publication's clauses. */
 export function contextNote(declared: DeclaredContext | null, scope: DocScope | null): string | undefined {
   if (!declared) return undefined;
+  if (declared.kind === "account") {
+    // The account note depends on the live read's OUTCOME (the records
+    // block on success, the honest degradation on a refusal) — the ask
+    // handler composes it (TODO.ai-platform/03); never a static claim.
+    return undefined;
+  }
   if (declared.kind === "page") {
     return `Context note: the user is viewing ${declared.label || "a page"}${declared.route ? ` (${declared.route})` : ""} in the OIML SMART platform. The passages come from the general corpus; frame procedural guidance for that page when relevant.`;
   }

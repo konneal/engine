@@ -17,6 +17,8 @@ import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
 import { contractV2, tableRetyped } from "./refs";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
+import { resolveLiveAccount, type LiveRecord } from "./livedata";
+import { rawSessionToken } from "./session";
 
 export interface Env {
   AI: any;
@@ -39,6 +41,12 @@ export interface Env {
   OIDC_CLIENT_SECRET?: string;
   OIDC_REDIRECT_URI?: string;
   SESSION_SECRET?: string;
+  /** TODO.ai-platform/03 — the "my account" live-data delegation: the
+   *  platform instance's API base + its client id at the OP (the
+   *  delegation's scope target). Absent = the account chip honestly
+   *  reports the live read unwired on this deployment. */
+  SMART_PLATFORM_API?: string;
+  SMART_PLATFORM_CLIENT_ID?: string;
   INTERNAL_SERVICE?: { fetch(input: RequestInfo, init?: RequestInit): Promise<Response> };
 }
 
@@ -519,12 +527,19 @@ async function handleAsk(
   // inference must never steal the user's explicit chip) and can miss a
   // naming the text plainly carries (the win must not depend on that
   // flake either).
-  const docScope = declaredCtx ? await resolveDocScope(env, declaredCtx) : null;
-  const named = declaredCtx ? namedDocumentIn(q.query) : null;
+  const docScope = declaredCtx && declaredCtx.kind !== "account" ? await resolveDocScope(env, declaredCtx) : null;
+  const named = declaredCtx && declaredCtx.kind !== "account" ? namedDocumentIn(q.query) : null;
   let ctxApplied;
   let declaredScoped = false;
   if (!declaredCtx) {
     ctxApplied = NO_CONTEXT;
+  } else if (declaredCtx.kind === "account") {
+    // Provisional echo (TODO.ai-platform/03): the live read's outcome
+    // refines it after the conversational branch — a conversational turn
+    // never reads the account. The account context NEVER scopes corpus
+    // retrieval (scoped_to stays null; the corpus answers the regulatory
+    // half, the records answer the account half).
+    ctxApplied = appliedContext(declaredCtx, null);
   } else if (docScope && (!named || named.doc_number === docScope.doc_number)) {
     // the chip scopes; a same-family document named in the question
     // agrees with it. An understand extraction the text does not name is
@@ -647,8 +662,54 @@ async function handleAsk(
     return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: NO_CONTEXT, ...(exempt ? {} : { quota }) });
   }
 
+  // (declared before the retrieval try: the account block, the refusal
+  // gate, the prompt and the response all read them)
+  let liveRecords: LiveRecord[] | undefined;
+  let accountNote: string | undefined;
   try {
     const tR = Date.now();
+    // ── The "my account" live read (TODO.ai-platform/03) — resolved
+    // HERE, after the conversational branch (a conversational turn never
+    // reads the account) and before retrieval (the records join the
+    // prompt beside the corpus passages). The cones bind exactly as for
+    // the user's own browser: the exchange (the identity service's RFC
+    // 8693 session delegation) re-judges the standing live, and the
+    // platform's API enforces the visibility — this service only ever
+    // maps what the platform answered. Every failure degrades honestly:
+    // the answer runs on the corpus and the context line says WHY the
+    // live data was not read.
+    if (declaredCtx?.kind === "account") {
+      const live = await resolveLiveAccount(env, rawSessionToken(req), member);
+      if (live.status === "ok") {
+        liveRecords = live.records;
+        ctxApplied = appliedContext(declaredCtx, null, undefined, {
+          read_at: live.readAt,
+          stores: live.stores,
+          records: live.records.length,
+        });
+        const lines = live.records.map(
+          (r) => `- ${r.label} [${[r.status, r.detail].filter(Boolean).join("; ")}] ${r.url}`,
+        );
+        accountNote =
+          `Live account data (read ${live.readAt} from the user's own OIML SMART account — exactly what they may see, never more):\n` +
+          (lines.length ? lines.join("\n") : "(the account surfaces answered empty)") +
+          `\nAnswer account questions from these records ONLY: name the record when you use it, never invent one, and say honestly when they do not hold the answer. The corpus passages still ground the regulatory claims (the requirements, the procedures); the records are the user's own work.`;
+        console.log("live data:", live.records.length, "records from", live.stores.join("+") || "none");
+      } else {
+        const note =
+          live.reason === "sign_in_required" ? "sign-in-required"
+          : live.reason === "window_expired" ? "live-window-expired"
+          : "live-unavailable";
+        ctxApplied = appliedContext(declaredCtx, null, note);
+        accountNote =
+          live.reason === "sign_in_required"
+            ? "Context note: the user asked with the 'my account' context but is not signed in — the account data was NOT read; answer from the corpus and say so."
+            : live.reason === "window_expired"
+              ? "Context note: the user's live access window lapsed — the account data was NOT read; answer from the corpus, say the live read did not happen, and suggest signing in again to refresh it."
+              : "Context note: the live account read was refused or unreachable — the account data was NOT read; answer from the corpus and say so honestly.";
+        console.log("live data: not read —", live.reason);
+      }
+    }
     // The DECLARED context's scope is a HARD seal (TODO.ai-platform/02):
     // the panel's context line claims the grounding, so no passage from
     // outside the declared publication may reach the answer. The seal is
@@ -690,7 +751,7 @@ async function handleAsk(
     return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
   }
   const { hits } = retrieved;
-  if (hits.length === 0) {
+  if (hits.length === 0 && !liveRecords?.length) {
     const answer = REFUSAL_ANSWER;
     const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
     telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang);
@@ -705,7 +766,7 @@ async function handleAsk(
     hits,
     q.lang,
     keptHistory,
-    [processNote, eNote, contextNote(declaredCtx, docScope)].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
@@ -737,7 +798,7 @@ async function handleAsk(
       const sse = new ReadableStream({
         async start(controller) {
           const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(exempt ? {} : { quota }) });
+          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(exempt ? {} : { quota }) });
           let full = "";
           try {
             for await (const tok of sseTokens(stream)) {
@@ -859,7 +920,7 @@ async function handleAsk(
   if (finalAnchors.violations.length > 0) {
     console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified — not caching");
   }
-  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2ns.blocks, context_applied: ctxApplied };
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2ns.blocks, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
