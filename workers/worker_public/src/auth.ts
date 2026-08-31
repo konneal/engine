@@ -148,6 +148,7 @@ export async function handleCallback(env: any, req: Request): Promise<Response> 
       sub: claims.sub,
       name: typeof claims.name === "string" ? claims.name : undefined,
       email: typeof claims.email === "string" ? claims.email : undefined,
+      picture: typeof claims.picture === "string" ? claims.picture : undefined,
       roles,
     };
     // Mint ONCE — the cookie and the bubble's Bearer carry the same
@@ -199,6 +200,7 @@ export async function handleMe(env: any, req: Request): Promise<Response> {
       sub: session.sub,
       name: session.name,
       email: session.email,
+      picture: session.picture,
       roles: session.roles,
     });
   }
@@ -207,6 +209,7 @@ export async function handleMe(env: any, req: Request): Promise<Response> {
       authenticated: !!session,
       name: session?.name ?? null,
       email: session?.email ?? null,
+      picture: session?.picture ?? null,
       roles: session?.roles ?? [],
       tier: session ? "member" : "anon",
       sign_in_available: !!cfg,

@@ -6,6 +6,8 @@ export interface SessionClaims {
   sub: string;
   name?: string;
   email?: string;
+  /** OIDC picture claim (avatar URL) — present when the OP issues it */
+  picture?: string;
   roles: string[];
   iat: number;
   exp: number;
