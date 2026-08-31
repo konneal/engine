@@ -15,7 +15,8 @@ required knowing the corpus before querying it. We describe a
 question-answering service, **OIML SMART AI** (ai.oimlsmart.org), that
 answers natural-language questions from the indexed publications with
 clause-level citations, verbatim quote anchors for normative values, and
-typed renderings of the tables and equations the answers depend on. The
+typed renderings of the tables and equations the answers depend on — and
+it reads figures and user-supplied photographs directly, from pixels. The
 service measures every component it ships: a golden question set,
 retrieval metrics in the tradition of the information-retrieval
 literature, and judged faithfulness. We report the measured design
@@ -140,15 +141,33 @@ validated industry-wide; our corpus measurement confirmed it, and the
 one-time cost (~$0.0017 per chunk) is amortized over every future
 answer.
 
-With the typed-table lane live (§6) and retrieval lanes running
-concurrently with query understanding, the current baseline is:
+With the typed-table lane live (§6), retrieval lanes running
+concurrently with query understanding, edition steering active (§5) and
+multimodal generation on (§6), the current baseline is:
 
 | Metric | Value |
 |---|---|
-| Recall@5 (mean of 3) | **95.4%** |
-| Average precision@5 | 0.83 |
+| Recall@5 (mean of 3) | **94.3%** (range 93.1–96.6) |
+| Average precision@5 | 0.82 |
 | MRR@5 | 0.87 |
 | End-to-end golden cases | 14/14 |
+
+These numbers are on our own golden set, not on the benchmarks of the
+works we build on — the honest comparison is per-technique, on the same
+corpus, before and after. So read: the full-corpus lexical stage is the
+ETSI study's recipe (ref 1) — adopting it lifted recall@5 here from 86%
+to 95%; the contextual preambles are Anthropic's contextual retrieval
+(ref 3) — confirmed on this corpus at ~$0.0017 per chunk one-time; the
+clause-boundary, structure-preserving chunking follows the same
+structure-aware line as refs 2 and 7, which our typed-unit pin extends
+from "chunk better" to "guarantee the answering object a slot." Two
+elements of the deployed system have no counterpart in the cited work:
+the symbolic-reference contract, under which table data never passes
+through the model at all (refs 2's error-reduction approach still
+re-generates tables; we removed the corruption channel), and the
+mechanical post-generation verification of every answer (quote anchors,
+unit references, retyped-table detection) with a faithfulness judge that
+sees the passages actually used.
 
 ## 5. Editions and trust
 
@@ -159,6 +178,21 @@ edition and status of every source; superseded sources are marked.
 Answers to questions that name a publication are steered to the current
 edition; answers that must cite a superseded edition (the 2021 passages
 do not reproduce a table the 2017 edition carries) say so explicitly.
+
+Steering is measured, not assumed, and two mechanisms earned their place
+by fixing observed failures. Superseded editions match archaic phrasing
+strongly — a complex verification question once cited R 76-1:1992/1988
+while the current 2006 edition was crowded out of the passage window —
+so ranking now demotes older-edition chunks of a publication whenever a
+newer edition of the same publication is present in the evidence
+(cross-publication recency is deliberately untouched: a 1992 document
+that is still current must not lose to unrelated 2024 ones). And because
+query understanding can pin an edition for the wrong family, an edition
+pin that the corpus itself fails to corroborate is dropped to the
+document-level filter. After both fixes the probe cites R 76-1:2006 in
+force, with one legitimate 1988 tail citation for a clause only that
+edition carries; the window's measured average precision (0.85) and MRR
+(0.88) are the best the service has recorded.
 
 ## 6. Tables, equations, and figures as typed objects
 
@@ -176,6 +210,14 @@ Figures are described by a vision-capable model that reads the actual
 image pixels; equations are carried in LaTeX and plain-language
 description. Both arrive as typed objects with the same validation.
 
+Figures also flow the other way: when the retrieved passages contain
+figure units, their actual images are attached to the answer model's
+input, so descriptions and reasoning come from the drawing itself — the
+model reads labels that exist only in the pixels. Users can likewise
+attach a photograph (an instrument nameplate, a scale dial, a schematic)
+to their question; the text still drives retrieval, and the image gives
+the model the visual context, under the same citation contract.
+
 ## 7. Models, cost, and sovereignty
 
 All models are open-weight and served on a single cloud platform
@@ -188,6 +230,16 @@ month including infrastructure. The model policy is deliberately
 cost-first on the serving path (every question pays it) and quality-first
 on one-time work (enrichment, captioning, evaluation), where quality
 persists into every future answer.
+
+One lesson generalizes: read the model card before wiring a model. Three
+separate live failures traced to defaults we never set — a
+reasoning-effort parameter that silently defaults to maximum (starving
+small output budgets), sampling defaults that let a thinking model loop
+(repetition consuming the token budget that carried the structured
+output), and a degraded non-thinking mode we were unknowingly paying
+for. Every call site now states its reasoning mode, its sampling, and a
+budget the reasoning cannot starve; the discipline costs nothing and
+removed an entire class of silent failure.
 
 ## 8. The producer-native path: Metanorma Knowledge Objects
 
@@ -223,7 +275,17 @@ The service's answers are evaluated on three axes, continuously:
 
 Every change ships through the same gate: the suites run in CI and the
 service's cache versions flush on every retrieval change so no answer is
-served from a superseded index.
+served from a superseded index. The gate rejects as often as it accepts.
+A candidate change that unioned additional retrieval candidates into a
+rewritten query's pool — a plausible-looking "more evidence" improvement
+— dropped recall@5 from 94.3% to 89.7%: topically close but wrong
+documents outscored the right ones under the cross-encoder, and the
+per-case diff named the three failing questions. The fix (additive
+candidates may only replace an identical query, never dilute a rewritten
+one) is now a comment in the code. A second candidate — grading
+document-scoped retrieval more aggressively — was measured, found to buy
+nothing, and reverted the same day. Additive is not free; the suite, not
+the author, decides.
 
 ## 10. Conclusions and outlook
 
@@ -232,10 +294,15 @@ over the OIML corpus is measurable, economical, and — with the
 producer-native ingestion path — increasingly maintained by the
 documents' own structure rather than by scraping their renderings. The
 open work is equally concrete: upstream bibliographic corrections for
-the 36 families without derivable current editions; a publisher-specific
-identifier flavor so citation joins become exact; collection-level
-bundles for cross-document reasoning; and interlingual unit alignment so
-the same clause can be answered in every OIML language.
+the 36 families without derivable current editions; unit-level language
+tagging so bilingual annexes inside English editions stop masquerading
+as main text; a publisher-specific identifier flavor so citation joins
+become exact; collection-level bundles for cross-document reasoning; and
+interlingual unit alignment so the same clause can be answered in every
+OIML language. The requirements behind several of these belong to the
+authoring system itself, and we have filed them with the Metanorma
+document model team as the producer side of an AI-native publishing
+stack.
 
 The service is live at ai.oimlsmart.org. Try it, and tell us when it is
 wrong — the feedback button is the fastest path into the evaluation
