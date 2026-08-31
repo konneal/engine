@@ -17,7 +17,8 @@ import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
 import { contractV2, tableRetyped } from "./refs";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
-import { resolveLiveAccount, type LiveRecord } from "./livedata";
+import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
+import { detectDraftIntent, prepareDraft } from "./drafts";
 import { rawSessionToken } from "./session";
 
 export interface Env {
@@ -378,6 +379,14 @@ async function handleAsk(
   // contextual (history-carrying) turn does.
   const declaredCtx = parseContext(body);
 
+  // The draft act (TODO.ai-platform/04): the user asks the assistant to
+  // PREPARE an act (the application prefill is the pilot) — never to
+  // perform it. The answer depends on the conversation, the account's
+  // live standing and the registry, never on the query alone, so a draft
+  // ask bypasses both answer caches (read AND write) exactly as a
+  // declared-context ask does.
+  const draftAct = detectDraftIntent(q.query);
+
   const member = tier === "member" ? await sessionFrom(req, env as any) : null;
 
   const exempt = tier === "anon" ? await isExemptIp(env, clientIp(req)) : false;
@@ -435,7 +444,7 @@ async function handleAsk(
   // declared-context asks and image asks skip the cache entirely — the
   // answer depends on the conversation / declared context / image, not
   // the query text alone
-  const cached = body?.fresh === true || contextual || declaredCtx || userImage ? null : await cacheGet(env, ns, q.query, q.lang);
+  const cached = body?.fresh === true || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, ns, q.query, q.lang);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
@@ -471,7 +480,7 @@ async function handleAsk(
   // take this path (they always run understanding + live retrieval);
   // fresh=true already bypassed the exact cache above.
   let understanding: any = null;
-  if (!cached && !contextual && !declaredCtx && !q.lang && !userImage && body?.fresh !== true) {
+  if (!cached && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && body?.fresh !== true) {
     const wv0 = (await warmEmbed) ?? null;
     if (wv0) {
       const sc0 = await semanticCacheGet(env, wv0);
@@ -596,7 +605,7 @@ async function handleAsk(
   // for standalone knowledge questions; contextual turns, declared-context
   // asks and image asks always run live; fresh=true regenerates,
   // bypassing this cache too)
-  if (understanding?.intent !== "conversational" && !contextual && !declaredCtx && !userImage && body?.fresh !== true) {
+  if (understanding?.intent !== "conversational" && !contextual && !declaredCtx && !draftAct && !userImage && body?.fresh !== true) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
       const sc = await semanticCacheGet(env, warmVec);
@@ -660,6 +669,59 @@ async function handleAsk(
     }
     telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
     return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: NO_CONTEXT, ...(exempt ? {} : { quota }) });
+  }
+
+  // ── The draft act (TODO.ai-platform/04) — the assistant PREPARES, the
+  // user commits in the platform's real UI. Branched after the
+  // conversational route (a draft ask is not one) and before retrieval
+  // (the draft grounds in the conversation + the registry anchor, not
+  // the corpus passages). THE SERVICE NEVER WRITES: the only credential
+  // in play is the read-scoped delegation (the RFC 8693 exchange, the
+  // same one the "my account" reads ride), and it only ever feeds the
+  // ROLE check — the refusal speaks the platform's own vocabulary. The
+  // draft rides the response's `draft` field to the panel, which hands
+  // it to the platform's real form; the commit is the user's own click.
+  if (draftAct) {
+    const draftCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
+    const queryHash = await sha256Hex(q.query);
+    // The delegation's honest states, computed exactly as the live-data
+    // path computes them (livedata.ts): the member's session → the
+    // exchange → the read-scoped token whose roles the draft reads.
+    const liveCfg = liveDataConfig(env);
+    const sessionRaw = rawSessionToken(req);
+    let delegation;
+    if (!member || !sessionRaw) delegation = { status: "unsigned" as const };
+    else if (!liveCfg) delegation = { status: "not_configured" as const };
+    else {
+      const exchanged = await exchangeForLiveToken(env, sessionRaw);
+      delegation = exchanged.ok
+        ? { status: "ok" as const, token: exchanged.token }
+        : { status: exchanged.reason };
+    }
+    const verdict = await prepareDraft(env, {
+      act: draftAct,
+      query: q.query,
+      history: keptHistory,
+      member,
+      delegation,
+      platformClientId: liveCfg?.platformClientId,
+      model: roleModel(env, "understand"),
+    });
+    console.log("draft act:", draftAct, "→", verdict.status === "draft" ? `draft (${Object.keys(verdict.draft.fields).length} fields)` : `refused (${verdict.reason})`);
+    const citations = verdict.citation ? [{ ...verdict.citation, corpus: "oiml" }] : [];
+    const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
+    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash, q.lang);
+    if (wantsStream) {
+      return sseResponse(
+        [
+          { type: "citations", citations, context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), ...(exempt ? {} : { quota }) },
+          { type: "token", v: verdict.answer },
+          { type: "done", model, query_hash: queryHash, context_applied: draftCtxApplied },
+        ],
+        corsHeaders(req),
+      );
+    }
+    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), ...(exempt ? {} : { quota }) });
   }
 
   // (declared before the retrieval try: the account block, the refusal

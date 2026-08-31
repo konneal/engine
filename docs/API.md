@@ -176,6 +176,77 @@ The deployment wiring: `SMART_PLATFORM_API` (the platform's API base) +
 `SMART_PLATFORM_CLIENT_ID` (its client id at the OP — the delegation's
 scope target). Absent, the chip's ask answers `live-unavailable` honestly.
 
+#### 2.1.3 The draft acts (TODO.ai-platform/04 — act with confirmation)
+
+The assistant can PREPARE an act; the user commits it in the platform's
+real UI. **The service never writes**: the only credential in play is the
+read-scoped delegation (§2.1.2's exchange), and it feeds nothing but the
+role check. The pilot act is the **application prefill**
+(`application_prefill`); the TL dispatch, the review comment and the
+evaluation summary are named follow-ups on the same contract.
+
+A draft ask (the user names the act — "draft / prepare / start / submit an
+R 60 application…") bypasses both answer caches and answers with:
+
+- `answer` — a deterministic account of what was drafted, what was
+  dropped and why, and the boundary: the draft opens in the real form
+  with every field editable, and only the user's own click commits it
+  (the service never claims a performed act).
+- `draft` — the wire shape below (ABSENT on a refusal).
+- `citations` — the resolved Recommendation the act anchors on.
+
+```jsonc
+"draft": {
+  "kind": "draft",
+  "act": "application_prefill",
+  "version": 1,
+  "title": "New OIML R 60:2021 application",
+  "prepared_at": "2026-08-31T10:00:00Z",
+  "requires_confirmation": true,          // ALWAYS — the draft is an input, never a channel
+  "fields": {
+    "standard_doc": "urn:oiml:pub:r:60:2021",   // the estate URN, resolved against the corpus registry
+    "standard_label": "OIML R 60:2021",
+    "family_designation": "LC series",          // only fields the user stated
+    "model_designation": "LC-500",
+    "description": "…",
+    "samples": [{ "serial": "SN-0042", "condition": "NEW" }],
+    "scheme": "A"                                // or "B"
+  },
+  "dropped": [                                 // the never-invents account
+    { "field": "family_designation", "value": "Phantom-9", "reason": "not stated in your own words" }
+  ],
+  "notes": ["The technical parameters stay with you: the form derives what the model declares…"]
+}
+```
+
+The honest rules, all eval-gated (the golden suite's `draft-*` legs):
+
+- **Never-invents**: the extraction (an LLM pass) only PROPOSES fields;
+  every drafted value must trace — through its own source span — to the
+  user's own messages, or it lands in `dropped` and the answer names it.
+  The instrument model's derivations never ride the draft: the platform's
+  form derives them on open, the user confirms each one.
+- **The refusals speak the platform's role vocabulary** (read from the
+  exchanged token's `service_roles`, re-judged live at the exchange):
+  the anonymous visitor is asked to sign in; a role that cannot perform
+  the act (the test-lab operator, the issuing-authority officer, the
+  read-only viewer) is told what the account IS and that the act belongs
+  to the applicant — no draft. Fail-closed: a role the pilot does not
+  recognize refuses. An unresolvable Recommendation (never named by the
+  user, or not in the corpus) refuses — the act anchors on a real
+  document.
+- **The never-writes must-not**: a crafted prompt ("submit it now with
+  my token") yields at most a draft with `requires_confirmation: true` —
+  the response NEVER carries a performed-act marker. The platform's
+  bearer cone refuses the delegated write class outright either way;
+  the commit path is the platform's own form, its own validation, its
+  own audit (which marks the act AI-prepared).
+
+**SSE**: the `draft` rides the first (`citations`) frame beside
+`context_applied`; `token` frames carry the answer; `done` as usual.
+The draft is ephemeral — the conversations API never persists it (a
+resumed session keeps the honest context line, not a stale draft).
+
 **SSE protocol** (`text/event-stream`, each line `data: {json}`):
 1. `{"type":"citations","citations":[...],"quota":{"used":n,"limit":m}}` — arrives FIRST so chips render while the answer streams
 2. `{"type":"token","v":"…"}` — repeated, in order
