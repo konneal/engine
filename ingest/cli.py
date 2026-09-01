@@ -281,6 +281,7 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--force", action="store_true")
         sp.add_argument("--resume", action="store_true")
         sp.add_argument("--skip-export", action="store_true")
+        sp.add_argument("--incremental", action="store_true")
         sp.add_argument("--dry", action="store_true")
         sp.add_argument("--skip-fts", action="store_true")
         sp.add_argument("--skip-graph", action="store_true")
@@ -302,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         run_tables(corpus=args.corpus, limit=args.limit)
     elif args.cmd == "fts":
         from .fts import apply as fts_apply
-        fts_apply(limit=args.limit, resume=args.resume)
+        fts_apply(limit=args.limit, resume=args.resume, incremental=args.incremental)
     elif args.cmd == "mko":
         from .mko_pipeline import run_mko
         run_mko(

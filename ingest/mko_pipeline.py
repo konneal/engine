@@ -46,6 +46,15 @@ def _run(cmd: list[str], extra_env: dict[str, str] | None = None) -> subprocess.
 
 def _step(name: str, r: subprocess.CompletedProcess) -> None:
     tail = (r.stdout or "").strip().splitlines()[-1:] or [(r.stderr or "").strip()[-160:]]
+    # exit 3 from ingest = bundles skipped (per-doc resilience,
+    # TODO.remaining/11): the run continues — the verify gate below still
+    # fails loudly if anything was skipped, so throughput never hides defects
+    if r.returncode == 3 and name == "ingest":
+        print(f"  [{name}] ok-with-skips: {tail[0][:150]}", flush=True)
+        skipped = ARTIFACTS / "mko_skipped.json"
+        if skipped.exists():
+            print(f"  [ingest] skipped bundles (see {skipped}):", skipped.read_text()[:600], flush=True)
+        return
     print(f"  [{name}] {'ok' if r.returncode == 0 else 'FAIL'}: {tail[0][:150]}", flush=True)
     if r.returncode != 0:
         print((r.stderr or r.stdout)[-1500:], flush=True)

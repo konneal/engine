@@ -24,8 +24,37 @@ from .config import ARTIFACTS
 
 CHUNKS = ARTIFACTS / "chunks.jsonl"
 MKO_CHUNKS = ARTIFACTS / "mko_chunks.jsonl"
+TYPED_TABLES = ARTIFACTS / "table_chunks_enrich.jsonl"
+CHANGED = ARTIFACTS / "mko_changed.jsonl"
 CONTEXTS = ARTIFACTS / "enriched-contexts.jsonl"
 BATCH = 50
+
+# — unit-level language detection (TODO.remaining/09) —
+# OIML EN editions embed official French/Spanish annexes with no marker;
+# the declared doc language says "en" for all of them (issue #72: an ES
+# annex chunk poisoned family-relative edition steering). Stopword ratios
+# on the first ~200 words are enough to TAG the mismatch — we tag, never
+# drop: bilingual annexes are official content.
+_LANG_MARKERS = {
+    "en": {"the", "and", "of", "to", "in", "is", "that", "for", "with", "as"},
+    "fr": {"le", "la", "les", "de", "des", "et", "est", "une", "dans", "pour"},
+    "es": {"el", "la", "los", "las", "de", "que", "y", "una", "para", "con"},
+    "de": {"der", "die", "das", "und", "ist", "von", "mit", "für", "den", "dem"},
+}
+
+
+def _detect_language(text: str) -> str | None:
+    words = re.findall(r"[a-zà-öø-ÿ]+", text[:1600].lower())
+    if len(words) < 20:
+        return None  # too short to judge — keep the declared language
+    counts = {lang: sum(1 for w in words if w in stop) for lang, stop in _LANG_MARKERS.items()}
+    best = max(counts, key=counts.get)
+    if counts[best] < 3:
+        return None
+    runner = sorted(counts.values(), reverse=True)
+    if runner[0] <= runner[1] * 1.5:
+        return None  # no clear winner (bilingual front matter) — keep declared
+    return best
 
 
 def _esc(s: str) -> str:
@@ -62,6 +91,14 @@ def _insert_sql(rec: dict, contexts: dict[str, str]) -> tuple[str, bool] | None:
     fts = f"{ctx.strip()} {body}" if ctx else body
     fts = fts[:4000]
     display = body[:2800]
+    # unit-level langid: tag bilingual-annex content with its ACTUAL
+    # language when it clearly disagrees with the declared one
+    lang = str(md.get("language") or "en")
+    if lang in _LANG_MARKERS:
+        detected = _detect_language(body)
+        if detected and detected != lang:
+            md["declared_language"] = lang
+            lang = detected
     sql = (
         "INSERT OR REPLACE INTO chunks "
         "(id, doc_id, docidentifier, doctype, doc_number, edition, language, "
@@ -73,7 +110,7 @@ def _insert_sql(rec: dict, contexts: dict[str, str]) -> tuple[str, bool] | None:
         f"'{_esc(str(md.get('doctype') or ''))}',"
         f"'{_esc(str(md.get('doc_number') or ''))}',"
         f"'{_esc(str(md.get('edition') or ''))}',"
-        f"'{_esc(str(md.get('language') or 'en'))}',"
+        f"'{_esc(lang)}',"
         f"'{_esc(str(md.get('clause_anchor') or ''))}',"
         f"'{_esc(str(md.get('clause_title') or ''))}',"
         f"'{_esc(str(md.get('status') or 'unknown'))}',"
@@ -117,7 +154,47 @@ def build_rows(limit: int | None = None) -> tuple[list[str], int, int]:
                     inserts.append(row[0])
                     n_ctx += row[1]
                     n += 1
+    # Typed-table lane (TODO.remaining/09): the 10.4k table chunks were
+    # dense-only — BM25 could not see the objects that hold the normative
+    # values. They carry unit_id + block, so they land with unit identity.
+    if TYPED_TABLES.is_file():
+        with TYPED_TABLES.open(encoding="utf-8") as src:
+            for line in src:
+                rec = json.loads(line)
+                row = _insert_sql(rec, contexts)
+                if row:
+                    inserts.append(row[0])
+                    n_ctx += row[1]
+                    n += 1
     return inserts, n, n_ctx
+
+
+def build_changed_rows() -> tuple[list[str], int, int]:
+    """Incremental apply (TODO.remaining/10): only the ids the MKO pipeline
+    marked changed (artifacts/mko_changed.jsonl, written by the diff step).
+    INSERT OR REPLACE upserts in place — the ai/au triggers sync chunks_fts,
+    so no DELETE and no full pass. Recovery path is `fts --full`."""
+    if not CHANGED.is_file():
+        raise SystemExit("no artifacts/mko_changed.jsonl — run the mko pipeline, or use --full")
+    changed_ids = {json.loads(line)["id"] for line in CHANGED.open(encoding="utf-8") if line.strip()}
+    contexts = _load_contexts()
+    inserts: list[str] = []
+    n_ctx = 0
+    for source in (CHUNKS, MKO_CHUNKS, TYPED_TABLES):
+        if not source.is_file():
+            continue
+        with source.open(encoding="utf-8") as src:
+            for line in src:
+                rec = json.loads(line)
+                if rec.get("id") not in changed_ids:
+                    continue
+                if (rec.get("metadata") or {}).get("corpus") == "clean":
+                    continue
+                row = _insert_sql(rec, contexts)
+                if row:
+                    inserts.append(row[0])
+                    n_ctx += row[1]
+    return inserts, len(inserts), n_ctx
 
 
 def _run_sql(path: Path, attempts: int = 3) -> None:
@@ -139,16 +216,20 @@ def _run_sql(path: Path, attempts: int = 3) -> None:
     raise RuntimeError(f"d1 execute failed ({attempts} attempts):\n{last}")
 
 
-def apply(limit: int | None = None, resume: bool = False) -> None:
-    inserts, n, n_ctx = build_rows(limit)
-    print(f"fts: prepared {n} rows ({n_ctx} with context preamble)", flush=True)
+def apply(limit: int | None = None, resume: bool = False, incremental: bool = False) -> None:
+    if incremental:
+        inserts, n, n_ctx = build_changed_rows()
+        print(f"fts: incremental — {n} changed rows ({n_ctx} with context preamble)", flush=True)
+    else:
+        inserts, n, n_ctx = build_rows(limit)
+        print(f"fts: prepared {n} rows ({n_ctx} with context preamble)", flush=True)
 
-    with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as tf:
-        tf.write("DELETE FROM chunks;\n")
-        clear_path = Path(tf.name)
-    print("fts: clearing…", flush=True)
-    _run_sql(clear_path)
-    clear_path.unlink(missing_ok=True)
+        with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as tf:
+            tf.write("DELETE FROM chunks;\n")
+            clear_path = Path(tf.name)
+        print("fts: clearing…", flush=True)
+        _run_sql(clear_path)
+        clear_path.unlink(missing_ok=True)
 
     total = len(inserts)
     for i in range(0, total, BATCH):
@@ -159,7 +240,7 @@ def apply(limit: int | None = None, resume: bool = False) -> None:
         print(f"fts: {min(i + BATCH, total)}/{total}", flush=True)
         _run_sql(bpath)
         bpath.unlink(missing_ok=True)
-    print(f"fts: done ({total} rows)", flush=True)
+    print(f"fts: done ({total} rows{' incremental' if incremental else ''})", flush=True)
 
 
 def _count_rows() -> int:

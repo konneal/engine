@@ -45,19 +45,33 @@ def main(argv: list[str]) -> int:
     graph_fragments: list[str] = []
     payload_rows: list[str] = []
 
+    # per-doc resilience (TODO.remaining/11): one broken bundle (manifest
+    # mismatch, drifted export) must not abort the whole run — the bundle is
+    # skipped, named in the report, and the exit code still signals it so
+    # the gated pipeline fails loudly. Resilience is throughput, never a
+    # way to hide defects.
+    skipped: list[tuple[str, str]] = []
     for raw in argv:
         bundle_path = Path(raw).expanduser()
-        bundle = MkoBundle(bundle_path)
-        doc = to_doc_record(bundle)
-        chunks = to_chunks(bundle, doc)
-        glossary = to_glossary(bundle, doc)
-        bibliography = to_bibliography(bundle, doc)
-        graph_sql = to_graph_sql(bundle, doc)
-        payload_rows.extend(to_payload_sql(bundle, doc))
-        all_chunks.extend(c.model_dump() for c in chunks)
-        all_glossary.extend(glossary)
-        all_bibliography.extend(bibliography)
-        graph_fragments.append(graph_sql)
+        try:
+            bundle = MkoBundle(bundle_path)
+            doc = to_doc_record(bundle)
+            chunks = to_chunks(bundle, doc)
+            glossary = to_glossary(bundle, doc)
+            bibliography = to_bibliography(bundle, doc)
+            graph_sql = to_graph_sql(bundle, doc)
+            payload_rows.extend(to_payload_sql(bundle, doc))
+            all_chunks.extend(c.model_dump() for c in chunks)
+            all_glossary.extend(glossary)
+            all_bibliography.extend(bibliography)
+            graph_fragments.append(graph_sql)
+        except Exception as e:  # noqa: BLE001 — name it, skip it, report it
+            skipped.append((bundle_path.name, str(e)[:160]))
+            print(f"  [ingest] SKIP {bundle_path.name}: {str(e)[:160]}", flush=True)
+    if skipped:
+        (ARTIFACTS / "mko_skipped.json").write_text(
+            __import__("json").dumps(skipped, indent=1), encoding="utf-8"
+        )
         by_type: dict[str, int] = {}
         for u in bundle.units:
             by_type[u.type] = by_type.get(u.type, 0) + 1
@@ -105,7 +119,7 @@ def main(argv: list[str]) -> int:
     print(f"wrote {chunks_out} ({len(all_chunks)} chunks), "
           f"{glossary_out} ({len(all_glossary)} terms), "
           f"{biblio_out} ({len(all_bibliography)} cited docs), {graph_out}")
-    return 0
+    return 3 if skipped else 0
 
 
 if __name__ == "__main__":
