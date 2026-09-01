@@ -368,5 +368,85 @@
         "I submitted"
       ]
     }
+  },
+  {
+    "id": "model-requirement-mpe",
+    "query": "Explain the requirement /req/metrological/mpe: what machine limit does the platform's verdict engine evaluate for it, and which clause of R 60-1 declares it?",
+    "expect": {
+      "answer_any": [
+        "lookupMPE|p_LC"
+      ],
+      "citation_corpus": "smart-model",
+      "model_node": "/req/metrological/mpe",
+      "model_kind": "requirement",
+      "model_clause": "clause-5\\.3\\.2"
+    }
+  },
+  {
+    "id": "model-chip-requirement",
+    "query": "This requirement — what two values does its machine limit compare, and in which units are they recorded?",
+    "context": {
+      "kind": "entity",
+      "label": "this requirement /req/metrological/measuring-range-max — Maximum load of the measuring range",
+      "route": "/app/standards/r60/req/metrological/measuring-range-max",
+      "doc": "urn:oiml:pub:r:60:2021"
+    },
+    "expect": {
+      "answer_any": [
+        "d_max|E_max|maximum (test )?load"
+      ],
+      "citation_corpus": "smart-model",
+      "context_kind": "entity",
+      "context_scoped_to": "OIML R 60:2021",
+      "model_node": "/req/metrological/measuring-range-max",
+      "model_kind": "requirement",
+      "model_clause": "clause-5\\.2"
+    }
+  },
+  {
+    "id": "model-disagreement-posture",
+    "query": "For /req/metrological/humidity-ch: what is the maximum-load humidity effect limit, and does the model agree with the test standard's form criterion on it?",
+    "expect": {
+      "answer_any": [
+        "contradict|disagree|differ|conflict|however|but"
+      ],
+      "citation_corpus": "smart-model",
+      "model_node": "/req/metrological/humidity-ch",
+      "model_kind": "requirement",
+      "model_clause": "clause-5\\.6\\.3\\.1"
+    }
+  },
+  {
+    "id": "model-term-definition",
+    "query": "Define /term/durability exactly as the R 60 SMART model carries it.",
+    "expect": {
+      "answer_any": [
+        "maintain its performance characteristics"
+      ],
+      "citation_corpus": "smart-model",
+      "model_node": "/term/durability",
+      "model_kind": "term"
+    }
+  },
+  {
+    "id": "model-conformance-test",
+    "query": "What does the test /conf/metrological-tests/measurement-error-repeatability-mdlo determine, and at which temperatures does its method apply loads?",
+    "expect": {
+      "answer_any": [
+        "measurement error|repeatability|MDLO"
+      ],
+      "citation_corpus": "smart-model",
+      "model_node": "/conf/metrological-tests/measurement-error-repeatability-mdlo",
+      "model_kind": "conformance_test",
+      "model_clause": "clause-2"
+    }
+  },
+  {
+    "id": "model-must-not-bind-unindexed",
+    "query": "Explain /req/metrological/no-such-requirement for me.",
+    "expect": {
+      "model_absent": true,
+      "allow_refusal": true
+    }
   }
 ]

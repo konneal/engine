@@ -17,16 +17,27 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint:wrangler
       - run: node --test tests/anchors.test.ts
+      - run: node --test tests/model-plane.test.ts
 
   ingest:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The model plane's freshness gate (TODO.ai-platform/05): the index
+      # derives from the smart repo's committed model-plane bundles — the
+      # gate compares the pinned hashes against the checkout's current
+      # bundles (a package change re-indexes).
+      - uses: actions/checkout@v4
+        with:
+          repository: oimlsmart/smart
+          ref: v2
+          path: smart-checkout
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: python -m pip install -r ingest/requirements.txt
       - run: python -m compileall -q ingest
+      - run: SMART_REPO="$GITHUB_WORKSPACE/smart-checkout" python -m ingest.cli model-plane --check
 
   site-and-ui:
     # builds the site for real (site-shell checked out as the sibling the

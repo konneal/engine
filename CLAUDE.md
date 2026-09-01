@@ -25,6 +25,7 @@ This repo is the orchestrator: ingestion → enrichment → indexing → serving
   - `.venv/bin/python -m ingest.cli embed` — embed via Workers AI, resumable (`artifacts/embeddings.jsonl`)
   - `.venv/bin/python -m ingest.cli upsert` — push vectors + metadata into Vectorize
   - `.venv/bin/python -m ingest.cli probe` — connectivity, embedding dims, sample query
+  - The model plane (TODO.ai-platform/05): `SMART_REPO=~/src/oimlsmart/smart .venv/bin/python -m ingest.cli model-plane` — derive the SMART model chunks + node rows from the smart checkout's committed bundles (`browser/public/data/model-plane/*.json` — the packages' projection; never hand-edit the pins) into `artifacts/model_chunks.jsonl` (rides embed/upsert/fts) + `artifacts/model_nodes.jsonl`; `--apply` loads D1 `model_nodes`/`model_plane_meta` (migration 0010); `--check` is the FRESHNESS GATE — a package change moves a bundle's `source_hash`, the gate fails, the index re-indexes (CI: the ingest job)
 - Secrets: `npx wrangler secret put ADMIN_TOKEN -c workers/worker_public/wrangler.toml` — guards `POST /v1/admin/keys` (API key creation)
 - Generated artifacts live in `artifacts/` (gitignored); never commit them
 
@@ -70,7 +71,7 @@ latency-sensitive calls.
 | `~/src/relaton/relaton-data-oiml/` | bibliography | 5707 YAML records; GLM-OCR chunk cache (`backfill/cache/`) |
 | `~/src/oimlsmart/vocab/` | terminology | 13 Glossarist datasets; `oiml-complete` = 6031 concepts; VIM/VIML editions |
 | `~/src/primmel/smartcab-refs/` | internal corpus | 16 ISO/IEC 17xxx (CASCO) standards, Metanorma, multi-edition; **copyrighted, internal-only — never expose to unauthenticated users** |
-| `~/src/oimlsmart/smart/` | identity provider + API consumer | OIML-CS platform (Astro SPA + Hono API); its oimlsmart.org Identity service is RAG's auth front door; role model at `browser/src/auth/roles.ts` (applicant, ia_officer, tl_operator, biml_officer, cs_admin, mc_member, rc_member, executive_secretary, admin, viewer) |
+| `~/src/oimlsmart/smart/` | identity provider + API consumer + the model plane's SSOT | OIML-CS platform (Astro SPA + Hono API); its oimlsmart.org Identity service is RAG's auth front door; role model at `browser/src/auth/roles.ts` (applicant, ia_officer, tl_operator, biml_officer, cs_admin, mc_member, rc_member, executive_secretary, admin, viewer). The primmel packages (`primmel-packages/`) are the Recommendation models' single source of truth; the model plane (TODO.ai-platform/05) consumes their committed projection (`browser/public/data/model-plane/*.json`) — read-only, `SMART_REPO`-declared |
 
 Precedence when the same document exists in both corpora: **clean wins over dirty**. Every chunk must carry provenance (source repo, doc slug, edition, language, quality tier).
 

@@ -1,6 +1,7 @@
+import { MODEL_CORPUS_NOTE } from "./modelplane";
+
 export const MODELS = {
-  embed: "@cf/qwen/qwen3-embedding-0.6b",
-  rerank: "@cf/baai/bge-reranker-base",
+  embed: "@cf/qwen/qwen3-embedding-0.6b",  rerank: "@cf/baai/bge-reranker-base",
   // ANSWER MODEL (all tiers, user decision 2026-08-29): glm-5.3-flash —
   // natively multimodal (vision-unified contract), GLM family, flash tier.
   // Vision image-parts land with answer contract v2; text answers work now.
@@ -66,6 +67,12 @@ export const DATASETS: Dataset[] = [
     id: "oiml",
     label: "OIML Publications",
     description: "Recommendations, Documents, Basic publications, Guides",
+  },
+  {
+    id: "smart-model",
+    label: "OIML SMART Models",
+    description: "The machine-readable Recommendation models (requirements' constraints, applicability rules, acceptance criteria, tests, terms) — derived from the Primmel packages",
+    note: MODEL_CORPUS_NOTE,
   },
   {
     id: "iso",

@@ -26,6 +26,7 @@ CHUNKS = ARTIFACTS / "chunks.jsonl"
 MKO_CHUNKS = ARTIFACTS / "mko_chunks.jsonl"
 TYPED_TABLES = ARTIFACTS / "table_chunks_enrich.jsonl"
 CHANGED = ARTIFACTS / "mko_changed.jsonl"
+MODEL_CHUNKS = ARTIFACTS / "model_chunks.jsonl"
 CONTEXTS = ARTIFACTS / "enriched-contexts.jsonl"
 BATCH = 50
 
@@ -159,6 +160,18 @@ def build_rows(limit: int | None = None) -> tuple[list[str], int, int]:
     # values. They carry unit_id + block, so they land with unit identity.
     if TYPED_TABLES.is_file():
         with TYPED_TABLES.open(encoding="utf-8") as src:
+            for line in src:
+                rec = json.loads(line)
+                row = _insert_sql(rec, contexts)
+                if row:
+                    inserts.append(row[0])
+                    n_ctx += row[1]
+                    n += 1
+    # the model plane (TODO.ai-platform/05): the machine content joins the
+    # lexical lane too — an exact-jargon query ("d_max E_max", "5.3.2 MPE")
+    # hits the model node by BM25 exactly like a prose clause
+    if MODEL_CHUNKS.is_file():
+        with MODEL_CHUNKS.open(encoding="utf-8") as src:
             for line in src:
                 rec = json.loads(line)
                 row = _insert_sql(rec, contexts)

@@ -247,6 +247,78 @@ The honest rules, all eval-gated (the golden suite's `draft-*` legs):
 The draft is ephemeral — the conversations API never persists it (a
 resumed session keeps the honest context line, not a stale draft).
 
+#### 2.1.4 The model plane (TODO.ai-platform/05 — model-native grounding)
+
+The assistant grounds in the SMART Recommendation MODELS, not only the
+prose corpus. The packages' machine content — the requirements'
+constraints (the machine limits the platform's verdict engine evaluates),
+the applicability rules, the acceptance criteria, the conformance tests,
+the term definitions — indexes **alongside** the prose (Vectorize corpus
+`smart-model` + the D1 `model_nodes` store + the FTS lane). The index
+DERIVES from the primmel packages, the models' single source of truth:
+the smart repo's `derive-model-plane.ts` projects the packages into
+committed bundles (`browser/public/data/model-plane/*.json`, byte-clean-
+guarded by its SSOT gate) and `python -m ingest.cli model-plane` consumes
+them from the sibling smart checkout (`SMART_REPO`). **The freshness is
+gated**: every bundle carries the package's `source_hash`; the committed
+pins (`ingest/model_plane_pins.json`) record what the index derived from,
+and `python -m ingest.cli model-plane --check` (CI: the ingest job) fails
+when a package moved — a package change re-indexes.
+
+**The model-aware chips.** "This requirement" on a model surface (the
+platform's requirement / conformance-test / term pages) declares an
+entity context whose label leads with the canonical node id
+(`/req/metrological/mpe — Maximum permissible errors…`). The service
+binds the node EXACTLY (the strict id grammar — never a fuzzy match):
+the declared label's id wins, then a node id the question names; the
+standard comes from the declared or question-named publication only (an
+LLM inference never narrows the bind), and a scope-less id binds only
+when unambiguous across the indexed standards — an ambiguous or
+unindexed id binds NOTHING, honestly. A bound node grounds the answer in
+the node itself: its constraint (quoted verbatim), its applicability,
+its acceptance, its provenance, its tests/preconditions ride the prompt
+as a structured block, the citations lead with the model node
+(`corpus: "smart-model"`), and the echo names the grounding:
+
+```jsonc
+"context_applied": {
+  "kind": "entity",
+  "label": "this requirement /req/metrological/mpe — Maximum permissible errors on type evaluation",
+  "scoped_to": "OIML R 60:2021",
+  "model": {
+    "node_id": "/req/metrological/mpe",
+    "kind": "requirement",
+    "standard": "oiml-r60",
+    "clause": "urn:oiml:pub:r:60-1:2021#clause-5.3.2"
+  }
+}
+```
+
+**The explained verdict.** The applicability/evaluation engines' verdicts
+answer in plain language with the constraint + the clause + the user's
+value ("your class C instrument fails 5.3.2 because the MPE for class C is
+±…, your declared value is …"). The verdict EXPLANATION is the platform's
+computation — the engine's own trace seam (the smart repo's
+`engine/verdict-explanation.ts`, proven on its golden cases), never a
+constraint this service invents or recomputes. The model plane grounds
+the static half (the requirement's machine limit + its clause + its
+acceptance); a live verdict's trace is the platform's own computation.
+
+**The honesty (the clause-drift doctrine's posture).** Where the model
+and the prose disagree, the answer says so and cites both: a model node
+that DECLARES a source discrepancy (the packages' `source_discrepancy`
+annotation — e.g. R 60-1, 5.6.3.1's C_Hmax ≤ 1 v vs R 60-3, 2.1.7's
+C_Hmax ≤ MPE) carries it into the grounding block verbatim and the answer
+must surface it; and every retrieved model-plane passage rides the corpus
+note — where a model passage and a prose passage disagree (a different
+edition's prose included), say so explicitly and cite both.
+
+The eval legs (the golden suite's `model-*` cases): the explained-
+verdict shape (the machine limit + the clause + the value in the answer),
+the model-aware chip binding (the echo above), the disagreement posture,
+and the must-not (an unbindable declaration carries NO model echo —
+never an invented grounding).
+
 **SSE protocol** (`text/event-stream`, each line `data: {json}`):
 1. `{"type":"citations","citations":[...],"quota":{"used":n,"limit":m}}` — arrives FIRST so chips render while the answer streams
 2. `{"type":"token","v":"…"}` — repeated, in order

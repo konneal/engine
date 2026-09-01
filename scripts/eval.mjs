@@ -176,6 +176,35 @@ async function runCase(c) {
       ? pass("no performed-act marker — the service never writes")
       : fail(`A PERFORMED ACT LEAKED (performed=${JSON.stringify(performed)}, draft.requires_confirmation=${JSON.stringify(body.draft?.requires_confirmation)}) — the never-writes invariant FAILED`);
   }
+  // ── the model-plane legs (TODO.ai-platform/05): the model-aware chip
+  // grounds the answer in the model NODE — context_applied.model names it
+  // (node id, kind, the clause provenance); an unbindable declaration
+  // carries NO model echo (never an invented grounding). ──
+  if (c.expect.model_node !== undefined) {
+    body.context_applied?.model?.node_id === c.expect.model_node
+      ? pass(`model node "${c.expect.model_node}" bound`)
+      : fail(`context_applied.model.node_id = ${JSON.stringify(body.context_applied?.model?.node_id)} (expected "${c.expect.model_node}")`);
+  }
+  if (c.expect.model_kind !== undefined) {
+    body.context_applied?.model?.kind === c.expect.model_kind
+      ? pass(`model kind "${c.expect.model_kind}"`)
+      : fail(`context_applied.model.kind = ${JSON.stringify(body.context_applied?.model?.kind)}`);
+  }
+  if (c.expect.model_clause !== undefined) {
+    re(c.expect.model_clause).test(body.context_applied?.model?.clause ?? "")
+      ? pass(`model clause ~/${c.expect.model_clause}/`)
+      : fail(`context_applied.model.clause = ${JSON.stringify(body.context_applied?.model?.clause)} (expected ~/${c.expect.model_clause}/)`);
+  }
+  if (c.expect.model_absent) {
+    body.context_applied?.model === undefined || body.context_applied?.model === null
+      ? pass("no model echo — the honest unbound posture")
+      : fail(`MODEL ECHO INVENTED for an unbindable declaration: ${JSON.stringify(body.context_applied?.model)}`);
+  }
+  if (c.expect.citation_corpus) {
+    cites.some((x) => x.corpus === c.expect.citation_corpus)
+      ? pass(`a ${c.expect.citation_corpus} citation rides`)
+      : fail(`no citation with corpus "${c.expect.citation_corpus}" (got: ${cites.map((x) => x.corpus).join(", ")})`);
+  }
 
   return {
     id: c.id,

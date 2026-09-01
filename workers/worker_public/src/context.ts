@@ -51,6 +51,10 @@ export interface AppliedContext {
   note?: "document-not-in-corpus" | "question-document-wins" | "sign-in-required" | "live-window-expired" | "live-unavailable";
   /** the account kind's live-read echo (TODO.ai-platform/03) */
   live?: LiveEcho;
+  /** the model plane's bound node (TODO.ai-platform/05): the model-aware
+   *  chip grounded this answer in the model node itself — its constraint,
+   *  its provenance, its tests */
+  model?: { node_id: string; kind: string; standard: string; clause?: string };
 }
 
 export const NO_CONTEXT: AppliedContext = { kind: "none", scoped_to: null };
@@ -170,7 +174,18 @@ export function parseAppliedContext(v: any): AppliedContext | null {
     v.live && typeof v.live === "object" && typeof v.live.read_at === "string" && Array.isArray(v.live.stores) && typeof v.live.records === "number"
       ? { read_at: v.live.read_at.slice(0, 40), stores: v.live.stores.filter((s: any) => typeof s === "string").slice(0, 8), records: Math.min(Math.max(0, v.live.records), 999) }
       : undefined;
-  return { kind: v.kind, ...(label ? { label } : {}), scoped_to: scoped, ...(note ? { note } : {}), ...(live ? { live } : {}) };
+  // The model-plane echo round-trips bounded too (TODO.ai-platform/05):
+  // a resumed session keeps the "grounded in this model node" honesty.
+  const model =
+    v.model && typeof v.model === "object" && typeof v.model.node_id === "string" && typeof v.model.kind === "string" && typeof v.model.standard === "string"
+      ? {
+          node_id: v.model.node_id.slice(0, 120),
+          kind: v.model.kind.slice(0, 40),
+          standard: v.model.standard.slice(0, 40),
+          ...(typeof v.model.clause === "string" && v.model.clause.trim() ? { clause: v.model.clause.slice(0, 120) } : {}),
+        }
+      : undefined;
+  return { kind: v.kind, ...(label ? { label } : {}), scoped_to: scoped, ...(note ? { note } : {}), ...(live ? { live } : {}), ...(model ? { model } : {}) };
 }
 
 /** The prompt note the declared context contributes (rides the

@@ -18,6 +18,7 @@ import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
 import { contractV2, tableRetyped } from "./refs";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
+import { bindModelNode, modelCitation, modelEcho, modelGroundingBlock, standardForDocNumber } from "./modelplane";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { rawSessionToken } from "./session";
 
@@ -728,6 +729,26 @@ async function handleAsk(
   // gate, the prompt and the response all read them)
   let liveRecords: LiveRecord[] | undefined;
   let accountNote: string | undefined;
+  // ── The model plane's node binding (TODO.ai-platform/05) ──
+  // "this requirement" on a model surface grounds in the model NODE
+  // itself (its constraint, its provenance, its tests): the declared
+  // entity label leads with the canonical node id (the platform's
+  // publish contract); a question may name one too. The standard comes
+  // from the DECLARED or question-NAMED publication only — understand's
+  // LLM extraction is an inference and never narrows the bind (the
+  // wave-02 lesson); scope-less binds hold only when the node id is
+  // unambiguous across the indexed standards.
+  const modelDocHint = named ?? docScope ?? namedDocumentIn(q.query);
+  const boundModel = await bindModelNode(env, {
+    label: declaredCtx?.label,
+    query: q.query,
+    standard: standardForDocNumber(modelDocHint?.doc_number),
+  });
+  if (boundModel) {
+    ctxApplied = { ...ctxApplied, model: modelEcho(boundModel) };
+    console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause");
+  }
+  const modelNote = boundModel ? modelGroundingBlock(boundModel) : undefined;
   try {
     const tR = Date.now();
     // ── The "my account" live read (TODO.ai-platform/03) — resolved
@@ -813,7 +834,7 @@ async function handleAsk(
     return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
   }
   const { hits } = retrieved;
-  if (hits.length === 0 && !liveRecords?.length) {
+  if (hits.length === 0 && !liveRecords?.length && !boundModel) {
     const answer = REFUSAL_ANSWER;
     const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
     telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang);
@@ -828,7 +849,7 @@ async function handleAsk(
     hits,
     q.lang,
     keptHistory,
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
@@ -851,7 +872,10 @@ async function handleAsk(
     console.log("user image attached to generation");
   }
   const queryHash = await sha256Hex(q.query);
-  const cites = citations(usedHits);
+  // The bound model node leads the citations (TODO.ai-platform/05): the
+  // panel's first citation card IS the model node — its constraint, its
+  // provenance — ahead of the prose passages.
+  const cites = boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits);
 
   if (wantsStream) {
     const stream = await generateStream(env, model, messages);
@@ -971,7 +995,7 @@ async function handleAsk(
     telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
-  const finalCites = citations(used);
+  const finalCites = boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used);
   const c2ns = answer.includes(REFUSAL_ANSWER)
     ? { text: answer, blocks: [] as Awaited<ReturnType<typeof contractV2>>["blocks"], dropped: [] as string[] }
     : await contractV2(env.DB, answer, used);
