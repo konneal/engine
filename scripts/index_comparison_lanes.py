@@ -45,7 +45,8 @@ def api(path: str, body: dict) -> dict:
     req = urllib.request.Request(
         f"{BASE}{path}",
         data=json.dumps(body).encode(),
-        headers={"Authorization": f"Bearer {ADMIN}", "content-type": "application/json"},
+        headers={"Authorization": f"Bearer {ADMIN}", "content-type": "application/json",
+                 "User-Agent": "oiml-lane-indexer/1.0"},
     )
     with urllib.request.urlopen(req, timeout=300) as r:
         return json.loads(r.read())
@@ -123,7 +124,8 @@ def embed_and_upsert(enriched: list[dict], index_name: str, lane: str):
             req = urllib.request.Request(
                 f"https://api.cloudflare.com/client/v4/accounts/{account}/vectorize/v2/indexes/{index_name}/upsert",
                 data=json.dumps({"vectors": vs}).encode(),
-                headers={"Authorization": f"Bearer {token}", "content-type": "application/json"},
+                headers={"Authorization": f"Bearer {token}", "content-type": "application/json",
+                         "User-Agent": "oiml-lane-indexer/1.0"},
             )
             with urllib.request.urlopen(req, timeout=60) as r:
                 upserted += len(vs)
