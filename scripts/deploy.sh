@@ -28,7 +28,8 @@ echo "── building site ──"
 
 # ── auto-bump INDEX_VERSION (only when the serving/index surface changed) ──
 TOML="workers/worker_public/wrangler.toml"
-CURRENT=$(grep -o 'INDEX_VERSION = "public-v[0-9.]*"' "$TOML" | grep -o '[0-9.]*')
+CURRENT=$(sed -n 's/.*INDEX_VERSION = "public-v\([0-9][0-9.]*\).*/\1/p' "$TOML" | head -1)
+[ -n "$CURRENT" ] || fail "could not parse INDEX_VERSION from $TOML"
 MAJOR=$(echo "$CURRENT" | cut -d. -f1)
 MINOR=$(echo "$CURRENT" | cut -d. -f2)
 NEXT="${MAJOR}.$((MINOR + 1))"
