@@ -1389,7 +1389,19 @@ async function handleVectors(env: Env, req: Request): Promise<Response> {
       await env.VECTORIZE.upsert(vectors);
       return json({ ok: true, upserted: vectors.length });
     }
-    return err(400, "invalid_input", "mode must be get or upsert");
+    if (mode === "embed") {
+      // comparison-lane indexing (TODO.model-rag): embed text via the
+      // binding's model so lane builders don't need AI REST scope
+      const texts = Array.isArray(body?.texts) ? body.texts.filter((t: unknown) => typeof t === "string").slice(0, 16) : [];
+      if (!texts.length) return err(400, "invalid_input", "texts: 1-16 required");
+      const vectors: number[][] = [];
+      for (const t of texts) {
+        const v = await embed(env.AI, MODELS.embed, t.slice(0, 6000));
+        vectors.push(v);
+      }
+      return json({ vectors });
+    }
+    return err(400, "invalid_input", "mode must be get, upsert, or embed");
   } catch (e) {
     return err(502, "vectorize_failed", String(e).slice(0, 200));
   }
