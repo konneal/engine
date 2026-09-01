@@ -37,6 +37,7 @@ LANES = {
     "mko": ("exp_mko_chunks.jsonl", "idx_exp_mko"),
     "primmel": ("primmel_chunks.jsonl", "idx_exp_primmel"),
     "primmel_flat": ("primmel_flat_chunks.jsonl", "idx_exp_primmel_flat"),
+    "composed": ("exp_composed_chunks.jsonl", "idx_exp_composed"),
 }
 
 
