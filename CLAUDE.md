@@ -107,3 +107,34 @@ TypeScript Workers for serving (`worker_public`, `worker_internal`, `workflow_re
 - Serialization via framework (lutaml-model in Ruby; pydantic in Python) — no hand-rolled `to_h`/`to_json`.
 - Ruby `lib/`: autoload only, no `require_relative`. No `double()` in specs. No `send` to private methods, no `instance_variable_get/set`.
 - Library code has no side effects: output is explicit, deterministic, written to the consumer's working directory — never into the package/repo source tree.
+
+## Model call-site rules (learned 2026-08-30/31, all from live incidents)
+
+Read the model card FIRST for: reasoning-mode controls and defaults,
+recommended sampling, output-budget guidance. Every call site states its
+reasoning mode, sampling and a budget the reasoning cannot starve.
+
+- GLM-5 family: `reasoning_effort` defaults to MAX when absent — always
+  explicit; budgets ≥3072 or reasoning starves the content.
+- Qwen3 thinking mode: temp 0.6 / top_p 0.95 / top_k 20, NEVER greedy
+  (repetition loops ate the understanding budget → the 10s/5s nulls).
+- DeepSeek-V4: non-think mode severely degraded; keep reasoning on,
+  3072+ budgets, temp 1.0 / top_p 1.0.
+- Answer generation (glm-5.3-flash): temp 0.6 / top_p 0.95 (parity with
+  default on the golden probe, tighter determinism).
+- `roleModel(env, role)` reads `<ROLE>_MODEL` wrangler vars — live A/B
+  without code changes; always gate a swap with golden ×3.
+- Catalog watchlist (grep `wrangler ai models list`): qwen3.8-flash-next,
+  hosted hy4 — neither available as of 2026-09-01.
+
+## Deploy & ops automation
+
+- `npm run deploy` → `scripts/deploy.sh`: guards (main == origin/main,
+  clean tree, typecheck, unit), site build, INDEX_VERSION auto-bump,
+  90s settle, 3-query smoke. NEVER deploy from a stale/diverged main.
+- Wire-stage ops without REST tokens: embed+upsert via `/admin/enrich`
+  (binding, contexts KV-cached), deletions via wrangler OAuth
+  `vectorize delete-vectors`, reads via `/admin/vectors`.
+- Eval: golden ×3 with witness-span containment (tests/retrieval.mjs);
+  `node scripts/variance.mjs` (determinism), `node scripts/feedback-triage.mjs`
+  (thumbs-down clustering — hashes only, by privacy design).

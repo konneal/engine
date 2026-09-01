@@ -1,5 +1,3 @@
-# Grounding legal metrology: a retrieval-augmented question-answering service over the OIML publications corpus
-
 *Draft article for the OIML Bulletin — 2026-08-30. Style: Bulletin
 technical article (MS Word single-column on submission; this is the
 authoring source). Numbers are production-measured unless noted.*
@@ -59,10 +57,14 @@ A user asks a question in any language. The service:
    named publication, edition, defined terms, complexity. There are no
    keyword rules; the same model makes these judgements for every
    question.
-2. **Retrieves** from a vector index of the corpus (clause-boundary
-   chunks with contextual preambles) *and*, in parallel, from a
-   full-corpus keyword index — exact identifiers, part numbers and
-   defined terms that vector similarity alone misses.
+2. **Retrieves in parallel** — three lanes leave the question at the
+   same instant: the vector index is queried with the question's
+   embedding while understanding is still running (the dense lane's
+   results are reused unchanged when understanding adds nothing), a
+   full-corpus keyword index catches exact identifiers, part numbers
+   and defined terms that vector similarity alone misses, and
+   understanding's refinements — a named publication, an edition —
+   arrive as metadata filters on the dense query.
 3. **Ranks** the fused candidates with a cross-encoder; complex
    questions get a second, stronger re-ranking pass.
 4. **Answers from the retrieved passages only**, under a contract that
@@ -72,6 +74,11 @@ A user asks a question in any language. The service:
    every quoted phrase exists in a cited passage; a separate judge that
    scores faithfulness; a correction-and-retry when either fails. An
    answer that cannot be verified is never written to the answer cache.
+
+![Figure 1 — A question's path through the service. Three retrieval lanes run concurrently; every answer passes mechanical verification before it is served or cached. The edition registry derives publication status from supersession links, never from a status field.](paper-assets/architecture.svg)
+
+*Figure 1 — A question's path through the service. Three retrieval lanes run concurrently; every answer passes mechanical verification before it is served or cached. The edition registry derives publication status from supersession links, never from a status field.*
+
 
 When the question names a publication, answers are steered to the
 current edition by a registry derived from the bibliographic record's
@@ -109,7 +116,7 @@ practitioners ask for — are tabular. Flattening tables into prose loses
 the row/column geometry that makes them answerable. The index now treats
 tables as atomic typed objects (§6).
 
-**Structure is a retrieval signal.* Standards are hierarchically
+**Structure is a retrieval signal.** Standards are hierarchically
 organized with extensive cross-references; the system indexes the
 section hierarchy and the citation graph as a queryable graph (7,128
 nodes, 6,486 edges) alongside the text, so a defined term can be
@@ -206,6 +213,11 @@ permitted and mechanically verified against the source. The payload
 never passes through the model's output, so it cannot be corrupted by
 generation.
 
+![Figure 2 — The answer contract. The model writes prose with inline citations and symbolic references; three mechanical checks run after generation; the server resolves surviving references to the producer's payloads and the client renders them.](paper-assets/contract-v2.svg)
+
+*Figure 2 — The answer contract. The model writes prose with inline citations and symbolic references; three mechanical checks run after generation; the server resolves surviving references to the producer's payloads and the client renders them.*
+
+
 Figures are described by a vision-capable model that reads the actual
 image pixels; equations are carried in LaTeX and plain-language
 description. Both arrive as typed objects with the same validation.
@@ -253,6 +265,11 @@ replaces HTML scraping end to end for the cleanly-authored portion of
 the corpus. The format, Metanorma Knowledge Objects (MKO), is specified
 as Metanorma note 116 with the consumer contract (symbolic unit
 references and typed excerpts) contributed from this work.
+
+![Figure 3 — Producer-native ingestion. Each authored document exports as one MKO bundle; chunking, enrichment and indexing are derived from the bundle, and re-ingest is incremental by content hash.](paper-assets/mko-ingest.svg)
+
+*Figure 3 — Producer-native ingestion. Each authored document exports as one MKO bundle; chunking, enrichment and indexing are derived from the bundle, and re-ingest is incremental by content hash.*
+
 
 This path matters beyond OIML: any standards body whose publications are
 authored in Metanorma gets structured, table-aware, graph-connected
