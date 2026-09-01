@@ -23,8 +23,8 @@ the 2017 edition package for diachrony).
 | P5 | relation | part_of/cites/defines edges | curated clause-level references; `uses:` package composition (CASCO); requirement↔aspect binding; type↔instance references |
 | P6 | temporality | editions + derived status | edition lifecycle (status/supersedes/validity.from) + FULL edition packages (diffable) |
 | P7 | perception | figure units + assets + captions | figure references (fig-2/fig-3 in sequences) |
-| P8 | quantitative typing | unit strings in payloads | **unit register**: stable ids, quantity_kind, dimension vector, SI coherent unit, conversion factor; coherence on KINDS |
-| P9 | computation | formula LaTeX (display) | formulas-as-operations (lookup with params); calculations (typed IO); **OCL constraints with violation meaning + on_violation** |
+| P8 | quantitative typing | UnitsML in stems — flattened to string suffixes by the export (metanorma-document#55) | **unit register**: stable ids, quantity_kind, dimension vector, SI coherent unit, conversion factor; coherence on KINDS |
+| P9 | computation | formula asciimath+mathml (display-only; no evaluation semantics — metanorma-document#55 GAP-3) | formulas-as-operations (lookup with params); calculations (typed IO); **OCL constraints with violation meaning + on_violation** |
 | P10 | instance & process | — | entity schemas (type vs instance, obligation/cardinality); ordered test sequences (roles, contamination semantics); workflows; execution forms |
 
 Meta-primitive (P★, Primmel only): **self-verification** — the model-linker
