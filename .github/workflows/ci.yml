@@ -17,6 +17,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint:wrangler
       - run: node --test tests/anchors.test.ts
+      - run: node --test tests/refusal.test.ts
       - run: node --test tests/model-plane.test.ts
 
   ingest:

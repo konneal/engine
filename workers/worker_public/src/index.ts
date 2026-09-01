@@ -15,6 +15,7 @@ import enrichmentPrompt from "../prompts/enrichment.md";
 import { reflect } from "./reflect";
 import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
+import { canonicalRefusal } from "./refusal";
 import { contractV2, tableRetyped } from "./refs";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
@@ -211,15 +212,9 @@ function telemetry(
   );
 }
 
-// the model occasionally paraphrases the refusal sentence ("...information
-// on how to make lasagna in the indexed..."); the API contract is the
-// exact canonical sentence — normalize variants, keep the redirect tail
-const REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the indexed OIML publications\.?/i;
-function canonicalRefusal(answer: string): string {
-  if (answer.includes(REFUSAL_ANSWER)) return answer;
-  const m = answer.match(REFUSAL_VARIANT);
-  return m ? answer.replace(m[0], REFUSAL_ANSWER) : answer;
-}
+// the refusal canonicalizer lives in ./refusal (the pinned sentence, the
+// start-anchored variant, and the rag#88 drift family — the same shapes
+// the harnesses accept, canonicalized, never more)
 
 /** Start an embed call without awaiting failures — null result means the
  *  caller simply embeds fresh. */

@@ -5,10 +5,11 @@ import conversationalPromptText from "../prompts/conversational.md";
 import listwisePromptText from "../prompts/listwise.md";
 import { tableContext } from "./tablecontext";
 
-/** The one sanctioned refusal sentence (also in prompts/system.md).
- *  Refusals are never cached: a refusal says "retrieval found nothing",
- *  which is a property of the moment, not of the question. */
-export const REFUSAL_ANSWER = "I don't have information on this in the indexed OIML publications.";
+// the pinned refusal sentence lives with the canonicalizer in ./refusal
+// (refusals are never cached: a refusal says "retrieval found nothing",
+// which is a property of the moment, not of the question); re-exported
+// here so the existing import surface keeps working
+export { REFUSAL_ANSWER } from "./refusal";
 
 /** Fill {{TOKEN}} placeholders in a prompt data file. Unknown/empty tokens
  *  resolve to "" so optional lines vanish cleanly. */
