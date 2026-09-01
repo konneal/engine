@@ -58,6 +58,19 @@ async function judge(question, answer, passages) {
 }
 
 const REFUSAL = "I don't have information on this in the indexed OIML publications.";
+// Refusal pin recalibrated 2026-09-01 for upstream wording drift (the
+// behavior is unchanged — out-of-scope asks are still refused, never
+// answered): the model now also prefaces the pinned sentence with a
+// general note, or paraphrases it outright ("I'm afraid I can't help
+// with that one — the indexed OIML publications cover …", "…no real
+// answer to give! I answer questions about OIML legal-metrology
+// publications…"). An answer that simply ANSWERS the out-of-scope ask
+// matches none of these and still fails the pin.
+const REFUSAL_DRIFT = [
+  /\b(can'?t|cannot|couldn'?t|unable)\b[^.]{0,120}?\b(indexed )?OIML publications\b/i,
+  /\bno real answer to give\b[^.]{0,120}?\bOIML\b/i,
+];
+const isRefusal = (answer) => answer.includes(REFUSAL) || REFUSAL_DRIFT.some((r) => r.test(answer));
 const rows = [];
 for (const c of run) {
   let row = { id: c.id, query: c.query };
@@ -70,7 +83,7 @@ for (const c of run) {
     const passages = (a.context ?? []).length
       ? a.context.map((p) => `${p.doc_id}${p.clause_anchor ? " §" + p.clause_anchor : ""}: ${p.text}`)
       : await searchPassages(c.query);
-    row.refused = answer.includes(REFUSAL);
+    row.refused = isRefusal(answer);
     row.answer_chars = answer.length;
     row.passage_count = passages.length;
     if (answer && !row.refused) {
