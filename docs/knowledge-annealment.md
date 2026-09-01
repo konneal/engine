@@ -115,3 +115,101 @@ L0–L6; R 60 primary, R 76-1 generality probes at L1/L3/L4 (A/B/C only).
 Headline outputs: the **lane × rung matrix**, per-lane **primitive
 activation radar** (P1–P10), **capability ceiling**, **annealment
 index**, and **cost per correct answer**.
+
+
+---
+
+# The three eras — and the Primmel frontier (F1–F12)
+
+## The era framing
+
+| Era | Representation | Primitives | What the assistant IS | Ceiling |
+|---|---|---|---|---|
+| **1 · LEGACY** | plain text / raw adoc | P1–P2 | an index: find and restate | L1–L3 |
+| **2 · NOW** | MKO (P1–P7) · Primmel-KO (P1–P10) | structure, typing, execution | a grounded instrument: cite, render, verify, compute | MKO L7 · Primmel L9 |
+| **3 · FRONTIER** | Primmel objects (F1–F12 below) | closed world + executability + instances | an OPERATOR: verdict, simulate, prove, personalize, walk processes, verify publications | beyond L9 |
+
+The comparison programme (TODO 15–20) measures Era 2's value per primitive.
+The FRONTIER is Era 3 — capabilities that exist because the corpus is a
+model with a closed world, executable semantics, and recorded instances.
+**No document representation can follow** — these are the special wins
+for D that make Primmel the destination, not just the winner of a test.
+
+## F1 — Verdict as data (conformance-as-a-service)
+`Verdict` data class ("the canonical verdict chain"), OCL constraints
+with `violation_meaning` + `on_violation`, examination reports. Answers
+return a **VERDICT BLOCK**: pass/fail/void + the reason in the
+standard's own words + the full clause chain — produced by EXECUTION,
+verified by execution. The answer contract's strongest artifact class.
+
+## F2 — Counterfactual simulation
+Constraints and table-lookup formulas run on HYPOTHETICAL parameters:
+*"what if D_max were 0.8·E_max?"* → the OCL verdict + violation meaning;
+*"which accuracy class for n_LC = 3000?"* → the lookup INVERTED.
+Documents state facts; models evaluate hypotheses.
+
+## F3 — Exhaustiveness and provable absence
+The closed world (audited: all 60 requirements, 62 tests; forAll
+semantics) → *"list ALL requirements binding marking"* is COMPLETE, and
+*"does R 60 require X? — no, provably"* is a proof, not a refusal.
+Retrieval corpora can only fail to find; the model can show the absence.
+
+## F4 — Instance-grounded, parameterized answers
+Attributes scoped family/instance + load-cell-instance entities + sample
+data → the MPE table becomes a FUNCTION evaluated at the user's
+instrument (Max, e, class): the answer is computed for YOUR device.
+(Member/internal tier.) Input annealment: the unit register normalizes
+any input units first.
+
+## F5 — Certification workflow statefulness
+`evaluation/processes` (layer-composed, `validate_provision` URN
+anchors), gateways, execution forms + checklist → a procedural assistant
+that knows where the evaluation stands, what gates what, what runs next —
+and can advance checklist state. Agentic, not just informative.
+
+## F6 — Impact analysis (committee tooling)
+Requirement↔test↔formula↔table bindings (`formulas-used`, aspect
+bindings) → *"if limit_factor for class C changes, which requirements,
+tests, verdicts and forms change?"* — change impact over the dependency
+graph. Drafting-committee superpower.
+
+## F7 — Semantic edition diffs + temporal jurisdiction
+Full 2017 edition PACKAGES + `validity.from` → edition deltas COMPUTED at
+model level ("what changed in the creep requirement") and retro-jurisdiction
+questions ("which edition governed a 2019 evaluation?").
+
+## F8 — Self-verification as a query (meta-grounding)
+The model-linker rules and the burned-empty allowlist: the corpus is
+machine-checked consistent — so the assistant can VERIFY ITS OWN
+model-grounded claims by execution. The faithfulness judge's successor
+for the D lane.
+
+## F9 — Document-as-projection verification
+`documents/*/presentation.xml`: the model carries its own renders →
+*"does the published Table 4 match the model?"* — QA of PUBLISHING
+itself; the inverse direction (model → document generation) later.
+
+## F10 — Normative notes as overrides
+First-class NOTE/EXAMPLE objects with override semantics ("the MPE for
+creep shall ALWAYS use p_LC = 0.7 regardless of the manufacturer's
+declaration") → notes become queryable RULES that feed computation, not
+buried prose that computation ignores.
+
+## F11 — Composition-aware answers
+`uses:` package composition (ISO/IEC 17000/17065) with layer-overlay
+semantics → questions spanning the composition carry per-layer
+provenance: "core says X; R 60 overlays Y" — co-location is not
+composition, and only the model composes.
+
+## F12 — The machine passport (r60-to-dpp.prm)
+The `.prm` artifact: answers exportable as structured passport DATA, not
+prose — the answer contract's ultimate block type. The Q&A becomes a
+data source for downstream systems.
+
+## Frontier sequencing
+
+**Measurable NOW with existing objects** (fold into the comparison as
+bonus rungs / follow-up paper): F1, F2, F3, F7, F10 (deterministic
+witnesses, exactly like L8/L9). **Build next** (serving work, not corpus
+work): F4, F5, F8. **Programme scale** (with the smart estate): F6, F9,
+F11, F12.
