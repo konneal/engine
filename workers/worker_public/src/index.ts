@@ -20,7 +20,7 @@ import { canonicalRefusal } from "./refusal";
 import { contractV2, tableRetyped } from "./refs";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
-import { bindModelNode, modelCitation, modelEcho, modelGroundingBlock, standardForDocNumber } from "./modelplane";
+import { bindModelNode, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { rawSessionToken } from "./session";
 
@@ -485,7 +485,13 @@ async function handleAsk(
   // take this path (they always run understanding + live retrieval);
   // fresh=true already bypassed the exact cache above.
   let understanding: any = null;
-  if (!cached && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && body?.fresh !== true) {
+  // a query naming a model node (/req/…, /term/…) is node-SCOPED: its
+  // embedding sits near every other node-scoped ask about the same
+  // standard, and the single-entry semantic bucket then serves one
+  // node's answer for another (observed run-to-run across the golden
+  // model legs). Node-scoped queries use the exact cache only.
+  const nodeScoped = !!modelNodeRefIn(q.query) || !!modelNodeRefIn(declaredCtx?.label);
+  if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && body?.fresh !== true) {
     const wv0 = (await warmEmbed) ?? null;
     if (wv0) {
       const sc0 = await semanticCacheGet(env, wv0);
@@ -611,7 +617,7 @@ async function handleAsk(
   // for standalone knowledge questions; contextual turns, declared-context
   // asks and image asks always run live; fresh=true regenerates,
   // bypassing this cache too)
-  if (understanding?.intent !== "conversational" && !contextual && !declaredCtx && !draftAct && !userImage && body?.fresh !== true) {
+  if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !userImage && body?.fresh !== true) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
       const sc = await semanticCacheGet(env, warmVec);
