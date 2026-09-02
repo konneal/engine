@@ -42,6 +42,22 @@ index_name = "idx_exp_primmel"
 binding = "EXP_COMPOSED"
 index_name = "idx_exp_composed"
 
+[[vectorize]]
+binding = "EXP_PLAIN"
+index_name = "idx_exp_plain"
+
+[[vectorize]]
+binding = "EXP_ADC"
+index_name = "idx_exp_adoc"
+
+[[vectorize]]
+binding = "EXP_MKO"
+index_name = "idx_exp_mko"
+
+[[vectorize]]
+binding = "EXP_PFLAT"
+index_name = "idx_exp_primmel_flat"
+
 [[d1_databases]]
 binding = "EXP_DB"
 database_name = "rag-comparison"

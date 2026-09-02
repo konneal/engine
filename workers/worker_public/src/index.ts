@@ -29,6 +29,10 @@ export interface Env {
   VECTORIZE: any;
   EXP_PRIMMEL: any;
   EXP_COMPOSED: any;
+  EXP_PLAIN: any;
+  EXP_ADC: any;
+  EXP_MKO: any;
+  EXP_PFLAT: any;
   EXP_DB: D1Database;
   CACHE: KVNamespace;
   DB: D1Database;
@@ -1795,10 +1799,18 @@ export default {
       const laneBindings: Record<string, any> = {
         primmel: env.EXP_PRIMMEL,
         composed: env.EXP_COMPOSED,
+        plain: env.EXP_PLAIN,
+        adoc: env.EXP_ADC,
+        mko: env.EXP_MKO,
+        primmel_flat: env.EXP_PFLAT,
       };
       const laneTables: Record<string, string> = {
         primmel: "chunks_primmel",
         composed: "chunks_composed",
+        plain: "chunks_plain",
+        adoc: "chunks_adoc",
+        mko: "chunks_mko",
+        primmel_flat: "chunks_primmel_flat",
       };
       const binding = laneBindings[laneName];
       const table = laneTables[laneName];
