@@ -29,7 +29,7 @@
  *  slug segments (the packages' identifier shapes — /req/<class>/<id>,
  *  /conf/<class>/<id>, /term/<id>, /constraint/<id>, /characteristic/<id>,
  *  /state-machine/<id>, /dimension/<id>). */
-const NODE_RE = /(?:^|[\s("'`])\/(req|conf|term|constraint|characteristic|state-machine|dimension)\/([a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)?)(?=[\s)"'`,;.]|$)/i;
+const NODE_RE = /(?:^|[\s("'`])\/(req|conf|term|constraint|characteristic|state-machine|dimension)\/([a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)?)(?=[\s)"'`,;:.]|$)/i;
 
 /** The first model-node id a text names (the declared chip label first,
  *  the question second — the caller orders). */
