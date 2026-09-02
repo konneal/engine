@@ -33,6 +33,20 @@ bucket_name = "rag-public-assets"
 binding = "VECTORIZE"
 index_name = "idx_oiml_public_v2"
 
+# Comparison lanes (TODO.model-rag): the annealment experiment indexes
+[[vectorize]]
+binding = "EXP_PRIMMEL"
+index_name = "idx_exp_primmel"
+
+[[vectorize]]
+binding = "EXP_COMPOSED"
+index_name = "idx_exp_composed"
+
+[[d1_databases]]
+binding = "EXP_DB"
+database_name = "rag-comparison"
+database_id = "85a1fa04-ef61-4a2d-8e85-23bbc0a3284d"
+
 [[kv_namespaces]]
 binding = "CACHE"
 id = "0f65d12cc77c41b5b91086de1c04f6da"

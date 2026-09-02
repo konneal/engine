@@ -26,6 +26,9 @@ import { rawSessionToken } from "./session";
 export interface Env {
   AI: any;
   VECTORIZE: any;
+  EXP_PRIMMEL: any;
+  EXP_COMPOSED: any;
+  EXP_DB: D1Database;
   CACHE: KVNamespace;
   DB: D1Database;
   ASSETS: Fetcher;
@@ -1671,6 +1674,107 @@ export default {
       let tier: "anon" | "key" | "member" = isApi ? "key" : "anon";
       if (!isApi && env.SESSION_SECRET && (await sessionFrom(req, env as any))) tier = "member";
       return withCors(await handleAsk(env, ctx, req, tier, key), cors);
+    }
+
+    // comparison lane query (TODO.model-rag): direct retrieval against a
+    // comparison index, bypassing the full ask pipeline — for the annealment
+    // runner and the /compare demo
+    if (req.method === "POST" && (path === "/api/lane" || path === "/v1/lane")) {
+      const isApi = path.startsWith("/v1/");
+      let key: ApiKey | null = null;
+      if (isApi) {
+        key = await authenticate(env, req);
+        if (!key) return err(401, "unauthorized", "Provide a valid API key.");
+      }
+      const body = await readJson(req);
+      const laneName = String(body?.lane ?? "");
+      const query = String(body?.query ?? "").trim();
+      const laneBindings: Record<string, any> = {
+        primmel: env.EXP_PRIMMEL,
+        composed: env.EXP_COMPOSED,
+      };
+      const laneTables: Record<string, string> = {
+        primmel: "chunks_primmel",
+        composed: "chunks_composed",
+      };
+      const binding = laneBindings[laneName];
+      const table = laneTables[laneName];
+      if (!binding || !table) {
+        return err(400, "invalid_lane", `lane must be one of: ${Object.keys(laneBindings).join(", ")}`);
+      }
+      if (!query || query.length > 2000) return err(400, "invalid_input", "query required (1-2000 chars)");
+
+      try {
+        // embed the query
+        const vector = await embed(env.AI, MODELS.embed, query);
+        // dense retrieval from the comparison index
+        const dense = await binding.query(vector, { topK: 20, returnMetadata: "all" });
+        const hits = (dense.matches ?? []).map((m: any) => ({
+          id: m.id,
+          score: m.score,
+          metadata: m.metadata ?? {},
+          text: m.metadata?.chunk_text ?? "",
+        }));
+        // lexical retrieval from the comparison D1
+        let lexical: any[] = [];
+        try {
+          const match = query.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, " ").split(/\s+/)
+            .filter((t: string) => t.length >= 2 && t.length <= 40)
+            .filter((t: string) => !["the","a","an","of","and","or","to","in","for","on","is","are","was","were","be","by","with","as","at","from","that","this","what","how","when","where","which","who","does","do","did","can","could","should","would","may","might","shall","must","about","into","than","then","its","it","their","there"].includes(t))
+            .map((t: string) => `"${t}"`).join(" OR ");
+          if (match) {
+            const res = await env.EXP_DB.prepare(
+              `SELECT c.id, c.docidentifier, c.clause_anchor, c.clause_title, c.unit_id, c.block,
+                      c.text, c.source_lane, c.linked_clause, bm25(${table}_fts) AS rank
+                 FROM ${table}_fts
+                 JOIN ${table} c ON c.rowid = ${table}_fts.rowid
+                WHERE ${table}_fts MATCH ?1
+                ORDER BY rank LIMIT ?2`
+            ).bind(match, 10).all();
+            lexical = (res.results ?? []).map((r: any) => ({
+              id: r.id,
+              score: 1 / (1 + Math.max(0, r.rank)),
+              metadata: {
+                docidentifier: r.docidentifier,
+                clause_anchor: r.clause_anchor,
+                clause_title: r.clause_title,
+                unit_id: r.unit_id,
+                block: r.block,
+                source_lane: r.source_lane,
+                linked_clause: r.linked_clause,
+              },
+              text: r.text,
+            }));
+          }
+        } catch (e) {
+          console.log("lane lexical failed:", String(e).slice(0, 100));
+        }
+
+        // fuse: dedupe by id, dense first, lexical appended
+        const seen = new Set<string>();
+        const fused = [...hits, ...lexical.filter((h: any) => !seen.has(h.id) && !hits.some((d: any) => d.id === h.id))];
+        hits.forEach((h: any) => seen.add(h.id));
+        lexical.forEach((h: any) => { if (!seen.has(h.id)) { fused.push(h); seen.add(h.id); } });
+
+        return json({
+          lane: laneName,
+          query,
+          hits: fused.slice(0, 10).map((h: any) => ({
+            id: h.id,
+            score: h.score,
+            docidentifier: h.metadata?.docidentifier ?? "",
+            clause_anchor: h.metadata?.clause_anchor ?? "",
+            clause_title: h.metadata?.clause_title ?? "",
+            unit_id: h.metadata?.unit_id ?? "",
+            block: h.metadata?.block ?? "",
+            source_lane: h.metadata?.source_lane ?? "",
+            linked_clause: h.metadata?.linked_clause ?? "",
+            text: String(h.text ?? "").slice(0, 400),
+          })),
+        });
+      } catch (e) {
+        return err(502, "lane_query_failed", String(e).slice(0, 200));
+      }
     }
 
     if (req.method === "POST" && (path === "/api/search" || path === "/v1/search")) {
