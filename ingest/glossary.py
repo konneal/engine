@@ -134,11 +134,13 @@ def run(dry: bool = False) -> int:
                     break
     account = env.get("CLOUDFLARE_ACCOUNT_ID", "06cad8ae9a017c856ab496c6bca9a9d8")
     h = {"authorization": f"Bearer {token}", "user-agent": "oiml-glossary/1.0"}
-    upserted = 0
-    with httpx.Client(timeout=300) as c:
-        for i in range(0, len(specs), 16):
-            b = specs[i : i + 16]
-            try:
+    from concurrent.futures import ThreadPoolExecutor
+
+    state = {"done": 0, "lock": __import__("threading").Lock()}
+
+    def do_batch(b):
+        try:
+            with httpx.Client(timeout=300) as c:
                 r = c.post(f"{BASE}/admin/vectors", headers=h, json={"mode": "embed", "texts": [s["text"] for s in b]})
                 vecs = r.json()["vectors"]
                 payload = [{"id": s["id"], "values": v, "metadata": {**s["metadata"], "chunk_text": s["text"]}} for s, v in zip(b, vecs)]
@@ -147,14 +149,21 @@ def run(dry: bool = False) -> int:
                     headers={"authorization": f"Bearer {api_token}", "content-type": "application/json", "user-agent": "oiml-glossary/1.0"},
                     json={"vectors": payload},
                 )
-                if res.status_code == 200:
-                    upserted += len(b)
-                else:
-                    print(f"  upsert FAIL {i}: {res.text[:100]}")
-            except Exception as e:  # noqa: BLE001
-                print(f"  batch FAIL {i}: {str(e)[:100]}")
-            if (i // 16) % 20 == 0:
-                print(f"  {min(i + 16, len(specs))}/{len(specs)} (done={upserted})", flush=True)
-            time.sleep(0.5)
+                n = len(b) if res.status_code == 200 else 0
+                if res.status_code != 200:
+                    print(f"  upsert FAIL: {res.text[:100]}")
+                return n
+        except Exception as e:  # noqa: BLE001
+            print(f"  batch FAIL: {str(e)[:100]}")
+            return 0
+
+    batches = [specs[i : i + 16] for i in range(0, len(specs), 16)]
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for n in ex.map(do_batch, batches):
+            with state["lock"]:
+                state["done"] += n
+                if state["done"] % 320 < 16:
+                    print(f"  {state['done']}/{len(specs)}", flush=True)
+    upserted = state["done"]
     print(f"[glossary] DONE: {upserted}/{len(specs)} upserted to idx_glossary")
     return 0 if upserted == len(specs) else 1
