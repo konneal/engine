@@ -74,7 +74,6 @@ annex 32 / example 8), 113 glossary concepts, 342 cited docs, 3,561
 section nodes + cites/defines edges in D1. Retrieval held at baseline
 (R@5 95%, AP 0.875, MRR 0.893) after widening the rerank window to 10
 for the enlarged clean lane.
-
 ## Full-corpus validation (2026-08-28)
 
 All **37** compiled sample documents (R/D/B/G/E + OIML-CS admin + parts
