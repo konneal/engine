@@ -28,6 +28,7 @@ This repo is the orchestrator: ingestion → enrichment → indexing → serving
   - The model plane (TODO.ai-platform/05): `SMART_REPO=~/src/oimlsmart/smart .venv/bin/python -m ingest.cli model-plane` — derive the SMART model chunks + node rows from the smart checkout's committed bundles (`browser/public/data/model-plane/*.json` — the packages' projection; never hand-edit the pins) into `artifacts/model_chunks.jsonl` (rides embed/upsert/fts) + `artifacts/model_nodes.jsonl`; `--apply` loads D1 `model_nodes`/`model_plane_meta` (migration 0010); `--check` is the FRESHNESS GATE — a package change moves a bundle's `source_hash`, the gate fails, the index re-indexes (CI: the ingest job)
 - Secrets: `npx wrangler secret put ADMIN_TOKEN -c workers/worker_public/wrangler.toml` — guards `POST /v1/admin/keys` (API key creation)
 - Generated artifacts live in `artifacts/` (gitignored); never commit them
+- The vector adapter (`ingest/vector_adapter.py`, contract in `docs/vector-adapter.md`) is the ONLY door from producer chunks to any Vectorize index: pydantic wire schema (registry, size caps, anchor sanity) + target gating (lane corpora structurally cannot enter production — 2026-09-02 incident). Every new producer/upsert path goes through `normalize_chunk(...).upsert(..., target=…)`, never a hand-rolled metadata dict. `/admin/enrich` default mode writes to the production index; callers that only want contexts pass `mode:"context"`.
 
 ## Model policy (open-source, cost-first, minimal accounts)
 

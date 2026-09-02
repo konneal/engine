@@ -12,9 +12,23 @@ Usage:
 import argparse
 import json
 import os
+import sys
 import time
 import urllib.request
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ingest.vector_adapter import normalize_chunk  # noqa: E402
+
+# script lane name → adapter target (the index the corpus belongs to)
+ADAPTER_TARGET = {
+    "plain": "exp_plain",
+    "adoc": "exp_adoc",
+    "mko": "exp_mko",
+    "primmel": "primmel",
+    "primmel_flat": "primmel_flat",
+    "composed": "exp_composed",
+}
 
 BASE = os.environ.get("BASE_URL", "https://ai.oimlsmart.org")
 ADMIN = os.environ.get("ADMIN_TOKEN", "")
@@ -107,13 +121,16 @@ def embed_and_upsert(enriched: list[dict], index_name: str, lane: str):
                 print(f"  embed mismatch: {len(vectors)} vectors for {len(batch)} chunks")
                 continue
 
-            # build the upsert payload
+            # build the upsert payload THROUGH the adapter — the single
+            # boundary that enforces corpus vocabulary, metadata size,
+            # anchor sanity, and the target-index guard (a chunk foreign
+            # to this lane's index refuses here, never at the wire)
             vs = []
             for c, v in zip(batch, vectors):
-                md = {k: v2 for k, v2 in c["metadata"].items() if isinstance(v2, (str, int, float, bool))}
-                md["chunk_text"] = c["enriched_text"][:2800]
+                md = dict(c["metadata"])
+                md["chunk_text"] = c["enriched_text"]
                 md["ctx"] = "1"
-                vs.append({"id": c["id"], "values": v, "metadata": md})
+                vs.append(normalize_chunk({"id": c["id"], "text": c["enriched_text"], "metadata": md}, target=ADAPTER_TARGET[lane]).upsert(v, target=ADAPTER_TARGET[lane]))
 
             # upsert via Vectorize REST (the token has vectorize scope)
             token = os.environ.get("API_TOKEN", "")
