@@ -25,8 +25,10 @@ This repo is the orchestrator: ingestion → enrichment → indexing → serving
   - `.venv/bin/python -m ingest.cli embed` — embed via Workers AI, resumable (`artifacts/embeddings.jsonl`)
   - `.venv/bin/python -m ingest.cli upsert` — push vectors + metadata into Vectorize
   - `.venv/bin/python -m ingest.cli probe` — connectivity, embedding dims, sample query
+  - The model plane (TODO.ai-platform/05): `SMART_REPO=~/src/oimlsmart/smart .venv/bin/python -m ingest.cli model-plane` — derive the SMART model chunks + node rows from the smart checkout's committed bundles (`browser/public/data/model-plane/*.json` — the packages' projection; never hand-edit the pins) into `artifacts/model_chunks.jsonl` (rides embed/upsert/fts) + `artifacts/model_nodes.jsonl`; `--apply` loads D1 `model_nodes`/`model_plane_meta` (migration 0010); `--check` is the FRESHNESS GATE — a package change moves a bundle's `source_hash`, the gate fails, the index re-indexes (CI: the ingest job)
 - Secrets: `npx wrangler secret put ADMIN_TOKEN -c workers/worker_public/wrangler.toml` — guards `POST /v1/admin/keys` (API key creation)
 - Generated artifacts live in `artifacts/` (gitignored); never commit them
+- The vector adapter (`ingest/vector_adapter.py`, contract in `docs/vector-adapter.md`) is the ONLY door from producer chunks to any Vectorize index: pydantic wire schema (registry, size caps, anchor sanity) + target gating (lane corpora structurally cannot enter production — 2026-09-02 incident). Every new producer/upsert path goes through `normalize_chunk(...).upsert(..., target=…)`, never a hand-rolled metadata dict. `/admin/enrich` default mode writes to the production index; callers that only want contexts pass `mode:"context"`.
 
 ## Model policy (open-source, cost-first, minimal accounts)
 
@@ -49,7 +51,7 @@ config:
 |------|-------|-------|
 | Embeddings (index + query) | `@cf/qwen/qwen3-embedding-0.6b` ($0.012/M, 100+ languages) | same model both sides (mandatory); fallback `@cf/baai/bge-m3` (same price); whole-corpus embed ≈ $0.15 |
 | Reranker | `@cf/baai/bge-reranker-base` ($0.003/M) | ≈$0.00003/query; fallback: skip, vector order; GLM listwise rerank for the deep internal pool |
-| Standard QA (members) | qwen3.8-27b ($0.45/$3.20 per M) | ≈$0.004/answer; thinking off/low for latency |
+| Standard QA (ALL tiers, default since 2026-08-29) | glm-5.3-flash ($0.15/$0.03-cached/$0.50 per M; 320B/18B active, natively multimodal) | ≈$0.0012/answer — cheaper than the old member model; unified answer model incl. future vision image-parts; understanding stays qwen3-30b-a3b; fallback qwen3-30b-a3b |
 | Anon tier / cheap / judge | qwen3-30b-a3b-fp8 ($0.051/$0.335 per M — MoE, 3B active) | the "cheap Qwen"; A/B alternates glm-4.7-flash ($0.06/$0.40), granite-4.0-h-micro ($0.017/$0.112); deepseek-v4-flash is NOT cheap on CF ($0.44/$1.32 — hot-path CRAG grader only, cached $0.014); promotion-gate judge = deepseek-v4-pro (quality-first lane); ≈$0.0003/answer |
 | Research / agents | glm-5.2 primary ($1.40/$0.26-cached/$4.40); kimi-k2.6 alternate ($0.95/$0.16/$4.00); deepseek-v4-flash-0731 doc-as-context (1.31M ctx, $0.44/$0.014-cached/$1.32; deepseek-v4-pro-0813 for hard reasoning); kimi-k3 benched ($3/$15 — too expensive) | prompt caching mandatory for dossier loops — cached input 5–15× cheaper |
 | Index-time enrichment / graph (quality-first lane) | deepseek-v4-pro-0813 default; **glm-5.2** for hardest slices (kimi-k3 benched — too expensive) | one-time ≈$40–100 total, prompt-cache doc prefixes |
@@ -70,7 +72,7 @@ latency-sensitive calls.
 | `~/src/relaton/relaton-data-oiml/` | bibliography | 5707 YAML records; GLM-OCR chunk cache (`backfill/cache/`) |
 | `~/src/oimlsmart/vocab/` | terminology | 13 Glossarist datasets; `oiml-complete` = 6031 concepts; VIM/VIML editions |
 | `~/src/primmel/smartcab-refs/` | internal corpus | 16 ISO/IEC 17xxx (CASCO) standards, Metanorma, multi-edition; **copyrighted, internal-only — never expose to unauthenticated users** |
-| `~/src/oimlsmart/smart/` | identity provider + API consumer | OIML-CS platform (Astro SPA + Hono API); its oimlsmart.org Identity service is RAG's auth front door; role model at `browser/src/auth/roles.ts` (applicant, ia_officer, tl_operator, biml_officer, cs_admin, mc_member, rc_member, executive_secretary, admin, viewer) |
+| `~/src/oimlsmart/smart/` | identity provider + API consumer + the model plane's SSOT | OIML-CS platform (Astro SPA + Hono API); its oimlsmart.org Identity service is RAG's auth front door; role model at `browser/src/auth/roles.ts` (applicant, ia_officer, tl_operator, biml_officer, cs_admin, mc_member, rc_member, executive_secretary, admin, viewer). The primmel packages (`primmel-packages/`) are the Recommendation models' single source of truth; the model plane (TODO.ai-platform/05) consumes their committed projection (`browser/public/data/model-plane/*.json`) — read-only, `SMART_REPO`-declared |
 
 Precedence when the same document exists in both corpora: **clean wins over dirty**. Every chunk must carry provenance (source repo, doc slug, edition, language, quality tier).
 
@@ -107,3 +109,34 @@ TypeScript Workers for serving (`worker_public`, `worker_internal`, `workflow_re
 - Serialization via framework (lutaml-model in Ruby; pydantic in Python) — no hand-rolled `to_h`/`to_json`.
 - Ruby `lib/`: autoload only, no `require_relative`. No `double()` in specs. No `send` to private methods, no `instance_variable_get/set`.
 - Library code has no side effects: output is explicit, deterministic, written to the consumer's working directory — never into the package/repo source tree.
+
+## Model call-site rules (learned 2026-08-30/31, all from live incidents)
+
+Read the model card FIRST for: reasoning-mode controls and defaults,
+recommended sampling, output-budget guidance. Every call site states its
+reasoning mode, sampling and a budget the reasoning cannot starve.
+
+- GLM-5 family: `reasoning_effort` defaults to MAX when absent — always
+  explicit; budgets ≥3072 or reasoning starves the content.
+- Qwen3 thinking mode: temp 0.6 / top_p 0.95 / top_k 20, NEVER greedy
+  (repetition loops ate the understanding budget → the 10s/5s nulls).
+- DeepSeek-V4: non-think mode severely degraded; keep reasoning on,
+  3072+ budgets, temp 1.0 / top_p 1.0.
+- Answer generation (glm-5.3-flash): temp 0.6 / top_p 0.95 (parity with
+  default on the golden probe, tighter determinism).
+- `roleModel(env, role)` reads `<ROLE>_MODEL` wrangler vars — live A/B
+  without code changes; always gate a swap with golden ×3.
+- Catalog watchlist (grep `wrangler ai models list`): qwen3.8-flash-next,
+  hosted hy4 — neither available as of 2026-09-01.
+
+## Deploy & ops automation
+
+- `npm run deploy` → `scripts/deploy.sh`: guards (main == origin/main,
+  clean tree, typecheck, unit), site build, INDEX_VERSION auto-bump,
+  90s settle, 3-query smoke. NEVER deploy from a stale/diverged main.
+- Wire-stage ops without REST tokens: embed+upsert via `/admin/enrich`
+  (binding, contexts KV-cached), deletions via wrangler OAuth
+  `vectorize delete-vectors`, reads via `/admin/vectors`.
+- Eval: golden ×3 with witness-span containment (tests/retrieval.mjs);
+  `node scripts/variance.mjs` (determinism), `node scripts/feedback-triage.mjs`
+  (thumbs-down clustering — hashes only, by privacy design).

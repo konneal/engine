@@ -17,16 +17,19 @@ export function hasInternalAccess(): boolean {
 }
 
 /** Ask rag-internal for RRF-fused passages for the query. Returns [] on
- *  any failure — the public-only results then serve the member. */
+ *  any failure — the public-only results then serve the member.
+ *  `auth` forwards the caller's session in WHATEVER form it arrived
+ *  (cookie same-origin, Bearer via the bubble bridge) — the internal
+ *  worker's readSession accepts both. */
 export async function retrieveInternal(
   service: ServiceFetcher,
-  cookie: string,
+  auth: { cookie: string; authorization: string },
   query: string,
 ): Promise<Hit[]> {
   try {
     const res = await service.fetch("https://internal/retrieve", {
       method: "POST",
-      headers: { "content-type": "application/json", cookie },
+      headers: { "content-type": "application/json", cookie: auth.cookie, authorization: auth.authorization },
       body: JSON.stringify({ query }),
     });
     if (!res.ok) return [];

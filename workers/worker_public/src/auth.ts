@@ -12,7 +12,9 @@ import {
   validateIdToken,
   OidcError,
 } from "./oidc";
-import { clearSessionCookie, mintSessionCookie, readSession, SessionClaims } from "./session";
+import { clearSessionCookie, mintSessionCookie, mintSessionToken, rawSessionToken, readSession, sessionCookieFromToken, SessionClaims } from "./session";
+import { bubbleConfirmPage, isAllowedBubbleOrigin } from "./bubble";
+import { dropOpAccessToken, retainOpAccessToken } from "./livedata";
 
 const PLAIN_LANGUAGE: Record<string, string> = {
   not_configured: "Sign-in is not configured for this service yet.",
@@ -27,6 +29,7 @@ const PLAIN_LANGUAGE: Record<string, string> = {
   token_audience: "The sign-in token was not issued for this service. Sign-in was refused.",
   token_expired: "The sign-in window expired. Please sign in again.",
   token_nonce: "The sign-in response failed its replay check. Please sign in again.",
+  origin_not_allowed: "That site may not connect the assistant to your account.",
 };
 
 export function authErrorText(reason: string): string {
@@ -63,14 +66,26 @@ const redirectWithError = (reason: string) =>
 export async function handleLogin(env: any, req: Request): Promise<Response> {
   const cfg = authConfig(env);
   if (!cfg) return redirectWithError("not_configured");
+  // Bubble bridge (bubble.ts): the embedded panel's sign-in. The origin
+  // is validated NOW, at flow start, and bound to the state — the
+  // callback hands the session token to exactly that origin, never to
+  // wherever the request happens to come from later.
+  const url0 = new URL(req.url);
+  const bubbleMode = url0.searchParams.get("mode") === "bubble";
+  const bubbleOrigin = url0.searchParams.get("origin") ?? "";
+  if (bubbleMode && !isAllowedBubbleOrigin(bubbleOrigin)) return redirectWithError("origin_not_allowed");
   try {
     const meta = await discoverIssuer(cfg.issuer);
     const state = randomToken();
     const nonce = randomToken();
     const pkce = await generatePkce();
-    await env.CACHE.put(`oa:${state}`, JSON.stringify({ nonce, verifier: pkce.verifier }), {
-      expirationTtl: 600,
-    });
+    await env.CACHE.put(
+      `oa:${state}`,
+      JSON.stringify({ nonce, verifier: pkce.verifier, ...(bubbleMode ? { mode: "bubble", origin: bubbleOrigin } : {}) }),
+      {
+        expirationTtl: 600,
+      },
+    );
     const url = buildAuthorizationUrl(meta, {
       clientId: cfg.clientId,
       redirectUri: cfg.redirectUri,
@@ -129,12 +144,40 @@ export async function handleCallback(env: any, req: Request): Promise<Response> 
       jwksUri: meta.jwks_uri,
     });
     const roles = Array.isArray(claims.roles) ? claims.roles.map(String) : [];
-    const cookie = await mintSessionCookie(cfg.sessionSecret, {
+    const sessionClaims = {
       sub: claims.sub,
       name: typeof claims.name === "string" ? claims.name : undefined,
       email: typeof claims.email === "string" ? claims.email : undefined,
+      picture: typeof claims.picture === "string" ? claims.picture : undefined,
       roles,
-    });
+    };
+    // Mint ONCE — the cookie and the bubble's Bearer carry the same
+    // session token, so the live-data window (TODO.ai-platform/03) keyed
+    // off it holds for both presentations.
+    const session = await mintSessionToken(cfg.sessionSecret, sessionClaims);
+    const cookie = sessionCookieFromToken(session.token);
+    // TODO.ai-platform/03: retain the OP access token for the session's
+    // exchange window (the "my account" live-data delegation exchanges
+    // it per the identity service's RFC 8693 §9b) — KV only, TTL = the
+    // OP token's own life, never D1, never past the window.
+    if (typeof token.access_token === "string" && typeof token.expires_in === "number") {
+      await retainOpAccessToken(env, session.token, token.access_token, token.expires_in);
+    }
+    // Bubble bridge: hand the session to the embedded panel as a Bearer
+    // token via the confirm page — postMessage to the validated origin
+    // ONLY, and only on the user's explicit click (bubble.ts). The
+    // cookie still sets, so ai.oimlsmart.org itself is signed in too.
+    if (stored.mode === "bubble" && typeof stored.origin === "string" && isAllowedBubbleOrigin(stored.origin)) {
+      return new Response(
+        bubbleConfirmPage({
+          name: sessionClaims.name ?? sessionClaims.email ?? "member",
+          origin: stored.origin,
+          token: session.token,
+          expiresAt: session.expiresAt,
+        }),
+        { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "set-cookie": cookie } },
+      );
+    }
     return new Response(null, { status: 302, headers: { location: "/", "set-cookie": cookie } });
   } catch (e) {
     if (e instanceof OidcError) console.error("auth callback:", e.reason, "—", e.message.slice(0, 200));
@@ -157,6 +200,7 @@ export async function handleMe(env: any, req: Request): Promise<Response> {
       sub: session.sub,
       name: session.name,
       email: session.email,
+      picture: session.picture,
       roles: session.roles,
     });
   }
@@ -165,6 +209,7 @@ export async function handleMe(env: any, req: Request): Promise<Response> {
       authenticated: !!session,
       name: session?.name ?? null,
       email: session?.email ?? null,
+      picture: session?.picture ?? null,
       roles: session?.roles ?? [],
       tier: session ? "member" : "anon",
       sign_in_available: !!cfg,
@@ -176,6 +221,10 @@ export async function handleMe(env: any, req: Request): Promise<Response> {
 export async function handleLogout(env: any, req: Request): Promise<Response> {
   const cfg = authConfig(env);
   const headers: Record<string, string> = { "set-cookie": clearSessionCookie() };
+  // The live-data window closes WITH the session (TODO.ai-platform/03 —
+  // deliberately, never by the TTL alone).
+  const presented = rawSessionToken(req);
+  if (presented) await dropOpAccessToken(env, presented);
   if (cfg) {
     try {
       const meta = await discoverIssuer(cfg.issuer);

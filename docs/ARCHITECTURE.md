@@ -275,3 +275,25 @@ grounded in 2025/2026 research and running in production at
 │  Playwright UI suite, retrieval eval harness                       │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+
+## 2026-09 additions (delta over the 2026-08-26 map)
+
+- **Multimodal generation**: figure units among the used passages attach
+  their R2 pixels to the glm-5.3-flash call (`attachFigureImages`) — the
+  model reads labels that exist only in the image. Users can attach a
+  photo (`image` data URL on /v1/ask, validated, 6MB) — text still drives
+  retrieval; image asks bypass both caches.
+- **Edition steering**: family-relative demotion of superseded editions
+  (cross-publication recency kept); edition pins corroborated by the
+  corpus (<3 chunks → drop to doc-only). Fixed superseded-citation drift.
+- **Citation labels**: model-facing passage headers and UI chips strip
+  OIML language markers, dedupe editions, never show UUID anchors.
+- **Lexical lane carries unit identity** (chunks.unit_id/block) — typed
+  chunks arriving via BM25 keep their [[u:…]] contract.
+- **Research loop**: keep-recent-10 context folding (older evidence as
+  digests) + per-round focus folding.
+- **Witness-span eval**: a hit requires ≥75% containment of the golden
+  answer span (ETSI protocol); graph-lane probes.
+- **Pipeline**: unit-level langid tags bilingual annexes; typed tables in
+  the lexical lane; `fts --incremental`; per-doc ingest resilience.

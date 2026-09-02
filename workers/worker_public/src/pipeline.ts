@@ -3,11 +3,13 @@ import { LIMITS, MODELS, DATASETS } from "./config";
 import systemPromptText from "../prompts/system.md";
 import conversationalPromptText from "../prompts/conversational.md";
 import listwisePromptText from "../prompts/listwise.md";
+import { tableContext } from "./tablecontext";
 
-/** The one sanctioned refusal sentence (also in prompts/system.md).
- *  Refusals are never cached: a refusal says "retrieval found nothing",
- *  which is a property of the moment, not of the question. */
-export const REFUSAL_ANSWER = "I don't have information on this in the indexed OIML publications.";
+// the pinned refusal sentence lives with the canonicalizer in ./refusal
+// (refusals are never cached: a refusal says "retrieval found nothing",
+// which is a property of the moment, not of the question); re-exported
+// here so the existing import surface keeps working
+export { REFUSAL_ANSWER } from "./refusal";
 
 /** Fill {{TOKEN}} placeholders in a prompt data file. Unknown/empty tokens
  *  resolve to "" so optional lines vanish cleanly. */
@@ -19,6 +21,7 @@ import { rrfFuse } from "./hybrid";
 import { lexicalPrefilter } from "./lexical";
 import { toHits } from "./lib/hit";
 import { QueryUnderstanding } from "./understand";
+import { structuralPropagation, positionOrder, ancestorDescendantDedup } from "./structural";
 
 export interface ChunkMeta {
   doc_id: string;
@@ -34,6 +37,15 @@ export interface ChunkMeta {
   text_ref: string;
   status?: string;
   superseded_by?: string;
+  /** answer contract v2: typed MKO units carry their unit id + block type */
+  unit_id?: string;
+  block?: string;
+  /** section-summary unit (FABLE multi-granularity, arXiv:2601.18116): a
+   *  depth-1 clause summary vector — a navigation node whose children
+   *  (child_anchors CSV) are quotable leaf clauses. The corpus's real
+   *  chunks start at depth 2, so these nodes cannot collide with them. */
+  section_summary?: string;
+  child_anchors?: string;
 }
 
 export interface Hit {
@@ -61,6 +73,42 @@ export function retrievalQuery(query: string, prev?: string): string {
   return query;
 }
 
+/** Typed-chunk selection for the pin: among a doc's typed units pick the
+ *  one whose text best overlaps the QUERY (the first candidate is wrong as
+ *  often as right — annex example tables outrank nothing). Lexical-overlap
+ *  heuristic over title + serialized rows; tables, figures and formulas
+ *  compete on the same score so a figure question can pin the figure
+ *  (which then feeds multimodal generation), while table-value questions
+ *  still pin their table on overlap. */
+function pickTypedChunk(query: string, candidates: Hit[], ranked: Hit[]): Hit | null {
+  if (!candidates.length) return null;
+  const pool = candidates;
+  const terms = query.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((t) => t.length > 2);
+  // the top-ranked PROSE passage usually sits in the answer clause: a
+  // typed chunk from that same clause is the answering object, not a
+  // same-topic example from an annex
+  const topProse = ranked.find((h) => !h.metadata.unit_id);
+  const topAnchor = topProse?.metadata.clause_anchor ?? "";
+  let best: Hit | null = null;
+  let bestScore = -1;
+  for (const h of pool) {
+    const hay = `${h.metadata.clause_title ?? ""} ${h.text}`.toLowerCase();
+    let score = 0;
+    for (const t of terms) if (hay.includes(t)) score++;
+    if (topAnchor && h.metadata.clause_anchor === topAnchor) score += terms.length; // dominates
+    // blank annex FORMS (empty value cells) are not answer tables
+    const cells = h.text.split("|").map((c) => c.trim());
+    const filled = cells.filter((c) => c.length > 0).length;
+    const density = cells.length ? filled / cells.length : 0;
+    score += density * 2;
+    if (score > bestScore) {
+      bestScore = score;
+      best = h;
+    }
+  }
+  return best ?? pool[0];
+}
+
 // colloquial process questions ("how do I get a device certified to R 60")
 // share almost no vocabulary with the B-series prose that answers them —
 // expand the retrieval query with the corpus's own terms so the window
@@ -70,7 +118,29 @@ const PROCESS_EXPANSION = " OIML Certification System OIML-CS issuing authority 
 export async function retrieve(
   env: any,
   query: string,
-  opts: { prev?: string; understanding?: QueryUnderstanding | null; queryOverride?: string; federate?: (query: string) => Promise<Hit[]>; warmEmbed?: Promise<number[] | null>; graphDocNumbers?: string[] } = {},
+  opts: {
+    prev?: string;
+    understanding?: QueryUnderstanding | null;
+    queryOverride?: string;
+    federate?: (query: string) => Promise<Hit[]>;
+    warmEmbed?: Promise<number[] | null>;
+    graphDocNumbers?: string[];
+    /** The declared context's HARD seal (TODO.ai-platform/02): when the
+     *  panel's chip declares a document scope, the CANDIDATE POOL is cut
+     *  to the publication family before rerank + the top-N cut — the
+     *  soft-steer widenings below (the full-corpus lexical union, the
+     *  sparse-filter widen, the sub-query lanes) can otherwise outscore
+     *  the filtered dense lane under the cross-encoder and push every
+     *  in-family passage out of the final hits, sealing the answer to
+     *  zero despite a healthy in-family pool. */
+    sealScope?: { doc_number: string; edition?: string } | null;
+    /** Option C: dense-lane results computed concurrently with
+     *  understanding (same folded-query vector, retrieve's exact query
+     *  parameters). With no filter they REPLACE the primary dense query;
+     *  with a filter they union in as discounted filter-miss cover. */
+    optimisticHits?: Hit[];
+    optimisticVec?: number[] | null;
+  } = {},
 ): Promise<Retrieved> {
   const u = opts.understanding ?? null;
   // Filters and process-intent come ONLY from query understanding — no
@@ -89,29 +159,81 @@ export async function retrieve(
   // arXiv:2604.09868 §II-B5). Lexical must scan the whole corpus — the
   // old keywordRank only re-ordered dense hits and could not recover
   // exact-jargon misses. Fail-open: empty lexical list leaves dense alone.
+  // Option C: when the query is unchanged (rq === folded) the optimistic
+  // vector is already resolved — never await a fresh embed for it.
   const vectorP =
-    rq === folded && opts.warmEmbed
-      ? opts.warmEmbed.then((w) => w ?? embed(env.AI, MODELS.embed, rq))
-      : embed(env.AI, MODELS.embed, rq);
+    rq === folded && opts.optimisticVec
+      ? Promise.resolve(opts.optimisticVec)
+      : rq === folded && opts.warmEmbed
+        ? opts.warmEmbed.then((w) => w ?? embed(env.AI, MODELS.embed, rq))
+        : embed(env.AI, MODELS.embed, rq);
   const lexicalP = lexicalPrefilter(env, rq).catch(() => [] as Hit[]);
-  const [vector, lexicalHits] = await Promise.all([vectorP, lexicalP]);
+  const [vector, lexicalHits0] = await Promise.all([vectorP, lexicalP]);
+  // The declared context's seal binds the lexical lane at the SOURCE: the
+  // RRF fusion below mixes the full-corpus lexical ranking straight into
+  // the final hits — past the pool-level seal — so under a seal the
+  // lexical lane is the FAMILY's lexical hits only.
+  const lexicalHits = opts.sealScope
+    ? lexicalHits0.filter((h) => h.metadata.doc_number === opts.sealScope!.doc_number && (!opts.sealScope!.edition || h.metadata.edition === opts.sealScope!.edition))
+    : lexicalHits0;
   if (lexicalHits.length) console.log("lexical prefilter:", lexicalHits.length, "hits");
   const q: any = { topK: LIMITS.retrieveK, returnMetadata: "all" };
   if (filter) q.filter = filter;
 
+  const optimistic = opts.optimisticHits ?? [];
+  const sameLane = rq === folded; // optimistic vector === this lane's vector
   let matches: any[] = [];
-  if (filter) {
+  if (!filter && sameLane && optimistic.length) {
+    // Option C fast path: the unfiltered dense query already ran
+    // concurrently with understanding — same vector, same topK, no
+    // filter. Reusing it skips one serial Vectorize round-trip with a
+    // bit-for-bit identical candidate set.
+    matches = optimistic.map((h) => ({ id: h.id, score: h.score, metadata: h.metadata }));
+    console.log("optimistic lane: reused", matches.length, "dense hits (no re-query)");
+  } else if (filter) {
     const filtered = await env.VECTORIZE.query(vector, q);
     matches = filtered.matches ?? [];
+    // an edition pin corroborated by (almost) nothing means the pin was a
+    // guess — understanding emits editions for families it mixes up
+    // (observed: R 76 pinned @2021, an R 60 year; the corpus holds
+    // 1988/1992/2006). The index is the ground truth for which editions
+    // EXIST: a wrong pin starves the doc filter and the widen then floods
+    // the pool with superseded editions. Drop to the doc-only filter and
+    // let family-relative steering rank editions downstream. A pin the
+    // user actually asked for survives — its edition exists in the corpus.
+    if (filters && filters.edition && matches.length < 3) {
+      const docOnly = await env.VECTORIZE.query(vector, {
+        topK: LIMITS.retrieveK,
+        returnMetadata: "all",
+        filter: toVectorizeFilter({ doc_number: filters.doc_number }),
+      });
+      if ((docOnly.matches ?? []).length > matches.length) {
+        console.log("edition pin dropped:", filters.doc_number, "@", filters.edition, "→", docOnly.matches?.length ?? 0, "doc-scoped hits (edition not in corpus)");
+        matches = docOnly.matches ?? [];
+        filters.edition = undefined;
+      }
+    }
     if (matches.length < LIMITS.rerankKeep) {
-      const unfiltered = await env.VECTORIZE.query(vector, { topK: LIMITS.retrieveK, returnMetadata: "all" });
+      // sparse doc filter → widen with the unfiltered ranking. Same lane:
+      // the optimistic results ARE that ranking (identical vector, no
+      // filter) — reuse them; otherwise re-query with this lane's vector.
+      const unfiltered = sameLane && optimistic.length
+        ? optimistic.map((h) => ({ id: h.id, score: h.score, metadata: h.metadata }))
+        : (await env.VECTORIZE.query(vector, { topK: LIMITS.retrieveK, returnMetadata: "all" })).matches ?? [];
       const seen = new Set(matches.map((m: any) => m.id));
-      matches = [...matches, ...(unfiltered.matches ?? []).filter((m: any) => !seen.has(m.id))];
+      matches = [...matches, ...unfiltered.filter((m: any) => !seen.has(m.id))];
     }
   } else {
     const res = await env.VECTORIZE.query(vector, q);
     matches = res.matches ?? [];
   }
+  // NOTE: when rq diverged (standalone_query / override) the optimistic
+  // hits are deliberately NOT unioned. Measured 2026-08-30: injecting the
+  // raw question's top-50 into a rewritten query's pool let topically
+  // close but wrong documents outscore the correct ones under the
+  // cross-encoder — recall@5 fell 94.3% → 89.7% (golden ×3). The
+  // optimistic lane may only REPLACE an identical query, never dilute a
+  // better one.
 
   // ── HyDE (Hypothetical Document Embeddings) ──
   // Embed the hypothetical answer and search with it — its vocabulary
@@ -167,22 +289,27 @@ export async function retrieve(
   // Different phrasings surface documents the original query misses.
   // Ref: RAG-Fusion paper (Semantic Scholar b4d1da74); dev.to 2026 blueprint
   if (u?.query_variants?.length) {
-    const variantResults: Hit[][] = [];
-    for (const variant of u.query_variants.slice(0, 3)) {
-      try {
-        const vv = await embed(env.AI, MODELS.embed, variant);
-        const vres = await env.VECTORIZE.query(vv, { topK: 20, returnMetadata: "all", ...(filter ? { filter } : {}) });
-        const vhits: Hit[] = (vres.matches ?? []).map((m: any) => ({
-          id: m.id,
-          score: m.score,
-          metadata: (m.metadata ?? {}) as ChunkMeta,
-          text: (m.metadata?.chunk_text as string) ?? "",
-        }));
-        variantResults.push(vhits);
-      } catch {
-        // variant retrieval failure — the primary results stand
-      }
-    }
+    // the variants are independent queries — embed + search them in
+    // PARALLEL; a serial loop paid 2 x (embed + query) round trips on
+    // the hot path for zero quality difference (same candidate set)
+    const variantResults = (
+      await Promise.all(
+        u.query_variants.slice(0, 3).map(async (variant) => {
+          try {
+            const vv = await embed(env.AI, MODELS.embed, variant);
+            const vres = await env.VECTORIZE.query(vv, { topK: 20, returnMetadata: "all", ...(filter ? { filter } : {}) });
+            return (vres.matches ?? []).map((m: any) => ({
+              id: m.id,
+              score: m.score,
+              metadata: (m.metadata ?? {}) as ChunkMeta,
+              text: (m.metadata?.chunk_text as string) ?? "",
+            })) as Hit[];
+          } catch {
+            return [] as Hit[]; // variant retrieval failure — primary results stand
+          }
+        }),
+      )
+    ).filter((r) => r.length > 0);
     // RRF fuse: primary ranking + each variant ranking
     if (variantResults.length > 0) {
       const allRankings: Hit[][] = [
@@ -218,23 +345,25 @@ export async function retrieve(
   // Retrieve for each sub-question and merge the top results.
   // Ref: Agent-Orchestrated Adaptive RAG (arXiv 2606.05658)
   if (u?.complexity === "complex" && u.sub_queries?.length) {
-    const subResults: Hit[][] = [];
-    for (const sub of u.sub_queries.slice(0, 4)) {
-      try {
-        const sv = await embed(env.AI, MODELS.embed, sub);
-        const sres = await env.VECTORIZE.query(sv, { topK: 15, returnMetadata: "all" });
-        subResults.push(
-          (sres.matches ?? []).map((m: any) => ({
-            id: m.id,
-            score: m.score,
-            metadata: (m.metadata ?? {}) as ChunkMeta,
-            text: (m.metadata?.chunk_text as string) ?? "",
-          })),
-        );
-      } catch {
-        // sub-query failure — primary results stand
-      }
-    }
+    // sub-questions are independent — parallel rounds, same as variants
+    const subResults = (
+      await Promise.all(
+        u.sub_queries.slice(0, 4).map(async (sub) => {
+          try {
+            const sv = await embed(env.AI, MODELS.embed, sub);
+            const sres = await env.VECTORIZE.query(sv, { topK: 15, returnMetadata: "all" });
+            return (sres.matches ?? []).map((m: any) => ({
+              id: m.id,
+              score: m.score,
+              metadata: (m.metadata ?? {}) as ChunkMeta,
+              text: (m.metadata?.chunk_text as string) ?? "",
+            })) as Hit[];
+          } catch {
+            return [] as Hit[]; // sub-query failure — primary results stand
+          }
+        }),
+      )
+    ).filter((r) => r.length > 0);
     // merge sub-results into the candidate pool (union, no RRF — these
     // are complementary perspectives, not alternatives)
     const seenIds = new Set(matches.map((m: any) => m.id));
@@ -285,6 +414,16 @@ export async function retrieve(
     }
   }
 
+  // The declared context's hard seal (TODO.ai-platform/02) — pool-level,
+  // after every lane has merged, before rerank + the top-N cut. Nothing
+  // outside the declared family competes for the window; everything
+  // inside it does.
+  if (opts.sealScope) {
+    const before = hits.length;
+    hits = hits.filter((h) => h.metadata.doc_number === opts.sealScope!.doc_number && (!opts.sealScope!.edition || h.metadata.edition === opts.sealScope!.edition));
+    console.log("context seal:", before, "→", hits.length, "candidates within", `doc#${opts.sealScope.doc_number}${opts.sealScope.edition ? "@" + opts.sealScope.edition : ""}`);
+  }
+
   // overview chunks repeat the title/doctype boilerplate and embed strongly
   // for name-like queries, crowding clause chunks out of the rerank window
   for (const h of hits) {
@@ -303,11 +442,13 @@ export async function retrieve(
     }
   }
   hits.sort((a, b) => b.score - a.score);
+  const tRerank = Date.now();
 
   if (hits.length > 1) {
     // 1. cross-encoder rerank (semantic precision)
     try {
       const scores = await rerank(env.AI, MODELS.rerank, query, hits.map((h) => h.text));
+      console.log("stage: rerank", Date.now() - tRerank, "ms over", hits.length, "candidates");
       if (scores) {
         hits.forEach((h, i) => (h.rerank_score = scores[i]));
         hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
@@ -322,6 +463,7 @@ export async function retrieve(
             hits = [...families, ...hits.filter((h) => h.metadata.clause_anchor !== "family")];
           }
         }
+
       }
     } catch {
       // vector order is the fallback, by design
@@ -353,26 +495,73 @@ export async function retrieve(
     }
   }
 
-// Edition recency: when the query does not pin an edition, newer editions
-  // get a tie-break nudge so stale duplicate chunks don't crowd out current
-  // ones. Scaled to the live score spread — rerank scores cluster within
-  // ~0.001, so any fixed-magnitude boost would reorder everything.
+// Edition steering, family-relative: when the query does not pin an
+  // edition, chunks from an OLDER edition of a publication are demoted
+  // whenever a NEWER edition of the SAME publication is in the pool.
+  // Superseded editions match archaic phrasing strongly (their wording is
+  // what the question echoes) and the per-doc diversity cap then fills the
+  // publication's slots with them — observed: R 76-1:1992/1988 passages
+  // displacing the current R 76-1:2006 on complex unfiltered queries.
+  // Cross-publication recency is deliberately NOT touched: a 1992
+  // publication that is still current must not be demoted because some
+  // unrelated 2024 document exists. Scaled to the live rerank spread —
+  // the scores cluster within ~0.001.
   if (!filters?.edition && hits.length > 1) {
     const year = (s?: string) => (/^(19|20)\d{2}$/.test(s ?? "") ? Number(s) : null);
     const scored = hits.map((h) => h.rerank_score ?? h.score);
     const spread = Math.max(...scored) - Math.min(...scored);
     if (spread > 0) {
-      const years = hits.map((h) => year(h.metadata.edition)).filter((y): y is number => y !== null && y >= 1990);
-      const max = years.length ? Math.max(...years) : 0;
+      const newest = new Map<string, number>();
+      let anyYear = 0;
       for (const h of hits) {
         const y = year(h.metadata.edition);
-        if (y && y >= 1990 && max > 1990) {
-          h.rerank_score = (h.rerank_score ?? h.score) + spread * 0.1 * ((y - 1990) / (max - 1990));
+        if (!y || y < 1990) continue;
+        const k = `${h.metadata.docidentifier}|${h.metadata.language}`;
+        newest.set(k, Math.max(newest.get(k) ?? 0, y));
+        anyYear = Math.max(anyYear, y);
+      }
+      // cross-publication tie-break: a current-edition publication ranks
+      // over stale ones (load-bearing — par-prepackaged: R 87:2004 must
+      // outrank 1990s texts); composed WITH the family-relative demotion
+      // below, which dominates for same-publication duplicates
+      if (anyYear > 1990) {
+        for (const h of hits) {
+          const y = year(h.metadata.edition);
+          if (y && y >= 1990) {
+            h.rerank_score = (h.rerank_score ?? h.score) + spread * 0.1 * ((y - 1990) / (anyYear - 1990));
+          }
         }
       }
-      hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
+      let demoted = 0;
+      for (const h of hits) {
+        const y = year(h.metadata.edition);
+        const max = newest.get(`${h.metadata.docidentifier}|${h.metadata.language}`);
+        if (y && max && y < max) {
+          // the older the edition relative to the family's newest, the
+          // stronger the demotion; a sibling exactly one revision back
+          // still competes when its clause is the only source (§5 of the
+          // paper: superseded editions stay citable when current ones
+          // lack the content)
+          h.rerank_score = (h.rerank_score ?? h.score) - spread * 0.4 * ((max - y) / Math.max(1, max - 1990));
+          demoted++;
+        }
+      }
+      if (demoted) {
+        console.log("edition steering: demoted", demoted, "superseded-edition chunks (family-relative)");
+        hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
+      } else if (anyYear > 1990) {
+        hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
+      }
     }
   }
+
+  // ── Structural propagation (FABLE TreeExpansion, arXiv:2601.18116) ──
+  // The corpus IS a tree: clause anchors chain parent→child, so a hit's
+  // score blends with its ancestors' (topic continuity) and descendants'
+  // (subtopic heat) — a section whose clauses are collectively hot rises,
+  // and a hot section lifts its clauses. Pure post-retrieval re-scoring
+  // over metadata the chunks already carry; no new index lane required.
+  hits = structuralPropagation(hits);
 
   // Per-publication diversity, keyed by normalized identity: overview
   // chunks are near-duplicates across editions — at most ONE per
@@ -397,7 +586,116 @@ export async function retrieve(
     }
     if (diversified.length >= LIMITS.rerankKeep + 2) break;
   }
-  return { hits: diversified.slice(0, LIMITS.rerankKeep), filters: filters ?? {} };
+
+  // answer contract v2 — typed-chunk pin (FINAL position): doc-scoped
+  // queries get ONE typed unit chunk (table first) guaranteed a slot.
+  // Prose outranks serialized tables under the cross-encoder AND the
+  // per-doc diversity cap counts typed chunks against the same doc key —
+  // without this guarantee the model never sees a unit id to reference.
+  let finalHits = diversified.slice(0, LIMITS.rerankKeep);
+  if (filters?.doc_number) {
+    const sameDocTyped = (h: Hit) =>
+      !!h.metadata.unit_id && !!h.metadata.block && h.metadata.doc_number === filters.doc_number;
+    {
+      // the pin guarantees the BEST query-overlap typed unit a slot — not
+      // merely "some" typed unit. Otherwise a doc-scoped figure question
+      // keeps an unrelated dirty-lane table (typed ⇒ pin skipped) and the
+      // figure unit never reaches the model, leaving the multimodal path
+      // and [[u:…]] references unreachable. Table-value questions are
+      // unaffected: their table wins the overlap score outright.
+      const typed = pickTypedChunk(query, hits.filter(sameDocTyped), hits);
+      if (typed && !finalHits.some((h) => h.id === typed.id)) {
+        finalHits = [...finalHits.slice(0, LIMITS.rerankKeep - 1), typed];
+        console.log("typed pin:", typed.metadata.docidentifier, "§", typed.metadata.clause_anchor, `(${typed.metadata.block})`);
+
+        // small-to-big (the hierarchy every bundle carries): an
+        // embedded object answers WITH its clause — if the parent
+        // clause's prose passage is not already among the finals, one
+        // metadata-filtered fetch adds it. The typed unit cites; the
+        // clause grounds.
+        const anchor = typed.metadata.clause_anchor;
+        const docId = typed.metadata.doc_id;
+        const parentPresent = finalHits.some(
+          (h) => h.metadata.doc_id === docId && h.metadata.clause_anchor === anchor && !h.metadata.unit_id,
+        );
+        if (anchor && docId && !parentPresent) {
+          try {
+            const pv = await env.VECTORIZE.query(vector, {
+              topK: 4,
+              returnMetadata: "all",
+              filter: { $and: [{ doc_id: { $eq: docId } }, { clause_anchor: { $eq: anchor } }] },
+            });
+            const parent = (pv.matches ?? []).map((m: any) => ({ id: m.id, score: m.score, metadata: m.metadata, text: m.metadata?.chunk_text ?? "" })).find((h: any) => !h.metadata?.unit_id);
+            if (parent && !finalHits.some((h) => h.id === parent.id)) {
+              finalHits = [...finalHits, { ...parent, score: parent.score * 0.7 }];
+              console.log("small-to-big: parent §", anchor, "of", typed.metadata.docidentifier, "added");
+            }
+          } catch {
+            // additive lane; primary results stand
+          }
+        }
+      }
+    }
+  }
+
+  // ── Section-summary units → leaf evidence (FABLE multi-granularity) ──
+  // A depth-1 summary vector that ranked is a navigation node, not
+  // quotable evidence: fetch its top child clauses (metadata-filtered,
+  // same query vector) so the model gets source text to cite, then retire
+  // the synthetic summary — the answer contract grounds claims in source
+  // clauses, never in our own summaries. The summary stays only when no
+  // child answered (it is then the doc's sole representative).
+  const sectionHit = finalHits.find(
+    (h) => h.metadata.section_summary === "1" && h.metadata.child_anchors && h.score > 0,
+  );
+  if (sectionHit && vector) {
+    try {
+      const kids = sectionHit
+        .metadata.child_anchors!.split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 25);
+      if (kids.length) {
+        const cv = await env.VECTORIZE.query(vector, {
+          topK: 3,
+          returnMetadata: "all",
+          filter: {
+            $and: [
+              { doc_id: { $eq: sectionHit.metadata.doc_id } },
+              { clause_anchor: { $in: kids } },
+            ],
+          },
+        });
+        const childHits = (cv.matches ?? [])
+          .filter((m: any) => !m.metadata?.section_summary)
+          .map((m: any) => ({
+            id: m.id,
+            score: m.score * 0.8,
+            metadata: m.metadata as ChunkMeta,
+            text: (m.metadata?.chunk_text as string) ?? "",
+          }))
+          .filter((c: Hit) => !finalHits.some((h) => h.id === c.id))
+          .slice(0, 2);
+        if (childHits.length) {
+          finalHits = [...finalHits.filter((h) => h !== sectionHit), ...childHits];
+          console.log(
+            "section descent:",
+            sectionHit.metadata.docidentifier,
+            "§" + sectionHit.metadata.clause_anchor,
+            "→",
+            childHits.map((c: Hit) => "§" + c.metadata.clause_anchor).join(", "),
+          );
+        }
+      }
+    } catch {
+      // additive lane; primary results stand
+    }
+  }
+
+  // Same-chain near-duplicate collapse (FABLE ancestor-descendant dedup)
+  finalHits = ancestorDescendantDedup(finalHits);
+
+  return { hits: finalHits, filters: filters ?? {} };
 }
 
 export interface HistoryTurn {
@@ -487,7 +785,10 @@ export async function listwiseRerank(
         return `[${i + 1}] ${label.replace(/(:|§)+$/g, "")} — ${h.text.replace(/\s+/g, " ").slice(0, 220)}`;
       })
       .join("\n");
-    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 6000));
+    // bounded to 2.5s: this call sits serially before generation starts —
+    // a slow reorder must never hold the first token hostage; the
+    // cross-encoder order is the fallback and is already good
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 2500));
     const call = (async () => {
       const res: any = await env.AI.run(model, {
         messages: [
@@ -565,11 +866,33 @@ export function buildMessages(
     budgetTokens - estTokens(system) - estTokens(retrievalNote ?? "") - estTokens(summaryBlock) - estTokens(`Question: ${query}\n\nContext passages:\n`) - historyUsed - 120; // slack for estimator error + output framing
   const passageParts: string[] = [];
   const usedHits: Hit[] = [];
-  for (const h of hits) {
+  // Passage label as the MODEL should cite it (it copies these into
+  // answers): drop OIML language markers, append the edition only when
+  // the identifier doesn't already carry it ("B 18:2025 (E)" + "2025" →
+  // no ":2025"; "PD-06 Edition 4" + "4" → no ":4"), and never show a
+  // producer UUID as a clause anchor — cite the clause title instead.
+  const passageLabel = (m: ChunkMeta): string => {
+    const id = (m.docidentifier || m.doc_id || "source").replace(/\s*\(([A-Z])\)\s*$/, "").trim();
+    const edition = m.edition && !id.includes(m.edition) ? ":" + m.edition : "";
+    const raw = String(m.clause_anchor ?? "");
+    const garbage = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(raw) || (raw.startsWith("_") && raw.length > 12);
+    const anchor = garbage || !raw ? "" : ` §${raw}`;
+    return `${id}${edition}${anchor}`;
+  };
+  // passages in document reading order (FABLE NodeFusion): same-doc
+  // clauses read top-to-bottom, docs by best rank — synthesis quality
+  // depends on arrangement, not just the selected set
+  for (const h of positionOrder(hits)) {
     const st = h.metadata.status === "withdrawn" || h.metadata.status === "superseded" ? ` [${h.metadata.status}]` : "";
-    const label = `${h.metadata.docidentifier || h.metadata.doc_id}:${h.metadata.edition || ""} §${h.metadata.clause_anchor || ""}${st}`.replace(/(:|§)+$/g, "");
-    const head = `[${usedHits.length + 1}] ${label} ${h.metadata.clause_title ? "— " + h.metadata.clause_title : ""}\n`;
-    const body = clipToTokens(h.text, LIMITS.maxPassageTokens);
+    const label = `${passageLabel(h.metadata)}${st}`;
+    // answer contract v2: typed passages declare their unit id so the
+    // model can reference [[u:<id>]] instead of retyping the object
+    const unitTag = (h.metadata as any).unit_id ? ` unit ${(h.metadata as any).unit_id}${(h.metadata as any).block ? ` (${(h.metadata as any).block})` : ""}` : "";
+    const head = `[${usedHits.length + 1}] ${label}${unitTag} ${h.metadata.clause_title ? "— " + h.metadata.clause_title : ""}\n`;
+    // tables: schema-aware pruning from the producer payload; the
+    // stored text is the fallback (pruning never goes below baseline)
+    const pruned = (h.metadata as any).block === "table" ? tableContext(h.metadata, query) : null;
+    const body = clipToTokens(pruned ?? h.text, LIMITS.maxPassageTokens);
     const t = estTokens(head) + estTokens(body);
     if (t <= remain) {
       passageParts.push(head + body);

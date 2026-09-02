@@ -1,4 +1,4 @@
-import { LIMITS, MODELS, datasetsFor, SUGGESTIONS, num, sha256Hex, today } from "./config";
+import { LIMITS, MODELS, datasetsFor, SUGGESTIONS, num, sha256Hex, today, roleModel } from "./config";
 import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, REFUSAL_ANSWER, Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
@@ -12,16 +12,29 @@ import precisionPrompt from "../prompts/precision.md";
 import { embed } from "./ai";
 import { scoreFaithfulness } from "./faithfulness";
 import enrichmentPrompt from "../prompts/enrichment.md";
+import sectionSummaryPrompt from "../prompts/section-summary.md";
 import { reflect } from "./reflect";
+import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
+import { canonicalRefusal } from "./refusal";
+import { contractV2, tableRetyped } from "./refs";
+import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
+import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
+import { bindModelNode, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
+import { detectDraftIntent, prepareDraft } from "./drafts";
+import { rawSessionToken } from "./session";
 
 export interface Env {
   AI: any;
   VECTORIZE: any;
+  EXP_PRIMMEL: any;
+  EXP_COMPOSED: any;
+  EXP_DB: D1Database;
   CACHE: KVNamespace;
   DB: D1Database;
   ASSETS: Fetcher;
   INDEX_VERSION: string;
+  UNIT_ASSETS: R2Bucket;
   ANON_DAY_ASK: string;
   ANON_DAY_SEARCH: string;
   KEY_DAY_ASK_DEFAULT: string;
@@ -35,6 +48,12 @@ export interface Env {
   OIDC_CLIENT_SECRET?: string;
   OIDC_REDIRECT_URI?: string;
   SESSION_SECRET?: string;
+  /** TODO.ai-platform/03 — the "my account" live-data delegation: the
+   *  platform instance's API base + its client id at the OP (the
+   *  delegation's scope target). Absent = the account chip honestly
+   *  reports the live read unwired on this deployment. */
+  SMART_PLATFORM_API?: string;
+  SMART_PLATFORM_CLIENT_ID?: string;
   INTERNAL_SERVICE?: { fetch(input: RequestInfo, init?: RequestInit): Promise<Response> };
 }
 
@@ -50,15 +69,35 @@ const err = (status: number, code: string, message: string) =>
 function corsHeaders(req: Request): Record<string, string> {
   const origin = req.headers.get("origin") ?? "";
   const allowed =
-    origin === "https://oimlsmart.org" || /^https:\/\/[a-z0-9-]+\.oimlsmart\.org$/.test(origin);
+    origin === "https://oimlsmart.org" ||
+    /^https:\/\/[a-z0-9-]+\.oimlsmart\.org$/.test(origin) ||
+    // the local dev posture: the platform and the minisites develop on
+    // localhost ports against the live service (the bubble bridge admits
+    // the same class; anon quota is per-IP, member auth needs the token)
+    /^http:\/\/localhost(:\d{1,5})?$/.test(origin) ||
+    /^http:\/\/127\.0\.0\.1(:\d{1,5})?$/.test(origin);
   return allowed
     ? {
         "access-control-allow-origin": origin,
-        "access-control-allow-methods": "GET, POST, OPTIONS",
+        // PATCH + DELETE: the conversations API speaks them (rename,
+        // delete) — the embedded panel preflights cross-origin.
+        "access-control-allow-methods": "GET, POST, PATCH, DELETE, OPTIONS",
         "access-control-allow-headers": "authorization, content-type",
         "access-control-max-age": "86400",
       }
     : {};
+}
+
+/** CORS-complete a handler's response: the browser surface grew
+ *  piecemeal (the SSE ask paths carried the headers; the JSON + error
+ *  paths and the conversations API did not), which an embedded
+ *  cross-origin client reads as opaque network failures. One wrap at
+ *  the router keeps every browser-facing answer readable. */
+function withCors(res: Response, cors: Record<string, string>): Response {
+  if (!cors["access-control-allow-origin"]) return res;
+  const headers = new Headers(res.headers);
+  for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
 async function kvIncr(cache: KVNamespace, key: string): Promise<number> {
@@ -131,6 +170,20 @@ function validateQuery(body: any): { query: string; lang?: string } | null {
   return { query, lang };
 }
 
+/** User-uploaded image for multimodal questions: a data URL
+ *  (data:image/(png|jpeg|webp|gif);base64,…) up to 6 MB of payload. The
+ *  question text still drives retrieval; the image is CONTEXT for the
+ *  answer model (photo of a nameplate, a schematic, a scale dial). Null =
+ *  no image; undefined-but-present-invalid throws at the boundary. */
+function userImageDataUrl(body: any): string | null {
+  const img = body?.image;
+  if (img == null) return null;
+  if (typeof img !== "string" || img.length > 6_000_000) return null;
+  const m = img.match(/^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$/);
+  if (!m || !m[2]) return null;
+  return img;
+}
+
 async function cacheGet(env: Env, ns: string, query: string, lang?: string) {
   const key = `a:${env.INDEX_VERSION}:${ns}:${await sha256Hex(
     `${query.toLowerCase().replace(/\s+/g, " ").trim()}|${lang ?? ""}`,
@@ -163,20 +216,51 @@ function telemetry(
   );
 }
 
-// the model occasionally paraphrases the refusal sentence ("...information
-// on how to make lasagna in the indexed..."); the API contract is the
-// exact canonical sentence — normalize variants, keep the redirect tail
-const REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the indexed OIML publications\.?/i;
-function canonicalRefusal(answer: string): string {
-  if (answer.includes(REFUSAL_ANSWER)) return answer;
-  const m = answer.match(REFUSAL_VARIANT);
-  return m ? answer.replace(m[0], REFUSAL_ANSWER) : answer;
-}
+// the refusal canonicalizer lives in ./refusal (the pinned sentence, the
+// start-anchored variant, and the rag#88 drift family — the same shapes
+// the harnesses accept, canonicalized, never more)
 
 /** Start an embed call without awaiting failures — null result means the
  *  caller simply embeds fresh. */
 function embedWarm(env: Env, text: string): Promise<number[] | null> {
   return embed(env.AI, MODELS.embed, text).catch(() => null);
+}
+
+/** GLM-5.3-Flash is natively multimodal: when the used passages contain
+ *  figure units with uploaded assets, attach the actual pixels to the
+ *  generation call so the model interprets the producer's figure, not
+ *  just its stored caption. Additive — failures simply send no images. */
+async function attachFigureImages(env: Env, messages: { role: string; content: string }[], usedHits: Hit[]): Promise<void> {
+  const figures = usedHits.filter((h) => h.metadata.unit_id && h.metadata.block === "figure").slice(0, 2);
+  if (!figures.length) return;
+  const parts: unknown[] = [];
+  const names: string[] = [];
+  for (const h of figures) {
+    try {
+      const row = await env.DB.prepare("SELECT payload FROM unit_payloads WHERE unit_id = ?1").bind(h.metadata.unit_id!).first<any>();
+      const uri = row ? (JSON.parse(String(row.payload)).uri ?? "") : "";
+      const m = typeof uri === "string" ? uri.match(/^\/assets\/(.+)/) : null;
+      if (!m) continue;
+      const obj = await env.UNIT_ASSETS.get(m[1]);
+      if (!obj) continue;
+      const buf = new Uint8Array(await obj.arrayBuffer());
+      const ext = m[1].split(".").pop()?.toLowerCase() ?? "png";
+      const mime = ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
+      let binary = "";
+      for (let i = 0; i < buf.length; i += 8192) binary += String.fromCharCode(...buf.subarray(i, i + 8192));
+      parts.push({ type: "image_url", image_url: { url: `data:${mime};base64,${btoa(binary)}` } });
+      names.push(h.metadata.unit_id!);
+    } catch {
+      // additive — one unreadable asset never blocks the answer
+    }
+  }
+  if (!parts.length) return;
+  const last = messages[messages.length - 1];
+  last.content = [
+    { type: "text", text: `${last.content}\n\nThe original images of figure units ${names.join(", ")} are attached; interpret them directly when answering about these figures.` },
+    ...parts,
+  ] as unknown as string;
+  console.log("figure images attached:", names.join(", "));
 }
 
 async function generateStream(env: Env, model: string, messages: any[]): Promise<ReadableStream<Uint8Array> | null> {
@@ -186,6 +270,8 @@ async function generateStream(env: Env, model: string, messages: any[]): Promise
       stream: true,
       max_tokens: LIMITS.maxOutputTokens,
       reasoning_effort: "low",
+      temperature: 0.6,
+      top_p: 0.95,
     });
     if (res && typeof res.getReader === "function") return res as ReadableStream<Uint8Array>;
     if (res && res.body && typeof res.body.getReader === "function") return res.body;
@@ -201,6 +287,8 @@ async function generateOnce(env: Env, model: string, messages: any[]): Promise<s
       messages,
       max_tokens: LIMITS.maxOutputTokens,
       reasoning_effort: "low",
+      temperature: 0.6,
+      top_p: 0.95,
     });
     if (typeof res?.response === "string") return res.response;
     if (typeof res?.choices?.[0]?.message?.content === "string") return res.choices[0].message.content;
@@ -230,8 +318,13 @@ async function summarizeHistory(
         },
         { role: "user", content: convo },
       ],
-      max_tokens: 900,
+      max_tokens: 2048,
       reasoning_effort: "low",
+      // Qwen3 thinking-mode sampling (model card) — prevents the
+      // repetition loops that eat the budget before the summary lands
+      temperature: 0.6,
+      top_p: 0.95,
+      top_k: 20,
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
     return typeof text === "string" && text.trim() ? text.trim().slice(0, 1200) : null;
@@ -280,6 +373,20 @@ async function handleAsk(
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
 
+  // The declared context (TODO.ai-platform/02): the panel's opt-in chips.
+  // A declared context makes the answer depend on MORE than the query, so
+  // it bypasses both answer caches (read AND write) exactly as a
+  // contextual (history-carrying) turn does.
+  const declaredCtx = parseContext(body);
+
+  // The draft act (TODO.ai-platform/04): the user asks the assistant to
+  // PREPARE an act (the application prefill is the pilot) — never to
+  // perform it. The answer depends on the conversation, the account's
+  // live standing and the registry, never on the query alone, so a draft
+  // ask bypasses both answer caches (read AND write) exactly as a
+  // declared-context ask does.
+  const draftAct = detectDraftIntent(q.query);
+
   const member = tier === "member" ? await sessionFrom(req, env as any) : null;
 
   const exempt = tier === "anon" ? await isExemptIp(env, clientIp(req)) : false;
@@ -303,9 +410,12 @@ async function handleAsk(
   // pipeline via the service binding; rag-public never touches the
   // internal index itself, and generation/rerank stay in ONE pipeline.
   const service = env.INTERNAL_SERVICE;
-  const cookie = req.headers.get("cookie") ?? "";
+  const fedAuth = {
+    cookie: req.headers.get("cookie") ?? "",
+    authorization: req.headers.get("authorization") ?? "",
+  };
   const federate = member && service
-    ? (q2: string) => retrieveInternal(service, cookie, q2)
+    ? (q2: string) => retrieveInternal(service, fedAuth, q2)
     : undefined;
 
   const ns = tier === "key" ? `k:${key!.id}` : member ? `m:${member.sub}` : "anon";
@@ -317,24 +427,38 @@ async function handleAsk(
     .slice(-24)
     .map((h: any) => ({ role: h.role, content: h.content.slice(0, 4000) }));
   const contextual = history.length > 0;
+  // user-uploaded image: present-but-invalid is a boundary error (silent
+  // drop would answer a DIFFERENT question than the one the user asked)
+  const userImage = body?.image != null ? userImageDataUrl(body) : null;
+  if (body?.image != null && !userImage) {
+    return err(400, "invalid_image", "image must be a data URL (data:image/png|jpeg|webp|gif;base64,…) up to 6 MB");
+  }
   // history compaction: turns beyond the budget slice are summarized into a
   // continuity block (below) instead of silently dropped
   const budget = num(env as any, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
   const { kept: keptHistory, overflow } = splitHistory(history, budget);
-  const summary = overflow.length >= 2 ? ((await summarizeHistory(env.AI, MODELS.anon, overflow)) ?? undefined) : undefined;
+  const summary = overflow.length >= 2 ? ((await summarizeHistory(env.AI, MODELS.understand, overflow)) ?? undefined) : undefined;
   let retrieved;
-  // fresh=true (regenerate) skips the cache read; contextual follow-ups skip
-  // the cache entirely — the answer depends on the conversation, not the query
-  const cached = body?.fresh === true || contextual ? null : await cacheGet(env, ns, q.query, q.lang);
+  // fresh=true (regenerate) skips the cache read; contextual follow-ups and
+  // fresh=true (regenerate) skips the cache read; contextual follow-ups,
+  // declared-context asks and image asks skip the cache entirely — the
+  // answer depends on the conversation / declared context / image, not
+  // the query text alone
+  const cached = body?.fresh === true || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, ns, q.query, q.lang);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang);
+    // echo the context the CACHED answer was computed under — the payload
+    // stores it (cacheable excludes declared-context answers, but a model
+    // node named in the question binds WITHOUT a chip and its echo must
+    // survive the cache, not silently flatten to "none")
+    const cctx = cached.value.context_applied ?? NO_CONTEXT;
     if (wantsStream) {
       // a cache hit must still speak SSE — the chat client parses a stream
-      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.anon, query_hash: cached.value.query_hash }], corsHeaders(req));
+      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, context_applied: cctx }], corsHeaders(req));
     }
-    return json({ ...cached.value, cached: true, quota });
+    return json({ ...cached.value, cached: true, quota, context_applied: cctx });
   }
 
   // warm the folded-query embedding concurrently with understanding —
@@ -355,7 +479,125 @@ async function handleAsk(
       /* memory is additive */
     }
   }
-  const understanding = cached ? null : await understandQuery(env.AI, MODELS.anon, q.query, history, convEntities);
+  // ── fast path: standalone (non-contextual) near-duplicate of a recently
+  // answered question — serve from the semantic cache WITHOUT paying the
+  // understanding call. Contextual turns and declared-context asks never
+  // take this path (they always run understanding + live retrieval);
+  // fresh=true already bypassed the exact cache above.
+  let understanding: any = null;
+  // a query naming a model node (/req/…, /term/…) is node-SCOPED: its
+  // embedding sits near every other node-scoped ask about the same
+  // standard, and the single-entry semantic bucket then serves one
+  // node's answer for another (observed run-to-run across the golden
+  // model legs). Node-scoped queries use the exact cache only.
+  const nodeScoped = !!modelNodeRefIn(q.query) || !!modelNodeRefIn(declaredCtx?.label);
+  if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && body?.fresh !== true) {
+    const wv0 = (await warmEmbed) ?? null;
+    if (wv0) {
+      const sc0 = await semanticCacheGet(env, wv0);
+      if (sc0) {
+        console.log("semantic cache hit (pre-understanding)");
+        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang);
+        const cctx0 = sc0.context_applied ?? NO_CONTEXT;
+        if (wantsStream) {
+          return sseResponse([{ type: "citations", citations: sc0.citations ?? [], context_applied: cctx0 }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true, context_applied: cctx0 }], corsHeaders(req));
+        }
+        return json({ ...sc0, similar: true, context_applied: cctx0, ...(exempt ? {} : { quota }) });
+      }
+    }
+  }
+  // ── Option C: optimistic parallel retrieval ──
+  // The dense lane (folded-query embed + unfiltered Vectorize query) runs
+  // CONCURRENTLY with understanding instead of after it — the serial
+  // understand→retrieve chain collapses to max(understand, dense). The
+  // warm embedding IS the folded-query vector retrieve() would compute,
+  // and the query is issued with retrieve's exact parameters (topK,
+  // no filter), so when understanding emits no filter the optimistic
+  // results replace the primary dense query bit-for-bit; with a filter
+  // they union in as discounted candidates covering filter misses.
+  let optimisticVec: number[] | null = null;
+  let optimisticHits: Hit[] = [];
+  const t0 = Date.now();
+  if (!cached) {
+    const understandingP = understandQuery(env.AI, roleModel(env, "understand"), q.query, history, convEntities);
+    try {
+      optimisticVec = (await warmEmbed) ?? null;
+      if (optimisticVec) {
+        const ores = await env.VECTORIZE.query(optimisticVec, { topK: LIMITS.retrieveK, returnMetadata: "all" });
+        optimisticHits = (ores.matches ?? []).map((m: any) => ({
+          id: m.id, score: m.score, metadata: m.metadata, text: (m.metadata?.chunk_text ?? ""),
+        })) as Hit[];
+      }
+    } catch {
+      // optimistic path is additive; retrieve() runs its own dense lane
+    }
+    understanding = await understandingP;
+    console.log("stage: understand+optimistic", Date.now() - t0, "ms");
+  }
+  // ── The declared context's document scope (TODO.ai-platform/02) ──
+  // The entity/document chip's corpus reference pins retrieval to that
+  // publication FAMILY by writing the same understanding fields a named
+  // document in the query would — the whole doc-scoped machinery (the
+  // Vectorize filter, the family boost, the typed pin, the grade skip)
+  // keys off them. A document named IN THE QUESTION wins over the chip:
+  // the context informs, it never overrides the user's explicit words —
+  // and context_applied's note says which way it went, never silently.
+  // "Named" is read from the question TEXT (namedDocumentIn), never from
+  // understand's extraction alone: the LLM also fires on domain priors
+  // ("maximum permissible errors" → R 76 with no document named — an
+  // inference must never steal the user's explicit chip) and can miss a
+  // naming the text plainly carries (the win must not depend on that
+  // flake either).
+  const docScope = declaredCtx && declaredCtx.kind !== "account" ? await resolveDocScope(env, declaredCtx) : null;
+  const named = declaredCtx && declaredCtx.kind !== "account" ? namedDocumentIn(q.query) : null;
+  let ctxApplied;
+  let declaredScoped = false;
+  if (!declaredCtx) {
+    ctxApplied = NO_CONTEXT;
+  } else if (declaredCtx.kind === "account") {
+    // Provisional echo (TODO.ai-platform/03): the live read's outcome
+    // refines it after the conversational branch — a conversational turn
+    // never reads the account. The account context NEVER scopes corpus
+    // retrieval (scoped_to stays null; the corpus answers the regulatory
+    // half, the records answer the account half).
+    ctxApplied = appliedContext(declaredCtx, null);
+  } else if (docScope && (!named || named.doc_number === docScope.doc_number)) {
+    // the chip scopes; a same-family document named in the question
+    // agrees with it. An understand extraction the text does not name is
+    // an inference — the chip overrides it.
+    if (understanding?.doc_number && understanding.doc_number !== docScope.doc_number) {
+      console.log("context scope: understand's doc#" + understanding.doc_number, "is inferred, not named in the question — the declared", docScope.label, "scopes");
+    }
+    understanding = {
+      ...(understanding ?? syntheticUnderstanding(docScope)),
+      docidentifier: docScope.label,
+      doc_number: docScope.doc_number,
+      edition: docScope.edition ?? understanding?.edition ?? null,
+    };
+    ctxApplied = appliedContext(declaredCtx, docScope);
+    declaredScoped = true;
+    console.log("context scope:", docScope.label, `(${declaredCtx.kind})`);
+  } else if (docScope && named) {
+    // the question names a DIFFERENT publication — the user's explicit
+    // words win over the chip, and retrieval follows the named document.
+    // When understand extracted the same document its fields stay (they
+    // can carry a phrased edition pin the text parse does not read).
+    if (understanding?.doc_number !== named.doc_number) {
+      understanding = {
+        ...(understanding ?? syntheticUnderstanding(named)),
+        docidentifier: named.label,
+        doc_number: named.doc_number,
+        edition: named.edition ?? null,
+      };
+    }
+    ctxApplied = appliedContext(declaredCtx, null, "question-document-wins");
+    console.log("context scope: the question names", named.label, "— it wins over the declared", docScope.label);
+  } else if (declaredCtx.doc) {
+    ctxApplied = appliedContext(declaredCtx, null, "document-not-in-corpus");
+    console.log("context scope:", declaredCtx.doc, "not in the corpus — the general corpus answers");
+  } else {
+    ctxApplied = appliedContext(declaredCtx, null);
+  }
   if (conversationId && understanding) {
     const now = Date.now();
     const ents: Array<[string, string]> = [];
@@ -372,19 +614,21 @@ async function handleAsk(
 
   // semantic cache: near-duplicate of a recently answered question —
   // serves the stored answer with a `similar: true` marker (checked only
-  // for standalone knowledge questions; contextual turns always run live;
-  // fresh=true regenerates, bypassing this cache too)
-  if (understanding?.intent !== "conversational" && !contextual && body?.fresh !== true) {
+  // for standalone knowledge questions; contextual turns, declared-context
+  // asks and image asks always run live; fresh=true regenerates,
+  // bypassing this cache too)
+  if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !userImage && body?.fresh !== true) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
       const sc = await semanticCacheGet(env, warmVec);
       if (sc) {
         console.log("semantic cache hit");
         telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang);
+        const cctx = sc.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
-          return sseResponse([{ type: "citations", citations: sc.citations ?? [] }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true }], corsHeaders(req));
+          return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: cctx }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, context_applied: cctx }], corsHeaders(req));
         }
-        return json({ ...sc, similar: true, ...(exempt ? {} : { quota }) });
+        return json({ ...sc, similar: true, context_applied: cctx, ...(exempt ? {} : { quota }) });
       }
     }
   }
@@ -392,7 +636,9 @@ async function handleAsk(
   // Conversational route, decided by query UNDERSTANDING (any language, any
   // phrasing) — not string matching. No retrieval: nothing in the corpus
   // answers "who are you". The model speaks for itself from the service
-  // facts in identityNote (composed from the DATASETS catalog).
+  // facts in identityNote (composed from the DATASETS catalog). A declared
+  // context is honestly NOT applied here (nothing grounds a conversational
+  // turn) — the echo reports none.
   if (understanding?.intent === "conversational") {
     const queryHash = await sha256Hex(q.query);
     const messages = [
@@ -408,7 +654,7 @@ async function handleAsk(
         const sse = new ReadableStream({
           async start(controller) {
             const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-            send({ type: "citations", citations: [], ...(exempt ? {} : { quota }) });
+            send({ type: "citations", citations: [], context_applied: NO_CONTEXT, ...(exempt ? {} : { quota }) });
             let full = "";
             try {
               for await (const tok of sseTokens(stream)) {
@@ -418,7 +664,7 @@ async function handleAsk(
             } catch {
               // stream ended prematurely — deliver what we have
             }
-            send({ type: "done", model, query_hash: queryHash });
+            send({ type: "done", model, query_hash: queryHash, context_applied: NO_CONTEXT });
             telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
             controller.close();
           },
@@ -429,19 +675,157 @@ async function handleAsk(
       }
     }
     let answer = await generateOnce(env, model, messages);
-    if (answer === null && model !== MODELS.anon) answer = await generateOnce(env, MODELS.anon, messages);
+    if (answer === null) answer = await generateOnce(env, MODELS.fallback, messages);
     if (answer === null) {
       telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
     telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
-    return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], ...(exempt ? {} : { quota }) });
+    return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: NO_CONTEXT, ...(exempt ? {} : { quota }) });
   }
 
+  // ── The draft act (TODO.ai-platform/04) — the assistant PREPARES, the
+  // user commits in the platform's real UI. Branched after the
+  // conversational route (a draft ask is not one) and before retrieval
+  // (the draft grounds in the conversation + the registry anchor, not
+  // the corpus passages). THE SERVICE NEVER WRITES: the only credential
+  // in play is the read-scoped delegation (the RFC 8693 exchange, the
+  // same one the "my account" reads ride), and it only ever feeds the
+  // ROLE check — the refusal speaks the platform's own vocabulary. The
+  // draft rides the response's `draft` field to the panel, which hands
+  // it to the platform's real form; the commit is the user's own click.
+  if (draftAct) {
+    const draftCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
+    const queryHash = await sha256Hex(q.query);
+    // The delegation's honest states, computed exactly as the live-data
+    // path computes them (livedata.ts): the member's session → the
+    // exchange → the read-scoped token whose roles the draft reads.
+    const liveCfg = liveDataConfig(env);
+    const sessionRaw = rawSessionToken(req);
+    let delegation;
+    if (!member || !sessionRaw) delegation = { status: "unsigned" as const };
+    else if (!liveCfg) delegation = { status: "not_configured" as const };
+    else {
+      const exchanged = await exchangeForLiveToken(env, sessionRaw);
+      delegation = exchanged.ok
+        ? { status: "ok" as const, token: exchanged.token }
+        : { status: exchanged.reason };
+    }
+    const verdict = await prepareDraft(env, {
+      act: draftAct,
+      query: q.query,
+      history: keptHistory,
+      member,
+      delegation,
+      platformClientId: liveCfg?.platformClientId,
+      model: roleModel(env, "understand"),
+    });
+    console.log("draft act:", draftAct, "→", verdict.status === "draft" ? `draft (${Object.keys(verdict.draft.fields).length} fields)` : `refused (${verdict.reason})`);
+    const citations = verdict.citation ? [{ ...verdict.citation, corpus: "oiml" }] : [];
+    const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
+    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash, q.lang);
+    if (wantsStream) {
+      return sseResponse(
+        [
+          { type: "citations", citations, context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), ...(exempt ? {} : { quota }) },
+          { type: "token", v: verdict.answer },
+          { type: "done", model, query_hash: queryHash, context_applied: draftCtxApplied },
+        ],
+        corsHeaders(req),
+      );
+    }
+    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), ...(exempt ? {} : { quota }) });
+  }
+
+  // (declared before the retrieval try: the account block, the refusal
+  // gate, the prompt and the response all read them)
+  let liveRecords: LiveRecord[] | undefined;
+  let accountNote: string | undefined;
+  // ── The model plane's node binding (TODO.ai-platform/05) ──
+  // "this requirement" on a model surface grounds in the model NODE
+  // itself (its constraint, its provenance, its tests): the declared
+  // entity label leads with the canonical node id (the platform's
+  // publish contract); a question may name one too. The standard comes
+  // from the DECLARED or question-NAMED publication only — understand's
+  // LLM extraction is an inference and never narrows the bind (the
+  // wave-02 lesson); scope-less binds hold only when the node id is
+  // unambiguous across the indexed standards.
+  const modelDocHint = named ?? docScope ?? namedDocumentIn(q.query);
+  const boundModel = await bindModelNode(env, {
+    label: declaredCtx?.label,
+    query: q.query,
+    standard: standardForDocNumber(modelDocHint?.doc_number),
+  });
+  if (boundModel) {
+    ctxApplied = { ...ctxApplied, model: modelEcho(boundModel) };
+    console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause");
+  }
+  const modelNote = boundModel ? modelGroundingBlock(boundModel) : undefined;
   try {
-    retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers });
-    // cascade final tier: joint listwise reordering for hard/member
-    // queries (cross-encoder already pruned; this orders the survivors)
+    const tR = Date.now();
+    // ── The "my account" live read (TODO.ai-platform/03) — resolved
+    // HERE, after the conversational branch (a conversational turn never
+    // reads the account) and before retrieval (the records join the
+    // prompt beside the corpus passages). The cones bind exactly as for
+    // the user's own browser: the exchange (the identity service's RFC
+    // 8693 session delegation) re-judges the standing live, and the
+    // platform's API enforces the visibility — this service only ever
+    // maps what the platform answered. Every failure degrades honestly:
+    // the answer runs on the corpus and the context line says WHY the
+    // live data was not read.
+    if (declaredCtx?.kind === "account") {
+      const live = await resolveLiveAccount(env, rawSessionToken(req), member);
+      if (live.status === "ok") {
+        liveRecords = live.records;
+        ctxApplied = appliedContext(declaredCtx, null, undefined, {
+          read_at: live.readAt,
+          stores: live.stores,
+          records: live.records.length,
+        });
+        const lines = live.records.map(
+          (r) => `- ${r.label} [${[r.status, r.detail].filter(Boolean).join("; ")}] ${r.url}`,
+        );
+        accountNote =
+          `Live account data (read ${live.readAt} from the user's own OIML SMART account — exactly what they may see, never more):\n` +
+          (lines.length ? lines.join("\n") : "(the account surfaces answered empty)") +
+          `\nAnswer account questions from these records ONLY: name the record when you use it, never invent one, and say honestly when they do not hold the answer. The corpus passages still ground the regulatory claims (the requirements, the procedures); the records are the user's own work.`;
+        console.log("live data:", live.records.length, "records from", live.stores.join("+") || "none");
+      } else {
+        const note =
+          live.reason === "sign_in_required" ? "sign-in-required"
+          : live.reason === "window_expired" ? "live-window-expired"
+          : "live-unavailable";
+        ctxApplied = appliedContext(declaredCtx, null, note);
+        accountNote =
+          live.reason === "sign_in_required"
+            ? "Context note: the user asked with the 'my account' context but is not signed in — the account data was NOT read; answer from the corpus and say so."
+            : live.reason === "window_expired"
+              ? "Context note: the user's live access window lapsed — the account data was NOT read; answer from the corpus, say the live read did not happen, and suggest signing in again to refresh it."
+              : "Context note: the live account read was refused or unreachable — the account data was NOT read; answer from the corpus and say so honestly.";
+        console.log("live data: not read —", live.reason);
+      }
+    }
+    // The DECLARED context's scope is a HARD seal (TODO.ai-platform/02):
+    // the panel's context line claims the grounding, so no passage from
+    // outside the declared publication may reach the answer. The seal is
+    // applied to the CANDIDATE POOL inside retrieve — the soft-steer
+    // widenings (the sparse-filter union, the full-corpus lexical union,
+    // the sub-query lanes) can otherwise outscore the filtered dense lane
+    // under the cross-encoder and push every in-family passage out of the
+    // top-N before a post-hoc seal ever sees one. A document named IN THE
+    // QUESTION keeps the soft steer by design (the widen covers sparse
+    // publications there).
+    retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
+      sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec });
+    console.log("stage: retrieve", Date.now() - tR, "ms");
+    // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
+    // they consume the same candidate list (grade is coarse: good/weak;
+    // listwise reorders survivors). Doc-scoped queries skip the grade
+    // entirely (the filter already pins the corpus; grading adds only latency).
+    const docScoped = !!(understanding?.doc_number);
+    const gradePromise = docScoped
+      ? Promise.resolve("skipped-doc-scoped" as const)
+      : gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text)).catch(() => null);
     if (retrieved.hits.length >= 4 && (member || understanding?.complexity === "complex")) {
       const reordered = await listwiseRerank(env, MODELS.listwise, understanding?.standalone_query || q.query, retrieved.hits);
       if (reordered) {
@@ -449,10 +833,8 @@ async function handleAsk(
         retrieved = { hits: reordered, filters: retrieved.filters };
       }
     }
-    // CRAG: grade the passages; a weak grade earns ONE corrective
-    // re-retrieval with the document identifier made explicit
-    const grade = await gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text));
-    console.log("grade:", grade);
+    const grade = await gradePromise;
+    console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate });
@@ -464,9 +846,9 @@ async function handleAsk(
     return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
   }
   const { hits } = retrieved;
-  if (hits.length === 0) {
+  if (hits.length === 0 && !liveRecords?.length && !boundModel) {
     const answer = REFUSAL_ANSWER;
-    const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query) };
+    const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
     telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang);
     return json({ ...out, ...(exempt ? {} : { quota }) });
   }
@@ -479,12 +861,33 @@ async function handleAsk(
     hits,
     q.lang,
     keptHistory,
-    [processNote, eNote].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
+  await attachFigureImages(env, messages, usedHits);
+  if (userImage) {
+    // the user's own image rides on the question message — retrieval stays
+    // text-driven; the answer model reads the image as question context
+    const last = messages[messages.length - 1];
+    const note = "\n\n(The user attached an image with this question; interpret it directly when answering.)";
+    if (Array.isArray(last.content)) {
+      const textPart = last.content.find((p: any) => p.type === "text");
+      if (textPart) textPart.text += note;
+      last.content = [...last.content, { type: "image_url", image_url: { url: userImage } }] as unknown as string;
+    } else {
+      last.content = [
+        { type: "text", text: last.content + note },
+        { type: "image_url", image_url: { url: userImage } },
+      ] as unknown as string;
+    }
+    console.log("user image attached to generation");
+  }
   const queryHash = await sha256Hex(q.query);
-  const cites = citations(usedHits);
+  // The bound model node leads the citations (TODO.ai-platform/05): the
+  // panel's first citation card IS the model node — its constraint, its
+  // provenance — ahead of the prose passages.
+  const cites = boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits);
 
   if (wantsStream) {
     const stream = await generateStream(env, model, messages);
@@ -493,7 +896,7 @@ async function handleAsk(
       const sse = new ReadableStream({
         async start(controller) {
           const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-          send({ type: "citations", citations: cites, ...(exempt ? {} : { quota }) });
+          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(exempt ? {} : { quota }) });
           let full = "";
           try {
             for await (const tok of sseTokens(stream)) {
@@ -503,16 +906,23 @@ async function handleAsk(
           } catch {
             // stream ended prematurely — deliver what we have
           }
-          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] });
-          telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
-          const canonical = canonicalRefusal(full);
+          const canonical0 = canonicalRefusal(full);
+          // answer contract v2: validate [[u:]] refs, resolve typed blocks
+          const c2 = canonical0.includes(REFUSAL_ANSWER)
+            ? { text: canonical0, blocks: [], dropped: [] as string[] }
+            : await contractV2(env.DB, canonical0, usedHits);
+          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2.blocks, context_applied: ctxApplied });
+          telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang);
+          const canonical = c2.text;
           // streamed answers can't be regenerated mid-flight; enforcement
           // is that an unverified answer is never served from cache again
-          const streamed = checkQuoteAnchors(canonical, usedHits.map((h: Hit) => h.text));
+          const streamedAnchors = checkQuoteAnchors(canonical, usedHits.map((h: Hit) => h.text));
+          const streamedRetyped = tableRetyped(canonical, usedHits.some((h: Hit) => h.metadata.unit_id && h.metadata.block === "table"));
+          const streamed = { total: streamedAnchors.total, violations: streamedRetyped ? ["table-retyped"] : streamedAnchors.violations };
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified — not caching");
           }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !canonical.includes(REFUSAL_ANSWER)) {
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(REFUSAL_ANSWER)) {
             const wv = (await warmEmbed) ?? null;
             if (wv) semanticCachePut(env, ctx, wv, { answer: canonical, citations: cites, model, query_hash: queryHash });
             ctx.waitUntil(
@@ -534,24 +944,31 @@ async function handleAsk(
   }
 
   let answer = await generateOnce(env, model, messages);
-  if (answer === null && model !== MODELS.anon) {
-    answer = await generateOnce(env, MODELS.anon, messages);
+  if (answer === null) {
+    answer = await generateOnce(env, MODELS.fallback, messages);
   }
   if (answer) answer = canonicalRefusal(answer);
 
-  // ── Deterministic quote-anchor check ──
+  // ── Deterministic quote-anchor + table-retyping check ──
   // One corrective regeneration when an anchor quotes text absent from
-  // the passages; the retry wins only if it verifies better.
+  // the passages or a typed table was retyped as markdown; the retry
+  // wins only if it verifies better.
   let used = usedHits;
   if (answer && !answer.includes(REFUSAL_ANSWER)) {
     const anchors = checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
-    if (anchors.violations.length > 0) {
-      console.log("anchors:", anchors.violations.length, "of", anchors.total, "unverified — regenerating");
-      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: ANCHOR_CORRECTION_NOTE }]);
+    const hasTableUnit = used.some((h: Hit) => h.metadata.unit_id && h.metadata.block === "table");
+    const retyped = tableRetyped(answer, hasTableUnit);
+    if (anchors.violations.length > 0 || retyped) {
+      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "— regenerating");
+      const note = retyped
+        ? "Correction notice: your draft reproduced a table as markdown although a typed table unit was available. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:<unit id>]] from the passage header where the table belongs. Do not render any table as markdown."
+        : ANCHOR_CORRECTION_NOTE;
+      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }]);
       if (corrected) {
         const correctedAnswer = canonicalRefusal(corrected);
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
-        if (retryAnchors.violations.length < anchors.violations.length) {
+        const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
+        if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped)) {
           answer = correctedAnswer;
         }
       }
@@ -566,10 +983,13 @@ async function handleAsk(
     const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h: Hit) => h.text));
     console.log("reflection:", reflection ? (reflection.grounded ? "grounded" : "ungrounded") : "null");
     if (reflection && !reflection.grounded && reflection.missing_info) {
-      // re-retrieve targeting what was missing
+      // re-retrieve targeting what was missing — the declared context's
+      // hard seal binds the retry exactly as the first pass
+      // (TODO.ai-platform/02)
       const retryRetrieve = await retrieve(env, q.query, {
         prev,
         understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` } as any,
+        sealScope: declaredScoped ? docScope : null,
       });
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
@@ -587,15 +1007,19 @@ async function handleAsk(
     telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
-  const finalCites = citations(used);
+  const finalCites = boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used);
+  const c2ns = answer.includes(REFUSAL_ANSWER)
+    ? { text: answer, blocks: [] as Awaited<ReturnType<typeof contractV2>>["blocks"], dropped: [] as string[] }
+    : await contractV2(env.DB, answer, used);
+  answer = c2ns.text;
   const finalAnchors = answer.includes(REFUSAL_ANSWER)
     ? { total: 0, violations: [] as string[] }
     : checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
   if (finalAnchors.violations.length > 0) {
     console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified — not caching");
   }
-  const out = { answer, citations: finalCites, model: MODELS.anon, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [] };
-  const cacheable = !contextual && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2ns.blocks, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
+  const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) semanticCachePut(env, ctx, warmVec, out);
@@ -655,7 +1079,7 @@ async function handleSearch(
     return err(429, "quota_exceeded", `Daily search limit reached (${quota.limit}). Try again tomorrow.`);
   }
 
-  const understanding = await understandQuery(env.AI, MODELS.anon, q.query, []);
+  const understanding = await understandQuery(env.AI, MODELS.understand, q.query, []);
   const graphDocNumbers = await graphExpand(env, understanding);
   let retrieved;
   try {
@@ -693,6 +1117,13 @@ async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request): Prom
   const chunks = Array.isArray(body?.chunks) ? body.chunks : [];
   if (chunks.length === 0 || chunks.length > 8) return err(400, "invalid_input", "chunks: 1-8 required");
   const force = body?.force === true;
+  // mode:"context" generates/returns the situating preamble WITHOUT
+  // embedding or upserting — the comparison-lane builders use it so lane
+  // chunks can never land in the production index (the 2026-09-02
+  // incident: 1,126 lane vectors entered production through this
+  // endpoint's upsert side effect). Default mode stays the production
+  // enrichment flow (context + embed + upsert in place).
+  const contextOnly = body?.mode === "context";
   const model = typeof env.ENRICH_MODEL === "string" && env.ENRICH_MODEL ? env.ENRICH_MODEL : MODELS.enrich;
 
   const usage = { prompt_tokens: 0, completion_tokens: 0, requests: 0, cache_hits: 0 };
@@ -731,6 +1162,7 @@ async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request): Prom
         } else {
           usage.cache_hits += 1;
         }
+        if (contextOnly) return { id: c.id, ok: true, cached, context };
         const original = typeof c.metadata.chunk_text === "string" && c.metadata.chunk_text ? c.metadata.chunk_text : c.text;
         const enriched = `${context}\n\n${original}`;
         const vector = await embed(env.AI, MODELS.embed, enriched.slice(0, 6000));
@@ -745,6 +1177,87 @@ async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request): Prom
   console.log("enrich:", ok, "/", results.length, "usage:", JSON.stringify(usage));
   if (usage.requests > 0) {
     // ledger: enrichment spend shows up in /v1/admin/stats like serving
+    ctx.waitUntil(
+      env.DB.prepare(
+        "INSERT INTO spend (day, tier, model, requests) VALUES (?1,'enrich',?2,?3) ON CONFLICT(day, tier, model) DO UPDATE SET requests = requests + ?3",
+      )
+        .bind(today(), model, usage.requests)
+        .run(),
+    );
+  }
+  return json({ results, usage });
+}
+
+/** Section-summary units (FABLE/BEAR multi-granularity, arXiv:2601.18116):
+ *  the corpus's clause chunks start at depth 2 ("3.1"), so the tree has no
+ *  depth-1 nodes. This endpoint writes them: a summary of each top-level
+ *  clause generated from its child chunks' excerpts (quality-first lane,
+ *  KV-cached per unit id), embedded as toc-path ⊕ summary à la FABLE's
+ *  internal-node indexing, and upserted as a navigation node — serving
+ *  descends from it to quotable leaf clauses (pipeline.ts section
+ *  descent). Credential, batching and ledger mirror /admin/enrich. */
+async function handleSectionUnit(env: Env, ctx: ExecutionContext, req: Request): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const units = Array.isArray(body?.units) ? body.units : [];
+  if (units.length === 0 || units.length > 6) return err(400, "invalid_input", "units: 1-6 required");
+  const model = typeof env.ENRICH_MODEL === "string" && env.ENRICH_MODEL ? env.ENRICH_MODEL : MODELS.enrich;
+
+  const usage = { prompt_tokens: 0, completion_tokens: 0, requests: 0, cache_hits: 0 };
+  const results = await Promise.all(
+    units.map(async (u: any) => {
+      const m = u?.metadata ?? {};
+      if (!u?.id || typeof u?.id !== "string" || !m?.doc_id || !m?.clause_anchor || !Array.isArray(u?.children) || u.children.length === 0) {
+        return { id: u?.id ?? null, ok: false, error: "invalid unit (id, metadata.doc_id, metadata.clause_anchor, children required)" };
+      }
+      try {
+        const cacheKey = `s:${u.id}`;
+        let summary = body?.force === true ? null : await env.CACHE.get(cacheKey);
+        const cached = !!summary;
+        if (!summary) {
+          const head = `${m.docidentifier ?? m.doc_id} §${m.clause_anchor}${m.clause_title ? " — " + m.clause_title : ""}`;
+          const listing = u.children
+            .slice(0, 12)
+            .map((c: any) => `§${c.anchor ?? ""}${c.title ? " " + c.title : ""} — ${String(c.excerpt ?? "").slice(0, 260)}`)
+            .join("\n");
+          const res: any = await env.AI.run(model, {
+            messages: [
+              { role: "system", content: sectionSummaryPrompt.trimEnd() },
+              { role: "user", content: `${head}\n\nSub-clauses:\n${listing}` },
+            ],
+            max_tokens: 1600, // parity with the chunk-enrichment call — 900 starved ~40% of section summaries (model-card budget rule)
+            reasoning_effort: "low",
+          });
+          const raw = typeof res?.response === "string" && res.response.trim() ? res.response : res?.choices?.[0]?.message?.content;
+          summary = typeof raw === "string" ? raw.trim().replace(/^["']|["']$/g, "").slice(0, 500) : "";
+          if (!summary) return { id: u.id, ok: false, error: "empty summary" };
+          if (res?.usage) {
+            usage.prompt_tokens += Number(res.usage.prompt_tokens ?? 0);
+            usage.completion_tokens += Number(res.usage.completion_tokens ?? 0);
+          }
+          usage.requests += 1;
+          ctx.waitUntil(env.CACHE.put(cacheKey, summary, { expirationTtl: 2_592_000 }));
+        } else {
+          usage.cache_hits += 1;
+        }
+        const childAnchors = u.children.map((c: any) => c.anchor).filter(Boolean).join(",");
+        const text = `§${m.clause_anchor}${m.clause_title ? " " + m.clause_title : ""} — ${summary}\nCovers: ${childAnchors}`;
+        const vectorText = `${m.docidentifier ?? m.doc_id} §${m.clause_anchor} ${text}`.slice(0, 2000);
+        const vector = await embed(env.AI, MODELS.embed, vectorText);
+        await env.VECTORIZE.upsert([
+          { id: u.id, values: vector, metadata: { ...m, chunk_text: text, section_summary: "1", child_anchors: childAnchors, ctx: "1" } },
+        ]);
+        return { id: u.id, ok: true, cached, children: u.children.length };
+      } catch (e: any) {
+        return { id: u.id, ok: false, error: String(e?.message ?? e).slice(0, 200) };
+      }
+    }),
+  );
+  const ok = results.filter((r: any) => r.ok).length;
+  console.log("section units:", ok, "/", results.length, "usage:", JSON.stringify(usage));
+  if (usage.requests > 0) {
     ctx.waitUntil(
       env.DB.prepare(
         "INSERT INTO spend (day, tier, model, requests) VALUES (?1,'enrich',?2,?3) ON CONFLICT(day, tier, model) DO UPDATE SET requests = requests + ?3",
@@ -794,6 +1307,209 @@ async function scoreJudge(
     return await Promise.race([call, timeout]);
   } catch {
     return null;
+  }
+}
+
+/** Deep-research mode (G10 v1): bounded agentic loop for members —
+ *  retrieve → sufficiency judge → re-retrieve targeting the gap → answer
+ *  from the ACCUMULATED evidence. ≤ max_iterations rounds; every
+ *  iteration's retrieval goes through the same gated pipeline as a
+ *  normal ask. Workflows (durable, resumable) is the documented upgrade
+ *  path when runs outgrow a single request. */
+async function handleResearch(env: Env, ctx: ExecutionContext, req: Request, session: any): Promise<Response> {
+  if (!session) {
+    return err(403, "forbidden", "Deep research is a member feature — sign in with your OIML SMART account.");
+  }
+  const body = await readJson(req);
+  const q = validateQuery(body);
+  if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
+  const maxIters = Math.min(Math.max(Number(body?.max_iterations) || 3, 1), 3);
+
+  const started = Date.now();
+  const queryHash = await sha256Hex(q.query);
+  const understanding = await understandQuery(env.AI, MODELS.understand, q.query, [], []);
+  const graphDocNumbers = await graphExpand(env, understanding);
+  const eNote = await editionNote(env, understanding);
+
+  const accumulated = new Map<string, Hit>();
+  let iterations = 0;
+  let focus = understanding?.standalone_query?.trim() || q.query;
+  let judge: { sufficient: boolean; missing: string } | null = null;
+
+  for (let i = 0; i < maxIters; i++) {
+    iterations = i + 1;
+    let retrieved: { hits: Hit[] };
+    try {
+      retrieved = await retrieve(env, q.query, {
+        understanding: i === 0 ? understanding : ({ ...understanding, standalone_query: focus, query_variants: [], hypothetical_answer: undefined } as any),
+        graphDocNumbers,
+      });
+    } catch {
+      break;
+    }
+    for (const h of retrieved.hits.slice(0, LIMITS.rerankKeep)) {
+      if (!accumulated.has(h.id)) accumulated.set(h.id, h);
+    }
+    const passages = [...accumulated.values()];
+    // Hierarchical context management (GLM-5 report, their search agents):
+    // the judge re-reads the full evidence every round and its context
+    // grows without bound. Keep-recent-k: the k most recent findings at
+    // full length, everything older as one-line digests. The final ANSWER
+    // generation below still sees the full set within the token budget —
+    // folding is judge-context only.
+    const KEEP_RECENT = 10;
+    const older = passages.slice(0, Math.max(0, passages.length - KEEP_RECENT));
+    const recent = passages.slice(-KEEP_RECENT);
+    const digest = older.length
+      ? `Earlier evidence (digest, ${older.length} passages):\n${older.map((h) => `- ${h.metadata.docidentifier ?? ""} §${h.metadata.clause_anchor ?? ""}: ${h.text.replace(/\s+/g, " ").slice(0, 160)}`).join("\n")}\n\n`
+      : "";
+    judge = await (async () => {
+      try {
+        const res: any = await env.AI.run(MODELS.grader, {
+          messages: [
+            { role: "system", content: researchPromptText.trimEnd() },
+            { role: "user", content: `Research question: ${q.query}\n\n${digest}Collected passages (${recent.length}):\n${recent.map((h, n) => `[${n + 1}] ${h.metadata.docidentifier ?? ""} §${h.metadata.clause_anchor ?? ""}: ${h.text.slice(0, 700)}`).join("\n")}` },
+          ],
+          max_tokens: 3072,
+          reasoning_effort: "low",
+          temperature: 1.0,
+          top_p: 1.0,
+        });
+        const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+        let parsed: any = null;
+        for (const m of (text ?? "").matchAll(/\{[^{}]*\}/g)) {
+          try {
+            const obj = JSON.parse(m[0]);
+            if (typeof obj.sufficient === "boolean") parsed = obj;
+          } catch { /* keep scanning */ }
+        }
+        return parsed ? { sufficient: parsed.sufficient, missing: String(parsed.missing ?? "") } : null;
+      } catch {
+        return null;
+      }
+    })();
+    console.log("research iter", iterations, "passages", passages.length, "sufficient:", judge?.sufficient);
+    if (!judge || judge.sufficient || !judge.missing) break;
+    // fold, don't accumulate: appending every round's `missing` compounds
+    // stale wants; the next retrieval focuses on the ORIGINAL question plus
+    // what is still missing now
+    focus = `${understanding?.standalone_query?.trim() || q.query} ${judge.missing}`.slice(0, LIMITS.maxInputChars);
+  }
+
+  const used = [...accumulated.values()];
+  if (!used.length) {
+    return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
+  }
+  const { messages, usedHits } = buildMessages(q.query, used, q.lang, [], eNote || undefined, undefined, LIMITS.inputTokenBudget);
+  let answer = await generateOnce(env, MODELS.research, messages);
+  if (answer === null) answer = await generateOnce(env, MODELS.fallback, messages);
+  if (answer === null) {
+    telemetry(env, ctx, "member", "research", MODELS.research, false, 0, queryHash, q.lang);
+    return err(502, "generation_failed", "The generation model is unavailable; please retry.");
+  }
+  answer = canonicalRefusal(answer);
+  const anchors = checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
+  if (anchors.violations.length) console.log("research anchors:", anchors.violations.length, "unverified");
+  const out = {
+    answer,
+    citations: citations(usedHits),
+    model: MODELS.research,
+    query_hash: queryHash,
+    research: { iterations, passages: used.length, elapsed_ms: Date.now() - started, sufficient: judge?.sufficient ?? null },
+  };
+  telemetry(env, ctx, "member", "research", MODELS.research, true, answer.length, queryHash, q.lang);
+  return json({ ...out, ...corsHeaders(req) });
+}
+
+/** Ops access to the Vectorize binding (get/upsert by id) for offline
+ *  passes like embedding smoothing (G-ETSI-4) — the binding is the
+ *  credential, admin-token gated exactly like /admin/enrich. */
+/** One-time figure captioning (TODO.remaining/03): fetch the unit's asset
+ *  from R2, describe it with the vision-capable answer model, store the
+ *  description into unit_payloads. Admin-gated; idempotent. */
+async function handleCaption(env: Env, req: Request): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const unitId = typeof body?.unit_id === "string" ? body.unit_id : "";
+  const context = typeof body?.context === "string" ? body.context.slice(0, 400) : "";
+  if (!unitId) return err(400, "invalid_input", "unit_id required");
+  try {
+    const row = await env.DB.prepare("SELECT payload, docidentifier FROM unit_payloads WHERE unit_id = ?1").bind(unitId).first<any>();
+    if (!row) return err(404, "not_found", "no unit_payload row for that id");
+    const payload = JSON.parse(String(row.payload));
+    const uri = payload.uri ?? "";
+    const m = uri.match(/^\/assets\/(.+)/);
+    if (!m) return err(400, "invalid_input", "payload has no /assets/ uri (upload the asset first)");
+    const obj = await env.UNIT_ASSETS.get(m[1]);
+    if (!obj) return err(404, "not_found", `asset ${m[1]} not in R2`);
+    const buf = await obj.arrayBuffer();
+    const ext = m[1].split(".").pop()?.toLowerCase() ?? "png";
+    const mime = ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const res: any = await env.AI.run(MODELS.member, {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `Describe this figure from ${row.docidentifier}${context ? ` (${context})` : ""} for a reader who cannot see it: what is plotted/shown, the axes or structure, and the normative point it makes. 2-3 plain sentences.` },
+            { type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } },
+          ],
+        },
+      ],
+      max_tokens: 1024,
+      // GLM-5.3-Flash defaults to reasoning_effort "max" when the parameter
+      // is absent — max-effort reasoning starves a 1024-token budget and
+      // the caption comes back empty (the u:fig-2 straggler)
+      reasoning_effort: "low",
+    });
+    const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+    if (!text?.trim()) return err(502, "generation_failed", "vision model returned no description");
+    const desc = text.trim().slice(0, 600);
+    await env.DB.prepare("UPDATE unit_payloads SET payload = json_set(payload, '$.description', ?1) WHERE unit_id = ?2").bind(desc, unitId).run();
+    return json({ ok: true, unit_id: unitId, description: desc });
+  } catch (e) {
+    return err(502, "caption_failed", String(e).slice(0, 200));
+  }
+}
+
+async function handleVectors(env: Env, req: Request): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const mode = body?.mode;
+  try {
+    if (mode === "get") {
+      const ids = Array.isArray(body?.ids) ? body.ids.filter((x: unknown) => typeof x === "string").slice(0, 100) : [];
+      if (!ids.length) return err(400, "invalid_input", "ids: 1-100 required");
+      const vectors = await env.VECTORIZE.getByIds(ids);
+      return json({ vectors: (vectors ?? []).map((v: any) => ({ id: v.id, values: v.values, metadata: v.metadata ?? null })) });
+    }
+    if (mode === "upsert") {
+      const vectors = Array.isArray(body?.vectors)
+        ? body.vectors.filter((v: any) => v && typeof v.id === "string" && Array.isArray(v.values))
+        : [];
+      if (!vectors.length || vectors.length > 100) return err(400, "invalid_input", "vectors: 1-100 required");
+      await env.VECTORIZE.upsert(vectors);
+      return json({ ok: true, upserted: vectors.length });
+    }
+    if (mode === "embed") {
+      // comparison-lane indexing (TODO.model-rag): embed text via the
+      // binding's model so lane builders don't need AI REST scope
+      const texts = Array.isArray(body?.texts) ? body.texts.filter((t: unknown) => typeof t === "string").slice(0, 16) : [];
+      if (!texts.length) return err(400, "invalid_input", "texts: 1-16 required");
+      const vectors: number[][] = [];
+      for (const t of texts) {
+        const v = await embed(env.AI, MODELS.embed, t.slice(0, 6000));
+        vectors.push(v);
+      }
+      return json({ vectors });
+    }
+    return err(400, "invalid_input", "mode must be get, upsert, or embed");
+  } catch (e) {
+    return err(502, "vectorize_failed", String(e).slice(0, 200));
   }
 }
 
@@ -906,7 +1622,7 @@ function scSignature(v: number[]): string {
   return v.slice(0, 16).map((x) => x.toFixed(2)).join(",");
 }
 
-async function semanticCacheGet(env: Env, vec: number[]): Promise<{ answer: string; citations: unknown[]; model: string; query_hash: string } | null> {
+async function semanticCacheGet(env: Env, vec: number[]): Promise<{ answer: string; citations: unknown[]; model: string; query_hash: string; context_applied?: unknown } | null> {
   try {
     const raw = await env.CACHE.get(`sc:${env.INDEX_VERSION}:${scSignature(vec)}`, "json") as any;
     if (!raw?.v || !Array.isArray(raw.v) || raw.v.length !== vec.length) return null;
@@ -980,23 +1696,23 @@ export default {
 
     if (req.method === "GET" && (path === "/auth/login" || path === "/auth/login/")) return handleLogin(env as any, req);
     if (req.method === "GET" && (path === "/auth/callback" || path === "/auth/callback/")) return handleCallback(env as any, req);
-    if (req.method === "GET" && (path === "/auth/me" || path === "/auth/me/")) return handleMe(env as any, req);
+    if (req.method === "GET" && (path === "/auth/me" || path === "/auth/me/")) return withCors(await handleMe(env as any, req), cors);
     if ((req.method === "GET" || req.method === "POST") && (path === "/auth/logout" || path === "/auth/logout/")) return handleLogout(env as any, req);
 
     if (path === "/api/conversations" || path.startsWith("/api/conversations/")) {
       const session = await sessionFrom(req, env as any);
-      if (!session) return err(401, "unauthorized", "Sign in to sync your conversations across devices");
+      if (!session) return withCors(err(401, "unauthorized", "Sign in to sync your conversations across devices"), cors);
       const parts = path.split("/").filter(Boolean); // [api, conversations, id?, messages?]
       if (parts.length === 4 && parts[3] === "messages" && req.method === "POST") {
-        return handleAppendMessage(env, session.sub, req, parts[2]!);
+        return withCors(await handleAppendMessage(env, session.sub, req, parts[2]!), cors);
       }
       if (parts.length > 3) return err(404, "not_found", "Unknown route");
-      return handleConversations(env, session.sub, req, { method: req.method, id: parts[2] });
+      return withCors(await handleConversations(env, session.sub, req, { method: req.method, id: parts[2] }), cors);
     }
 
     if (req.method === "GET" && (path === "/api/datasets" || path === "/api/datasets/")) {
       const session = await sessionFrom(req, env as any);
-      return json({ datasets: datasetsFor(session), suggestions: SUGGESTIONS });
+      return json({ datasets: datasetsFor(session), suggestions: SUGGESTIONS }, 200, cors);
     }
 
     if (req.method === "GET" && (path === "/v1/admin/stats" || path === "/v1/admin/stats/")) {
@@ -1056,10 +1772,112 @@ export default {
         key = await authenticate(env, req);
         if (!key) return err(401, "unauthorized", "Provide a valid API key: Authorization: Bearer oiml_...");
       }
-      // a valid RAG session cookie upgrades the browser tier to member
+      // a valid RAG session (cookie, or the bubble bridge's Bearer token)
+      // upgrades the browser tier to member
       let tier: "anon" | "key" | "member" = isApi ? "key" : "anon";
       if (!isApi && env.SESSION_SECRET && (await sessionFrom(req, env as any))) tier = "member";
-      return handleAsk(env, ctx, req, tier, key);
+      return withCors(await handleAsk(env, ctx, req, tier, key), cors);
+    }
+
+    // comparison lane query (TODO.model-rag): direct retrieval against a
+    // comparison index, bypassing the full ask pipeline — for the annealment
+    // runner and the /compare demo
+    if (req.method === "POST" && (path === "/api/lane" || path === "/v1/lane")) {
+      const isApi = path.startsWith("/v1/");
+      let key: ApiKey | null = null;
+      if (isApi) {
+        key = await authenticate(env, req);
+        if (!key) return err(401, "unauthorized", "Provide a valid API key.");
+      }
+      const body = await readJson(req);
+      const laneName = String(body?.lane ?? "");
+      const query = String(body?.query ?? "").trim();
+      const laneBindings: Record<string, any> = {
+        primmel: env.EXP_PRIMMEL,
+        composed: env.EXP_COMPOSED,
+      };
+      const laneTables: Record<string, string> = {
+        primmel: "chunks_primmel",
+        composed: "chunks_composed",
+      };
+      const binding = laneBindings[laneName];
+      const table = laneTables[laneName];
+      if (!binding || !table) {
+        return err(400, "invalid_lane", `lane must be one of: ${Object.keys(laneBindings).join(", ")}`);
+      }
+      if (!query || query.length > 2000) return err(400, "invalid_input", "query required (1-2000 chars)");
+
+      try {
+        // embed the query
+        const vector = await embed(env.AI, MODELS.embed, query);
+        // dense retrieval from the comparison index
+        const dense = await binding.query(vector, { topK: 20, returnMetadata: "all" });
+        const hits = (dense.matches ?? []).map((m: any) => ({
+          id: m.id,
+          score: m.score,
+          metadata: m.metadata ?? {},
+          text: m.metadata?.chunk_text ?? "",
+        }));
+        // lexical retrieval from the comparison D1
+        let lexical: any[] = [];
+        try {
+          const match = query.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, " ").split(/\s+/)
+            .filter((t: string) => t.length >= 2 && t.length <= 40)
+            .filter((t: string) => !["the","a","an","of","and","or","to","in","for","on","is","are","was","were","be","by","with","as","at","from","that","this","what","how","when","where","which","who","does","do","did","can","could","should","would","may","might","shall","must","about","into","than","then","its","it","their","there"].includes(t))
+            .map((t: string) => `"${t}"`).join(" OR ");
+          if (match) {
+            const res = await env.EXP_DB.prepare(
+              `SELECT c.id, c.docidentifier, c.clause_anchor, c.clause_title, c.unit_id, c.block,
+                      c.text, c.source_lane, c.linked_clause, bm25(${table}_fts) AS rank
+                 FROM ${table}_fts
+                 JOIN ${table} c ON c.rowid = ${table}_fts.rowid
+                WHERE ${table}_fts MATCH ?1
+                ORDER BY rank LIMIT ?2`
+            ).bind(match, 10).all();
+            lexical = (res.results ?? []).map((r: any) => ({
+              id: r.id,
+              score: 1 / (1 + Math.max(0, r.rank)),
+              metadata: {
+                docidentifier: r.docidentifier,
+                clause_anchor: r.clause_anchor,
+                clause_title: r.clause_title,
+                unit_id: r.unit_id,
+                block: r.block,
+                source_lane: r.source_lane,
+                linked_clause: r.linked_clause,
+              },
+              text: r.text,
+            }));
+          }
+        } catch (e) {
+          console.log("lane lexical failed:", String(e).slice(0, 100));
+        }
+
+        // fuse: dedupe by id, dense first, lexical appended
+        const seen = new Set<string>();
+        const fused = [...hits, ...lexical.filter((h: any) => !seen.has(h.id) && !hits.some((d: any) => d.id === h.id))];
+        hits.forEach((h: any) => seen.add(h.id));
+        lexical.forEach((h: any) => { if (!seen.has(h.id)) { fused.push(h); seen.add(h.id); } });
+
+        return json({
+          lane: laneName,
+          query,
+          hits: fused.slice(0, 10).map((h: any) => ({
+            id: h.id,
+            score: h.score,
+            docidentifier: h.metadata?.docidentifier ?? "",
+            clause_anchor: h.metadata?.clause_anchor ?? "",
+            clause_title: h.metadata?.clause_title ?? "",
+            unit_id: h.metadata?.unit_id ?? "",
+            block: h.metadata?.block ?? "",
+            source_lane: h.metadata?.source_lane ?? "",
+            linked_clause: h.metadata?.linked_clause ?? "",
+            text: String(h.text ?? "").slice(0, 400),
+          })),
+        });
+      } catch (e) {
+        return err(502, "lane_query_failed", String(e).slice(0, 200));
+      }
     }
 
     if (req.method === "POST" && (path === "/api/search" || path === "/v1/search")) {
@@ -1071,7 +1889,7 @@ export default {
       }
       let stier: "anon" | "key" | "member" = isApi ? "key" : "anon";
       if (!isApi && env.SESSION_SECRET && (await sessionFrom(req, env as any))) stier = "member";
-      return handleSearch(env, ctx, req, stier, key);
+      return withCors(await handleSearch(env, ctx, req, stier, key), cors);
     }
 
     if (req.method === "POST" && path === "/api/feedback") {
@@ -1079,7 +1897,7 @@ export default {
       const queryHash = typeof body?.query_hash === "string" ? body.query_hash : "";
       const rating = Number(body?.rating);
       if (!/^[a-f0-9]{64}$/.test(queryHash) || ![1, -1].includes(rating)) {
-        return err(400, "invalid_input", "query_hash and rating (1 or -1) are required");
+        return withCors(err(400, "invalid_input", "query_hash and rating (1 or -1) are required"), cors);
       }
       await env.DB.prepare("INSERT INTO feedback (query_hash, rating, ts) VALUES (?1,?2,?3)")
         .bind(queryHash, rating, new Date().toISOString())
@@ -1088,6 +1906,22 @@ export default {
     }
 
     if (req.method === "POST" && (path === "/admin/enrich" || path === "/v1/admin/enrich")) return handleEnrich(env, ctx, req);
+    if (req.method === "POST" && (path === "/admin/section" || path === "/v1/admin/section")) return handleSectionUnit(env, ctx, req);
+    if (req.method === "POST" && (path === "/admin/vectors")) return handleVectors(env, req);
+    if (req.method === "POST" && path === "/admin/caption") return handleCaption(env, req);
+    // unit assets (answer contract v2): immutable, unit-keyed figure images
+    const assetMatch = path.match(/^\/assets\/(u:[A-Za-z0-9_-]+)\.(png|jpe?g|gif|svg|webp)$/);
+    if (req.method === "GET" && assetMatch) {
+      const obj = await env.UNIT_ASSETS.get(assetMatch[1] + "." + assetMatch[2]);
+      if (!obj) return new Response("not found", { status: 404 });
+      const types: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", svg: "image/svg+xml", webp: "image/webp" };
+      return new Response(obj.body, { headers: { "content-type": types[assetMatch[2]] ?? "application/octet-stream", "cache-control": "public, max-age=31536000, immutable", ...corsHeaders(req) } });
+    }
+    if (req.method === "POST" && (path === "/api/research" || path === "/v1/research")) {
+      // member-only: a valid RAG session cookie is required (research spend stays with humans)
+      const session = env.SESSION_SECRET ? await sessionFrom(req, env as any) : null;
+      return handleResearch(env, ctx, req, session);
+    }
     if (req.method === "POST" && (path === "/admin/judge" || path === "/v1/admin/judge")) return handleJudge(env, req);
     if (req.method === "POST" && path === "/v1/admin/keys") return handleCreateKey(env, req);
     if (req.method === "GET" && path === "/v1/admin/keys") return handleListKeys(env, req);

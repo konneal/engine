@@ -1,0 +1,21 @@
+{
+ "plane": "model-plane/1",
+ "standards": {
+  "oiml-r129": {
+   "source_hash": "8566d336a1b3b445dd7f9321737a53c2ca6a582391ce0a64f2db9abc754ae345",
+   "node_count": 110
+  },
+  "oiml-r144": {
+   "source_hash": "f85bd741171821b88f33f3004c656da68b1a18f47300faca4ffb015fa89094c3",
+   "node_count": 112
+  },
+  "oiml-r60": {
+   "source_hash": "777bc2ed9b98e24f9d63c22f95aadc22bb6acedf2c5c7bad67e065e887a52632",
+   "node_count": 218
+  },
+  "oiml-r91": {
+   "source_hash": "a575933a4f44f4e7cd9b1d4fdd2ab4ba31fe7131750a4bd897b8e12db038e764",
+   "node_count": 204
+  }
+ }
+}

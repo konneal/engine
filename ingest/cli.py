@@ -10,6 +10,16 @@ from .chunk import Chunk, chunk_doc, doc_content_hash
 from .config import ARTIFACTS
 from .models import ManifestEntry
 from .parse import apply_precedence, load_corpus, normalize_identifier
+
+# The model plane (TODO.ai-platform/05): its chunks ride the same
+# embed/upsert lanes as the prose corpus when the derivation has run.
+MODEL_CHUNKS_PATH = ARTIFACTS / "model_chunks.jsonl"
+
+
+def _read_chunks(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    return [json.loads(l) for l in path.open(encoding="utf-8")]
 from .enrich import run as run_enrich
 from .graph import build as graph_build, apply as graph_apply
 
@@ -189,6 +199,10 @@ def embed(limit: int | None) -> None:
         raise SystemExit("run `parse` first")
 
     chunks = [json.loads(l) for l in CHUNKS_PATH.open(encoding="utf-8")]
+    model_chunks = _read_chunks(MODEL_CHUNKS_PATH)
+    if model_chunks:
+        print(f"  + {len(model_chunks)} model-plane chunks (TODO.ai-platform/05)")
+        chunks.extend(model_chunks)
     todo = [c for c in chunks if c["id"] not in done]
     if limit:
         todo = todo[:limit]
@@ -233,6 +247,8 @@ def upsert() -> None:
     info = cf.vectorize_info()
     print(f"index {info.get('name')}: dims={info.get('dimensions')} vectors={info.get('vectorCount')}")
     chunks = {json.loads(l)["id"]: json.loads(l) for l in CHUNKS_PATH.open(encoding="utf-8")}
+    for mc in _read_chunks(MODEL_CHUNKS_PATH):
+        chunks[mc["id"]] = mc
     vectors = []
     with EMBED_PATH.open(encoding="utf-8") as f:
         for line in f:
@@ -271,7 +287,7 @@ def probe() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingest")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None), ("fts", None)]:
+    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None), ("fts", None), ("mko", None), ("primmel", None), ("model-plane", None), ("sections", None)]:
         sp = sub.add_parser(name)
         sp.add_argument("--limit", type=int, default=None)
         sp.add_argument("--corpus", default=None)
@@ -280,6 +296,20 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--rpm", type=int, default=45)
         sp.add_argument("--force", action="store_true")
         sp.add_argument("--resume", action="store_true")
+        sp.add_argument("--skip-export", action="store_true")
+        sp.add_argument("--incremental", action="store_true")
+        sp.add_argument("--src", default=None)
+        sp.add_argument("--dry", action="store_true")
+        sp.add_argument("--skip-fts", action="store_true")
+        sp.add_argument("--skip-graph", action="store_true")
+        sp.add_argument("--docs", default=None)
+    # the model plane (TODO.ai-platform/05): derive from the smart
+    # checkout's committed bundles; --check is the freshness gate (a
+    # package change re-indexes); --apply loads the D1 node store.
+    mp = sub.choices["model-plane"]
+    mp.add_argument("--check", action="store_true")
+    mp.add_argument("--apply", action="store_true")
+    mp.add_argument("--no-pins", action="store_true")
     args = parser.parse_args(argv)
     if args.cmd == "parse":
         build(args.corpus, args.limit)
@@ -298,7 +328,47 @@ def main(argv: list[str] | None = None) -> int:
         run_tables(corpus=args.corpus, limit=args.limit)
     elif args.cmd == "fts":
         from .fts import apply as fts_apply
-        fts_apply(limit=args.limit, resume=args.resume)
+        fts_apply(limit=args.limit, resume=args.resume, incremental=args.incremental)
+    elif args.cmd == "primmel":
+        from pathlib import Path as _P
+        from .primmel import project
+        from .config import ARTIFACTS as _A
+        out = project(_P(args.src or str(Path.home() / "src/oimlsmart/smart/data/r60")).expanduser())
+        with (_A / "primmel_chunks.jsonl").open("w", encoding="utf-8") as fh:
+            for c in out["chunks"]:
+                fh.write(json.dumps(c, ensure_ascii=False) + "\n")
+        (_A / "primmel_payloads.sql").write_text("\n".join(out["payloads"]) + "\n", encoding="utf-8")
+        (_A / "primmel_glossary.json").write_text(json.dumps(out["glossary"], ensure_ascii=False, indent=1), encoding="utf-8")
+        (_A / "primmel_graph.jsonl").write_text(
+            "\n".join(json.dumps({"from": f, "kind": k, "to": t}, ensure_ascii=False) for f, k, t in out["edges"]) + "\n",
+            encoding="utf-8")
+        print("primmel: chunks", len(out["chunks"]), "| payloads", len(out["payloads"]), "| edges", len(out["edges"]), "| counts", out["counts"])
+    elif args.cmd == "mko":
+        from .mko_pipeline import run_mko
+        run_mko(
+            skip_export=args.skip_export,
+            dry=args.dry,
+            skip_fts=args.skip_fts,
+            skip_graph=args.skip_graph,
+        )
+    elif args.cmd == "model-plane":
+        from .model_plane import main as model_plane_main
+        extra = []
+        if args.check:
+            extra.append("--check")
+        if args.apply:
+            extra.append("--apply")
+        if args.no_pins:
+            extra.append("--no-pins")
+        return model_plane_main(extra)
+    elif args.cmd == "sections":
+        from .sections import run as run_sections
+        return run_sections(
+            docs=[d for d in (args.docs or "").split(",") if d.strip()] or None,
+            limit=args.limit,
+            batch=args.batch,
+            dry=args.dry,
+        )
     return 0
 
 
