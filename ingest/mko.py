@@ -111,6 +111,10 @@ class MkoUnit(BaseModel):
     type: str
     anchor: str = ""
     number: str = ""
+    # document order as an integer (metanorma-document#56): reading
+    # order is a sort, never a dotted-anchor parse; absent in older
+    # bundles (line order is the fallback)
+    ordinal: int | None = None
     cite_as: str = ""
     title: str = ""
     parent: str = ""
@@ -247,9 +251,14 @@ def to_doc_record(bundle: MkoBundle, corpus: str = "mko") -> DocRecord:
     title = next((t.text for t in doc.titles if not t.lang or t.lang.startswith("en")),
                  doc.titles[0].text if doc.titles else bundle.canonical)
     sections = [
-        Section(anchor=u.number or u.anchor, title=u.title, text=u.text, source_file=u.anchor or u.id)
+        Section(
+            anchor=u.number or u.anchor,
+            title=u.title,
+            text=u.text or u.payload.get("summary", ""),
+            source_file=u.anchor or u.id,
+        )
         for u in bundle.units
-        if u.type in ("clause", "annex") and (u.text or u.title)
+        if u.type in ("clause", "annex") and (u.text or u.title or u.payload.get("summary"))
     ]
     # doc_number from the canonical ("OIML R 60-1" → "60"): the
     # Vectorize doc_number filter and the graph lane key on it — without
@@ -289,6 +298,10 @@ def _unit_label(unit: MkoUnit, docidentifier: str) -> str:
 
 
 def _unit_text(unit: MkoUnit) -> str:
+    if unit.type in ("clause", "annex"):
+        # producer summaries (#56): container sections carry
+        # deterministic coverage text even with no direct prose
+        return unit.text or unit.payload.get("summary") or unit.title
     if unit.text:
         return unit.text
     p = unit.payload
@@ -352,6 +365,8 @@ def _unit_chunk(bundle: MkoBundle, unit: MkoUnit, doc: DocRecord) -> Chunk | Non
         "unit_id": unit.id,
         "unit_hash": unit.hash,
     }
+    if unit.ordinal is not None:
+        meta["ordinal"] = unit.ordinal
     if unit.type == "table":
         meta["table"] = unit.payload
     elif unit.type == "formula":
@@ -371,7 +386,13 @@ def _unit_chunk(bundle: MkoBundle, unit: MkoUnit, doc: DocRecord) -> Chunk | Non
 
 
 def to_chunks(bundle: MkoBundle, doc: DocRecord) -> list[Chunk]:
-    return [c for u in bundle.units if (c := _unit_chunk(bundle, u, doc))]
+    # producer ordinals (#56) make document order an explicit sort;
+    # older bundles fall back to line order
+    ordered = sorted(
+        enumerate(bundle.units),
+        key=lambda iu: iu[1].ordinal if iu[1].ordinal is not None else iu[0],
+    )
+    return [c for _, u in ordered if (c := _unit_chunk(bundle, u, doc))]
 
 
 def to_glossary(bundle: MkoBundle, doc: DocRecord) -> list[dict]:
