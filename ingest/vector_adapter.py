@@ -39,6 +39,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 # in their comparison index. smart-model is the model-plane projection.
 PRODUCTION_CORPORA = frozenset({"oiml", "dirty", "clean", "synthetic", "smart-model"})
 LANE_CORPORA = frozenset({"exp_plain", "exp_adoc", "exp_mko", "primmel", "primmel_flat", "exp_composed"})
+# the vocabulary lane: serving-side (the L2 nomenclature bridge), its own index
+SERVING_LANE_CORPORA = frozenset({"glossary"})
 
 MAX_META_BYTES = 9_000  # Vectorize hard limit is 10KB per vector metadata
 MAX_TEXT_CHARS = 2_800  # the 40016 lesson (2026-08-31): cap chunk_text
@@ -48,7 +50,7 @@ MAX_TEXT_CHARS = 2_800  # the 40016 lesson (2026-08-31): cap chunk_text
 # detection stays as defense in depth)
 _UUID_ANCHOR = re.compile(r"^_?[0-9a-f]{8}-[0-9a-f]{4}-", re.I)
 
-Target = Literal["production", "exp_plain", "exp_adoc", "exp_mko", "primmel", "primmel_flat", "exp_composed"]
+Target = Literal["production", "exp_plain", "exp_adoc", "exp_mko", "primmel", "primmel_flat", "exp_composed", "glossary"]
 
 # which corpora may an index hold — the structural incident guard
 TARGET_CORPORA: dict[str, frozenset[str]] = {
@@ -60,6 +62,8 @@ TARGET_CORPORA: dict[str, frozenset[str]] = {
     # the ablation lane indexes the SAME primmel corpus, unlinked
     "primmel_flat": frozenset({"primmel"}),
     "exp_composed": frozenset({"exp_composed"}),
+    # the vocabulary lane (L2 nomenclature bridge)
+    "glossary": frozenset({"glossary"}),
 }
 
 
@@ -94,7 +98,7 @@ class ChunkMetaModel(BaseModel):
     @field_validator("corpus")
     @classmethod
     def _registered_corpus(cls, v: str) -> str:
-        if v not in PRODUCTION_CORPORA | LANE_CORPORA:
+        if v not in PRODUCTION_CORPORA | LANE_CORPORA | SERVING_LANE_CORPORA:
             raise ValueError(
                 f"corpus {v!r} is not registered — add it to ingest/vector_adapter.py's registry, never emit it ad hoc"
             )

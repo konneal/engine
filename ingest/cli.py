@@ -287,7 +287,7 @@ def probe() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingest")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None), ("fts", None), ("mko", None), ("primmel", None), ("model-plane", None), ("sections", None)]:
+    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None), ("fts", None), ("mko", None), ("primmel", None), ("model-plane", None), ("sections", None), ("glossary", None)]:
         sp = sub.add_parser(name)
         sp.add_argument("--limit", type=int, default=None)
         sp.add_argument("--corpus", default=None)
@@ -369,6 +369,9 @@ def main(argv: list[str] | None = None) -> int:
             batch=args.batch,
             dry=args.dry,
         )
+    elif args.cmd == "glossary":
+        from .glossary import run as run_glossary
+        return run_glossary(dry=args.dry)
     return 0
 
 

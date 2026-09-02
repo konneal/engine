@@ -58,6 +58,11 @@ index_name = "idx_exp_mko"
 binding = "EXP_PFLAT"
 index_name = "idx_exp_primmel_flat"
 
+# The vocabulary lane (L2 nomenclature bridge): defined terms + definitions
+[[vectorize]]
+binding = "GLOSSARY"
+index_name = "idx_glossary"
+
 [[d1_databases]]
 binding = "EXP_DB"
 database_name = "rag-comparison"

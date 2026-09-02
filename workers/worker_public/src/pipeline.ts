@@ -59,6 +59,11 @@ export interface Hit {
 export interface Retrieved {
   hits: Hit[];
   filters: QueryFilters;
+  /** vocabulary link (the L2 nomenclature bridge): top defined-term
+   *  candidates for the question's subject — the answer model adjudicates
+   *  among them (dense retrieval alone binds everyday words to the wrong
+   *  term: measured "keeps drifting" → creep 0.69 vs durability 0.54) */
+  glossary?: { term: string; definition: string; docidentifier: string; score: number }[];
 }
 
 // Short follow-ups are usually elliptical ("and the limits?") — fold the
@@ -695,7 +700,40 @@ export async function retrieve(
   // Same-chain near-duplicate collapse (FABLE ancestor-descendant dedup)
   finalHits = ancestorDescendantDedup(finalHits);
 
-  return { hits: finalHits, filters: filters ?? {} };
+  // ── Vocabulary link (the L2 nomenclature bridge) ──
+  // Everyday words don't match defined terms — the one gap every
+  // comparison lane fails. Dense candidates + cross-encoder rerank, and
+  // the ANSWER model adjudicates among the top-2 (the entity-linking
+  // pattern: retrieval proposes, generation disambiguates — naive top-1
+  // dense binding picks the wrong term).
+  let glossary: Retrieved["glossary"] = [];
+  if (env.GLOSSARY && vector) {
+    try {
+      const g = await env.GLOSSARY.query(vector, { topK: 5, returnMetadata: "all" });
+      const cands = (g.matches ?? []).filter((m: any) => m.score >= 0.5);
+      if (cands.length) {
+        const texts = cands.map((m: any) => String(m.metadata?.chunk_text ?? ""));
+        const rs = await rerank(env.AI, MODELS.rerank, query, texts);
+        const ranked = cands
+          .map((m: any, i: number) => ({ m, r: rs ? rs[i] : m.score }))
+          .sort((a: any, b: any) => b.r - a.r)
+          .slice(0, 2);
+        glossary = ranked
+          .map(({ m, r }: any) => ({
+            term: String(m.metadata?.clause_title ?? "").trim(),
+            definition: String(m.metadata?.chunk_text ?? "").split(" — ").slice(1).join(" — ").slice(0, 300),
+            docidentifier: String(m.metadata?.docidentifier ?? ""),
+            score: r,
+          }))
+          .filter((x: any) => x.term && x.definition);
+        if (glossary!.length) console.log("glossary link:", glossary!.map((g2) => g2.term).join(", "));
+      }
+    } catch {
+      // additive lane; primary results stand
+    }
+  }
+
+  return { hits: finalHits, filters: filters ?? {}, ...(glossary?.length ? { glossary } : {}) };
 }
 
 export interface HistoryTurn {

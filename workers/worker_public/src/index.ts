@@ -33,6 +33,7 @@ export interface Env {
   EXP_ADC: any;
   EXP_MKO: any;
   EXP_PFLAT: any;
+  GLOSSARY: any;
   EXP_DB: D1Database;
   CACHE: KVNamespace;
   DB: D1Database;
@@ -860,12 +861,21 @@ async function handleAsk(
   const processNote = understanding?.process_intent
     ? "Retrieval note: these passages come from the OIML Certification System documents because they govern certification/application procedures for OIML publications."
     : undefined;
+  // the vocabulary binding (L2): the corpus's defined-term candidates for
+  // the question's subject — the model adjudicates among them and uses
+  // the corpus term (with its defining publication) when it names the
+  // subject; everyday words stop hiding the defined term
+  const vocabNote = retrieved.glossary?.length
+    ? "Vocabulary binding — defined terms in the indexed corpus that may name this question's subject:\n" +
+      retrieved.glossary.map((g) => `- ${g.term} (${g.docidentifier}): ${g.definition}`).join("\n") +
+      "\nIf one of these names what the question describes, answer with that defined term and cite its defining publication."
+    : undefined;
   const { messages, usedHits } = buildMessages(
     q.query,
     hits,
     q.lang,
     keptHistory,
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
