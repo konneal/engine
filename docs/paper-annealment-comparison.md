@@ -65,62 +65,88 @@ witness-span containment (a hit counts only when the golden answer
 span is present) plus structural artifact checks (typed block
 delivered, not re-typed prose).
 
-## 3. First results (3-lane comparison)
+## 3. Measured results (7-column matrix)
 
-Production (full OIML corpus, all serving stages) vs the two
-experimental lanes (raw retrieval, R 60 only):
+Production (full OIML corpus, all serving stages) vs the six lanes
+(raw dense+lexical fused retrieval, R 60 family only), graded by
+passage-scoped retrieval witnesses — each rung's evidence span must
+appear within one retrieved passage:
 
-| Rung | Production | Primmel | Composed |
-|---|---|---|---|
-| L0 locate | 2/2 | 2/2 | 2/2 |
-| L1 extract | 2/2 | 2/2 | 2/2 |
-| L2 nomenclature | 1/2 | 1/2 | 1/2 |
-| L3 geometry | 2/2 | 1/2 | 1/2 |
-| L4 composition | 1/2 | **2/2** | **2/2** |
-| L5 cross-standard | 1/2 | 0/2 | 0/2 |
-| L6 diachrony | 2/2 | 1/2 | 1/2 |
-| L7 perception | 1/1 | 1/1 | 1/1 |
-| **L8 computation** | 1/1 | **1/1** | **1/1** |
-| **L9 process** | 2/2 | **2/2** | **2/2** |
-| **Total** | **15/18** | **13/18** | **13/18** |
+| Rung | Plain | Adoc | MKO | Primmel | Flat | Composed | Production |
+|---|---|---|---|---|---|---|---|
+| L0 locate | 0/2 | 0/2 | 1/2 | 2/2 | 2/2 | 2/2 | 2/2 |
+| L1 extract | 1/2 | 1/2 | 1/2 | 2/2 | 2/2 | 2/2 | 2/2 |
+| L2 nomenclature | 0/2 | 0/2 | 0/2 | 1/2 | 1/2 | 2/2 | 1/2 |
+| L3 geometry | 0/2 | 1/2 | 0/2 | 1/2 | 1/2 | 1/2 | 2/2 |
+| L4 composition | 0/2 | 0/2 | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 |
+| L5 cross-standard | 0/2 | 0/2 | 0/2 | 1/2 | 0/2 | 0/2 | 2/2 |
+| L6 diachrony | 1/2 | 1/2 | 0/2 | 1/2 | 1/2 | 1/2 | 2/2 |
+| L7 perception | 0/1 | 0/1 | 1/1 | 0/1 | 0/1 | 1/1 | 1/1 |
+| **L8 computation** | 0/1 | 0/1 | 0/1 | **1/1** | **1/1** | **1/1** | 1/1 |
+| **L9 process** | 0/2 | 0/2 | 1/2 | **2/2** | **2/2** | **2/2** | 2/2 |
+| **Total** | **2/18** | **3/18** | **6/18** | **13/18** | **12/18** | **14/18** | **17/18** |
+
+Vector coverage at measurement: plain 151/187, adoc 171/187, mko
+650/676, primmel 180/202, flat 189/202, composed 643/878 — footnoted
+for honesty; the gaps are retryable timeouts, and the pattern below is
+far larger than any gap.
 
 ### What the numbers mean
 
-**Production's advantage is corpus size and serving pipeline.** At 32k
-chunks with query understanding, edition steering, and cross-corpus
-filtering, production passes L3 and L5 that the raw-retrieval lanes
-miss. Its L3 pass (n_LC class B) comes from the MKO tables already in
-the index; its L5 pass (ISO humidity) from the dirty-corpus chunks that
-mention ISO standards by name.
+**The ladder is real.** Raw text representations (plain, adoc) answer
+almost nothing (2–3/18) — they lose L0 LOCATE itself: only 95/187
+chunks in those lanes carry a clause anchor, so the anchoring primitive
+(P2) is absent from the representation, and "where does R 60 address
+creep" cannot be answered with a citation even when the text is
+retrieved. This is the thesis in one number: representation determines
+what questions a corpus can answer.
 
-**Primmel's advantage is typed model objects.** The D_max constraint
-probe (L8) retrieves the OCL `constraint` block with its violation
-meaning — "the type evaluation of this load cell is void" — from the
-Primmel lane. Production retrieves R 76-2 (a different standard!) for
-the same query. The creep-test order probe (L9) retrieves the
-`sequence` block with its ordered steps and roles.
+**Structure buys the middle.** MKO (6/18) jumps to 2/2 on L4
+composition (typed units carry cross-references) but loses the basics —
+typed table units without situating context underperform prose at
+L0–L3. The model lanes (primmel 13, flat 12) dominate everywhere their
+objects exist.
 
-**The composed lane confirms cross-linking works** but shows a
-trade-off: adding 676 MKO prose chunks to 202 Primmel model chunks
-dilutes the model objects' ranking for some queries. On L4 composition
-the cross-links help (both primmel and composed score 2/2 vs
-production's 1/2); on L3 the dilution hurts (composed misses the n_LC
-attribute that pure primmel misses differently).
+**The model's unique rungs are confirmed at full matrix.** L8
+computation is model-only by construction: the witness is the D_max/0.9
+machine-limit co-occurrence, which exists in exactly one passage per
+model lane and zero passages in every text lane. L9 process (the
+MDLO-before-creep sequence) similarly rides the model's sequence and
+precondition objects.
 
-**The L5 gap is structural.** The Primmel model composes with ISO/IEC
-17000/17065 (the `uses:` declarations), but the composition targets are
-NOT in the comparison indexes — only the R 60 model is. The production
-corpus includes dirty-corpus chunks that reference ISO standards by
-name. This is an isolation artifact of the experiment, not a
-representation effect.
+**Composed wins the matrix (14/18).** The earlier 3-lane measurement
+worried cross-linking diluted precision (it did, on L3 probes); at the
+full matrix the MKO prose + Primmel model cross-links ADD L2
+nomenclature (2/2 — the only lane to clear both nomenclature probes)
+and L7 perception (the figure objects ride the MKO side) without losing
+L8/L9. Composition costs nothing here and buys the vocabulary and
+perception primitives.
 
-### The capability ceiling (first measurement)
+**Per-primitive specialization is visible.** L7 perception passes only
+where figure objects exist (MKO, composed, production) — models carry
+no figures. L5 cross-standard passes only in production: the ISO/IEC
+17000 composition targets are not in any lane (the known isolation
+artifact — primmel's 1/2 comes from its `uses:` declaration naming the
+standard, not from retrieving it).
+
+**The serving stack is worth 3+ rungs of representation.** Production
+(17/18) beats the best lane by 3 with the SAME content because hybrid
+retrieval (dense + full-corpus BM25 + rerank + edition steering +
+structural propagation) recovers rungs that raw single-lane retrieval
+loses (L3 2/2, L5 2/2, L6 2/2). Representation and serving stack
+multiplicatively, not additively — the ceiling is representation-bound
+(L2's colloquial→term bridge fails everywhere, glossary binding is a
+pipeline capability).
+
+### The capability ceiling (full matrix)
 
 | Lane | Ceiling | Why |
 |---|---|---|
-| Production | L2/L4 | fails colloquial nomenclature (L2a) and MPE scaling (L4a) — the understanding model can't bridge "drifting" to "durability" without a glossary binding |
-| Primmel | L5 | the model carries P1–P10 but the raw retrieval (no understanding, no filtering) misses table geometry (L3a) and ISO links (L5) that need the serving pipeline |
-| Composed | L5 | same as primmel — the composed lane inherits the model's strengths and the raw-retrieval limitations |
+| Plain / Adoc | L1 | no anchoring primitive (95/187 chunks carry a clause anchor) — even locate-with-citation fails; raw text answers little and cites less |
+| MKO | L4 | typed units carry cross-references (L4 2/2) but the anchoring/nomenclature basics need situating context the lane lacks |
+| Primmel | L9 | the model carries P1–P10 — its misses (L2b VIML provenance, L5 targets) are corpus-isolation artifacts, not representation limits |
+| Composed | L9 | the full-matrix winner: model objects + prose vocabulary + figures; only the isolated L5 fails it |
+| Production | L2 | 17/18 — fails only the colloquial→term bridge ("drifting"→"durability"), a glossary-binding gap the FABLE-era pipeline does not yet close (the term-alias ask, primmel/spec#18) |
 
 ## 4. What this means for standards publishing
 
