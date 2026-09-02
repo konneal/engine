@@ -46,7 +46,8 @@ SUPERSEDED_BY_TYPES = {"obsoletedBy", "hasSuccessor", "succeededBy", "updates"}
 CITES_TARGET_RE = re.compile(r"^ext:")
 
 CHUNKED_UNIT_TYPES = {"clause", "annex", "term", "table", "formula",
-                      "requirement", "sourcecode", "note", "example"}
+                      "requirement", "sourcecode", "note", "example",
+                      "figure"}
 
 
 class MkoManifestComponent(BaseModel):
@@ -110,6 +111,11 @@ class MkoUnit(BaseModel):
     type: str
     anchor: str = ""
     number: str = ""
+    # document order as an integer (metanorma-document#56): reading
+    # order is a sort, never a dotted-anchor parse; absent in older
+    # bundles (line order is the fallback)
+    ordinal: int | None = None
+    cite_as: str = ""
     title: str = ""
     parent: str = ""
     breadcrumb: list[str] = Field(default_factory=list)
@@ -174,7 +180,13 @@ class MkoBundle:
             with zipfile.ZipFile(path) as zf:
                 self._files = {name: zf.read(name) for name in zf.namelist()}
         elif path.is_dir():
-            self._files = {p.name: p.read_bytes() for p in path.iterdir() if p.is_file()}
+            # manifest component paths are bundle-relative ("assets/<hash>") —
+            # a flat top-level read misses every asset and verification fails
+            self._files = {
+                p.relative_to(path).as_posix(): p.read_bytes()
+                for p in path.rglob("*")
+                if p.is_file()
+            }
         else:
             raise FileNotFoundError(f"not an MKO bundle: {path}")
         self.manifest = MkoManifest(**json.loads(self._text("manifest.json")))
@@ -239,16 +251,34 @@ def to_doc_record(bundle: MkoBundle, corpus: str = "mko") -> DocRecord:
     title = next((t.text for t in doc.titles if not t.lang or t.lang.startswith("en")),
                  doc.titles[0].text if doc.titles else bundle.canonical)
     sections = [
-        Section(anchor=u.number or u.anchor, title=u.title, text=u.text, source_file=u.anchor or u.id)
+        Section(
+            anchor=u.number or u.anchor,
+            title=u.title,
+            text=u.text or u.payload.get("summary", ""),
+            source_file=u.anchor or u.id,
+        )
         for u in bundle.units
-        if u.type in ("clause", "annex") and (u.text or u.title)
+        if u.type in ("clause", "annex") and (u.text or u.title or u.payload.get("summary"))
     ]
+    # doc_number from the canonical ("OIML R 60-1" → "60"): the
+    # Vectorize doc_number filter and the graph lane key on it — without
+    # the parse, every MKO chunk is invisible to doc-scoped retrieval
+    m = re.match(r"^[A-Z]+\s+(?:R|D|B|G|E|V)\s*(\d+)", bundle.canonical) or re.match(r"^[A-Z]+\s+([A-Z])\s*(\d+)", bundle.canonical)
+    doc_number = ""
+    m2 = re.search(r"(?:R|D|B|G|E|V)\s*-?\s*(\d+)", bundle.canonical)
+    if m2:
+        doc_number = str(int(m2.group(1)))
+    # producer-parsed identity wins when present (metanorma-document#52)
+    ids = getattr(bundle.document.ids, "__dict__", {}) if bundle.document else {}
+    if getattr(bundle.document.ids, "number", None):
+        doc_number = str(bundle.document.ids.number)
     return DocRecord(
         doc_id=f"{corpus}:{bundle.slug}",
         slug=bundle.slug,
         corpus=corpus,
         tier="mko",
         docidentifier=bundle.canonical,
+        doc_number=doc_number,
         doctype=_doctype(bundle),
         edition=doc.edition,
         language=(doc.languages or ["en"])[0],
@@ -268,6 +298,10 @@ def _unit_label(unit: MkoUnit, docidentifier: str) -> str:
 
 
 def _unit_text(unit: MkoUnit) -> str:
+    if unit.type in ("clause", "annex"):
+        # producer summaries (#56): container sections carry
+        # deterministic coverage text even with no direct prose
+        return unit.text or unit.payload.get("summary") or unit.title
     if unit.text:
         return unit.text
     p = unit.payload
@@ -300,6 +334,18 @@ def _unit_chunk(bundle: MkoBundle, unit: MkoUnit, doc: DocRecord) -> Chunk | Non
     crumb = f"{breadcrumb}\n\n" if breadcrumb else ""
     full = (header + crumb + _unit_label(unit, doc.docidentifier) + "\n\n" + text).strip()
     anchor = unit.number or unit.anchor or unit.id
+    # typed units cite their PARENT CLAUSE (number + title): a table is
+    # retrieved/ cited as "§4.1.2", not "§table-1" — clause-anchored
+    # reranking and citation practice both key on the clause number
+    clause_anchor = anchor
+    clause_title = unit.title
+    if unit.cite_as:
+        clause_anchor = unit.cite_as  # producer-derived (metanorma-document#52)
+    elif unit.type in ("table", "formula", "figure", "requirement", "note", "example") and unit.parent:
+        parent = bundle.units_by_id.get(unit.parent)
+        if parent is not None:
+            clause_anchor = parent.number or parent.anchor or clause_anchor
+            clause_title = parent.title or clause_title
     meta: dict = {
         "chunk_text": full[:2800],
         "doc_id": doc.doc_id,
@@ -308,8 +354,8 @@ def _unit_chunk(bundle: MkoBundle, unit: MkoUnit, doc: DocRecord) -> Chunk | Non
         "doc_number": doc.doc_number,
         "edition": doc.edition,
         "language": doc.language,
-        "clause_anchor": anchor,
-        "clause_title": unit.title,
+        "clause_anchor": clause_anchor,
+        "clause_title": clause_title,
         "block": unit.type,
         "tier": doc.tier,
         "corpus": doc.corpus,
@@ -319,6 +365,8 @@ def _unit_chunk(bundle: MkoBundle, unit: MkoUnit, doc: DocRecord) -> Chunk | Non
         "unit_id": unit.id,
         "unit_hash": unit.hash,
     }
+    if unit.ordinal is not None:
+        meta["ordinal"] = unit.ordinal
     if unit.type == "table":
         meta["table"] = unit.payload
     elif unit.type == "formula":
@@ -338,7 +386,13 @@ def _unit_chunk(bundle: MkoBundle, unit: MkoUnit, doc: DocRecord) -> Chunk | Non
 
 
 def to_chunks(bundle: MkoBundle, doc: DocRecord) -> list[Chunk]:
-    return [c for u in bundle.units if (c := _unit_chunk(bundle, u, doc))]
+    # producer ordinals (#56) make document order an explicit sort;
+    # older bundles fall back to line order
+    ordered = sorted(
+        enumerate(bundle.units),
+        key=lambda iu: iu[1].ordinal if iu[1].ordinal is not None else iu[0],
+    )
+    return [c for _, u in ordered if (c := _unit_chunk(bundle, u, doc))]
 
 
 def to_glossary(bundle: MkoBundle, doc: DocRecord) -> list[dict]:
@@ -391,6 +445,47 @@ def _cite_node(cited: str) -> str | None:
         return node
     slug = re.sub(r"[^A-Za-z0-9]+", "-", cited).strip("-").upper()
     return f"doc:{slug}" if slug else None
+
+
+TYPED_UNIT_FIELDS = ("table", "formula", "figure", "term", "requirement")
+
+
+def _sq(x: str) -> str:
+    return str(x).replace(chr(39), chr(39) * 2)
+
+
+def to_payload_sql(bundle: "MkoBundle", doc: DocRecord) -> list[str]:
+    """Typed unit payloads as D1 unit_payloads rows (answer contract v2):
+    the worker resolves model [[u:<id>]] references against these — the
+    payload data never passes through the LLM."""
+    import json as _json
+
+    rows: list[str] = []
+    for u in bundle.units:
+        if u.type not in TYPED_UNIT_FIELDS or not u.payload:
+            continue
+        # the lossless `mirror` renderer tree is fidelity/provenance, not a
+        # serving form — strip it (SQLITE_TOOBIG on big tables otherwise);
+        # the TS renderer consumes columns/rows, latex/description, alt/uri
+        slim = {k: v for k, v in u.payload.items() if k != "mirror"}
+        body = _json.dumps(slim, ensure_ascii=False)
+        if len(body) > 60000:
+            continue
+        rows.append(
+            "INSERT OR REPLACE INTO unit_payloads "
+            "(unit_id, doc_id, docidentifier, edition, clause_anchor, type, payload) VALUES ("
+            + ",".join([
+                "'" + _sq(u.id) + "'",
+                "'" + _sq(doc.doc_id) + "'",
+                "'" + _sq(doc.docidentifier) + "'",
+                "'" + _sq(doc.edition or "") + "'",
+                "''",
+                "'" + _sq(u.type) + "'",
+                "'" + _sq(body) + "'",
+            ])
+            + ");\n"
+        )
+    return rows
 
 
 def to_graph_sql(bundle: MkoBundle, doc: DocRecord) -> str:

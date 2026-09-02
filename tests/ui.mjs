@@ -89,6 +89,15 @@ await page.route("**/api/**", (route) => {
     let events;
     if (/lasagna/i.test(q)) {
       events = [{ type: "citations", citations: [], quota: { used: 1, limit: 20 } }, { type: "token", v: REFUSAL }, { type: "done", query_hash: "f".repeat(64) }];
+    } else if (/table/i.test(q)) {
+      events = [
+        { type: "citations", citations: CITES(), quota: { used: 3, limit: 20 } },
+        { type: "token", v: "The limits are given in [[u:table-1]] — classes A to D." },
+        { type: "done", model: "@cf/zai-org/glm-5.3-flash", query_hash: "b".repeat(64),
+          blocks: [{ unit_id: "u:table-1", type: "table", docidentifier: "OIML R 60-1", edition: "2",
+                     payload: { caption: "n_LC limits", columns: [{ label: "Class" }, { label: "n_LC min" }],
+                                rows: ["A | 50 000", "B | 5 000", "C | 500", "D | 100"] } }] },
+      ];
     } else if (/^xss/i.test(q)) {
       events = [{ type: "citations", citations: [], quota: { used: 2, limit: 20 } }, { type: "token", v: XSS_PAYLOAD }, { type: "done", query_hash: "c".repeat(64) }];
     } else {
@@ -133,6 +142,7 @@ await page.waitForFunction(() => document.querySelector(".assistant-body")?.text
 check("greeting removed after asking", (await page.locator(".suggestion").count()) === 0);
 check("user message rendered", (await chat.textContent()).includes("What is R 60?"));
 check("assistant answer streamed fully", (await chat.textContent()).includes("R 60 is the OIML Recommendation for load cells"));
+
 check("sources panel rendered", (await chat.textContent()).includes("Sources") && (await chat.textContent()).includes("OIML R 60-1"));
 check("superseded badge shown with successor", (await chat.textContent()).includes("superseded") && (await chat.textContent()).includes("OIML R 60:2017"));
 check("source chips collapsed by default", (await page.locator(".src-card:not(.open-card)").count()) === 2);
@@ -217,6 +227,16 @@ const darkState = await page.evaluate(() => ({
 check("dark mode renders (html not display:none)", darkState.htmlDisplay !== "none");
 check("dark mode has layout (body height > 100)", darkState.bodyH > 100, `bodyH=${darkState.bodyH}`);
 await page.evaluate(() => document.documentElement.classList.remove("dark"));
+
+
+// — answer contract v2: typed blocks render —
+await input.fill("show me the table");
+await input.press("Enter");
+await page.waitForSelector(".unit-table", { timeout: 10000 });
+check("typed table block rendered", (await page.locator(".unit-table tbody tr").count()) === 4);
+check("table payload cells exact", (await page.locator(".unit-table").textContent()).includes("50 000"));
+check("block badge + source shown", (await page.locator(".block-head .src-badge").first().textContent()) === "TABLE");
+check("ref token rendered in prose", (await chat.textContent()).includes("[[u:table-1]]"));
 
 check("no uncaught page errors", errors.length === 0, errors[0] ?? "");
 

@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill: #ffffff; stroke: #334155; stroke-width: 1.5; }
+    .src { fill: #eff6ff; stroke: #2563eb; stroke-width: 1.5; }
+    .gate { fill: #fefce8; stroke: #a16207; stroke-width: 1.5; }
+    .pay { fill: #faf5ff; stroke: #7c3aed; stroke-width: 1.5; }
+    .out { fill: #f0fdf4; stroke: #15803d; stroke-width: 1.5; }
+    .t  { font-size: 13px; font-weight: bold; fill: #1e293b; }
+    .s  { font-size: 11px; fill: #475569; }
+    .mono { font-size: 10.5px; font-family: "Courier New", monospace; fill: #334155; }
+    .edge { stroke: #334155; stroke-width: 1.5; fill: none; marker-end: url(#arr2); }
+    .lbl { font-size: 10.5px; fill: #64748b; }
+    .ttl { font-size: 11px; fill: #64748b; letter-spacing: 2px; }
+    .no  { fill: none; stroke: #94a3b8; stroke-width: 1.2; stroke-dasharray: 4 3; }
+  </style>
+
+  <text class="ttl" x="480" y="20" text-anchor="middle">ANSWER CONTRACT v2 — THE MODEL POINTS, THE RENDERER DRAWS</text>
+
+  <!-- left: passages -->
+  <rect class="src" x="30" y="40" width="280" height="112" rx="8"/>
+  <text class="t" x="170" y="61" text-anchor="middle">Retrieved passages</text>
+  <text class="s" x="170" y="78" text-anchor="middle">each header declares its typed units:</text>
+  <text class="mono" x="170" y="97" text-anchor="middle">[3] OIML R 60-1:2021 &#167;5.1.2</text>
+  <text class="mono" x="170" y="112" text-anchor="middle">unit u:table-1 (table) &#8212; &#8230;</text>
+  <text class="s" x="170" y="134" text-anchor="middle">clause chunks + atomic typed units</text>
+
+  <!-- middle: model -->
+  <rect class="box" x="360" y="40" width="240" height="112" rx="8"/>
+  <text class="t" x="480" y="61" text-anchor="middle">Answer model</text>
+  <text class="s" x="480" y="79" text-anchor="middle">emits prose that only:</text>
+  <text class="s" x="480" y="96" text-anchor="middle">&#183; cites every claim</text>
+  <text class="s" x="480" y="112" text-anchor="middle">&#183; quote-anchors normative values</text>
+  <text class="s" x="480" y="128" text-anchor="middle">&#183; points at units &#8212; never re-types</text>
+
+  <path class="edge" d="M 310 96 L 360 96"/>
+
+  <!-- right: draft output -->
+  <rect class="box" x="650" y="40" width="280" height="112" rx="8"/>
+  <text class="t" x="790" y="61" text-anchor="middle">Draft output</text>
+  <text class="mono" x="790" y="82" text-anchor="middle">&#8230; limited per class [R 60-1:2021 &#167;4.4.2]</text>
+  <text class="mono" x="790" y="98" text-anchor="middle">"maximum permissible error &#8230;"</text>
+  <text class="mono" x="790" y="114" text-anchor="middle">values: [[u:table-1]]</text>
+  <text class="s" x="790" y="136" text-anchor="middle">prose + citations + symbolic refs</text>
+
+  <path class="edge" d="M 600 96 L 650 96"/>
+
+  <!-- verification gates -->
+  <rect class="gate" x="30" y="200" width="280" height="76" rx="8"/>
+  <text class="t" x="170" y="221" text-anchor="middle">Quote-anchor check</text>
+  <text class="s" x="170" y="238" text-anchor="middle">every quoted phrase must exist</text>
+  <text class="s" x="170" y="252" text-anchor="middle">character-for-character in a used</text>
+  <text class="s" x="170" y="266" text-anchor="middle">passage &#8594; else regenerate</text>
+
+  <rect class="gate" x="340" y="200" width="280" height="76" rx="8"/>
+  <text class="t" x="480" y="221" text-anchor="middle">Unit-reference check</text>
+  <text class="s" x="480" y="238" text-anchor="middle">every [[u:&#8230;]] must appear among</text>
+  <text class="s" x="480" y="252" text-anchor="middle">the passages actually used;</text>
+  <text class="s" x="480" y="266" text-anchor="middle">unknown refs are dropped</text>
+
+  <rect class="gate" x="650" y="200" width="280" height="76" rx="8"/>
+  <text class="t" x="790" y="221" text-anchor="middle">Retyping check</text>
+  <text class="s" x="790" y="238" text-anchor="middle">a markdown table in the output</text>
+  <text class="s" x="790" y="252" text-anchor="middle">while a typed unit was available</text>
+  <text class="s" x="790" y="266" text-anchor="middle">&#8594; corrective regeneration</text>
+
+  <path class="edge" d="M 700 152 L 190 200"/>
+  <path class="edge" d="M 760 152 L 500 200"/>
+  <path class="edge" d="M 820 152 L 790 200"/>
+  <text class="lbl" x="905" y="180" text-anchor="middle">mechanical,</text>
+  <text class="lbl" x="905" y="192" text-anchor="middle">post-generation</text>
+
+  <!-- payload resolution -->
+  <rect class="pay" x="250" y="320" width="460" height="60" rx="8"/>
+  <text class="t" x="480" y="341" text-anchor="middle">Server resolves refs &#8594; producer payloads</text>
+  <text class="s" x="480" y="358" text-anchor="middle">D1 unit_payloads: the document's own columns, rows, units</text>
+  <text class="s" x="480" y="372" text-anchor="middle">&#8212; fetched by unit id, never generated</text>
+
+  <path class="edge" d="M 480 276 L 480 320"/>
+
+  <!-- client render -->
+  <rect class="out" x="150" y="424" width="660" height="60" rx="8"/>
+  <text class="t" x="480" y="445" text-anchor="middle">Client renders the producer's objects</text>
+  <text class="s" x="480" y="462" text-anchor="middle">real &#9001;table&#9002; from columns/rows &#183; KaTeX from LaTeX &#183; &#9001;img&#9002; from the asset store</text>
+
+  <path class="edge" d="M 480 380 L 480 424"/>
+
+  <rect x="150" y="508" width="660" height="36" rx="8" class="no"/>
+  <text class="s" x="480" y="530" text-anchor="middle">the payload never passes through the model, so generation cannot corrupt it</text>
+</svg>

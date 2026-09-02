@@ -20,11 +20,14 @@ const KEY = (() => {
   }
 })();
 const saveTag = process.argv.includes("--save") ? process.argv[process.argv.indexOf("--save") + 1] : null;
+const REPEAT = process.argv.includes("--repeat") ? Number(process.argv[process.argv.indexOf("--repeat") + 1]) : 1;
 const K = process.argv.includes("--k") ? Number(process.argv[process.argv.indexOf("--k") + 1]) : 5;
 
 const cases = [
   ...JSON.parse(readFileSync(new URL("./golden/cases.json", import.meta.url), "utf8")),
   ...JSON.parse(readFileSync(new URL("./golden/retrieval-probes.json", import.meta.url), "utf8")),
+  ...JSON.parse(readFileSync(new URL("./golden/table-cases.json", import.meta.url), "utf8")),
+  ...JSON.parse(readFileSync(new URL("./golden/graph-probes.json", import.meta.url), "utf8")),
 ];
 
 async function search(query, topK) {
@@ -48,6 +51,21 @@ function isRelevant(result, expect) {
   return true;
 }
 
+/** ETSI-protocol witness matching: a result is relevant when the
+ *  golden witness string's tokens are >=75% contained in the passage
+ *  text (normalized). Stricter and fairer than doc-pattern hits — a
+ *  hit must contain the ANSWER SPAN, not just come from the right
+ *  document. */
+function witnessMatch(text, witness) {
+  const norm = (s) =>
+    String(s ?? "").toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
+  const w = norm(witness);
+  if (w.length < 2) return false;
+  const t = new Set(norm(text));
+  const contained = w.filter((tok) => t.has(tok)).length;
+  return contained / w.length >= 0.75;
+}
+
 function apAtK(relevances) {
   let hits = 0;
   let sum = 0;
@@ -65,6 +83,7 @@ function rrAtK(relevances) {
   return idx < 0 ? 0 : 1 / (idx + 1);
 }
 
+async function runOnce(tag) {
 let nScored = 0;
 let nHit = 0;
 let sumAP = 0;
@@ -90,7 +109,9 @@ for (const c of cases) {
     err = String(e);
   }
   const top = results.slice(0, K);
-  const relevances = top.map((r) => isRelevant(r, c.expect));
+  const relevances = c.expect?.witness
+    ? top.map((r) => witnessMatch(r.text ?? r.chunk_text ?? "", c.expect.witness) && isRelevant(r, c.expect))
+    : top.map((r) => isRelevant(r, c.expect));
   const hit = relevances.some(Boolean);
   const rank = relevances.findIndex(Boolean);
   const rAtK = hit ? 1 : 0;
@@ -120,23 +141,45 @@ for (const c of cases) {
   console.log(`  ${mark} ${c.id.padEnd(22)} ${detail}`);
 }
 
+console.log(
+  `\nretrieval@${K}${tag}: R=${(100 * sumR / nScored).toFixed(0)}%  AP=${(sumAP / nScored).toFixed(3)}  MRR=${(sumRR / nScored).toFixed(3)}  (${nHit}/${nScored} hit)`,
+);
+return { nScored, nHit, sumAP, sumRR, sumR, rows };
+}
+
+const runs = [];
+for (let r = 0; r < REPEAT; r++) {
+  const res = await runOnce(` [run ${r + 1}/${REPEAT}]`);
+  runs.push(res);
+  if (r < REPEAT - 1) await new Promise((ok) => setTimeout(ok, 15000));
+}
+const first = runs[0];
 const summary = {
   base: BASE,
   ts: new Date().toISOString(),
   k: K,
+  repeats: REPEAT,
   protocol: "etsi-2604.09868",
-  scored: nScored,
-  hit_at_5: nHit,
-  rate: +(nHit / nScored).toFixed(3),
-  R_at_K: +(sumR / nScored).toFixed(4),
-  AP_at_K: +(sumAP / nScored).toFixed(4),
-  MRR_at_K: +(sumRR / nScored).toFixed(4),
-  rows,
+  scored: first.nScored,
+  hit_at_5: first.nHit,
+  rate: +(first.nHit / first.nScored).toFixed(3),
+  R_at_K: +(first.sumR / first.nScored).toFixed(4),
+  AP_at_K: +(first.sumAP / first.nScored).toFixed(4),
+  MRR_at_K: +(first.sumRR / first.nScored).toFixed(4),
+  rows: first.rows,
+  mean_over_runs: REPEAT > 1 ? {
+    R_at_K: +(runs.reduce((a, r) => a + r.sumR / r.nScored, 0) / REPEAT).toFixed(4),
+    AP_at_K: +(runs.reduce((a, r) => a + r.sumAP / r.nScored, 0) / REPEAT).toFixed(4),
+    MRR_at_K: +(runs.reduce((a, r) => a + r.sumRR / r.nScored, 0) / REPEAT).toFixed(4),
+    R_range: [Math.min(...runs.map((r) => r.sumR / r.nScored)).toFixed(4), Math.max(...runs.map((r) => r.sumR / r.nScored)).toFixed(4)],
+    AP_range: [Math.min(...runs.map((r) => r.sumAP / r.nScored)).toFixed(4), Math.max(...runs.map((r) => r.sumAP / r.nScored)).toFixed(4)],
+  } : undefined,
 };
 
-console.log(
-  `\nretrieval@${K}: R=${(100 * summary.R_at_K).toFixed(0)}%  AP=${summary.AP_at_K.toFixed(3)}  MRR=${summary.MRR_at_K.toFixed(3)}  (${nHit}/${nScored} hit)`,
-);
+if (REPEAT > 1) {
+  const m = summary.mean_over_runs;
+  console.log(`\nMEAN over ${REPEAT}: R=${m.R_at_K} AP=${m.AP_at_K} MRR=${m.MRR_at_K} | R range [${m.R_range}] AP range [${m.AP_range}]`);
+}
 
 if (saveTag) {
   mkdirSync(new URL("../artifacts/eval/", import.meta.url), { recursive: true });

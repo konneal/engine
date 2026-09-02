@@ -28,6 +28,7 @@ from ingest.mko import (  # noqa: E402
     to_doc_record,
     to_glossary,
     to_graph_sql,
+    to_payload_sql,
 )
 
 ARTIFACTS = Path(__file__).resolve().parents[1] / "artifacts"
@@ -42,19 +43,35 @@ def main(argv: list[str]) -> int:
     all_glossary: list[dict] = []
     all_bibliography: list[dict] = []
     graph_fragments: list[str] = []
+    payload_rows: list[str] = []
 
+    # per-doc resilience (TODO.remaining/11): one broken bundle (manifest
+    # mismatch, drifted export) must not abort the whole run — the bundle is
+    # skipped, named in the report, and the exit code still signals it so
+    # the gated pipeline fails loudly. Resilience is throughput, never a
+    # way to hide defects.
+    skipped: list[tuple[str, str]] = []
     for raw in argv:
         bundle_path = Path(raw).expanduser()
-        bundle = MkoBundle(bundle_path)
-        doc = to_doc_record(bundle)
-        chunks = to_chunks(bundle, doc)
-        glossary = to_glossary(bundle, doc)
-        bibliography = to_bibliography(bundle, doc)
-        graph_sql = to_graph_sql(bundle, doc)
-        all_chunks.extend(c.model_dump() for c in chunks)
-        all_glossary.extend(glossary)
-        all_bibliography.extend(bibliography)
-        graph_fragments.append(graph_sql)
+        try:
+            bundle = MkoBundle(bundle_path)
+            doc = to_doc_record(bundle)
+            chunks = to_chunks(bundle, doc)
+            glossary = to_glossary(bundle, doc)
+            bibliography = to_bibliography(bundle, doc)
+            graph_sql = to_graph_sql(bundle, doc)
+            payload_rows.extend(to_payload_sql(bundle, doc))
+            all_chunks.extend(c.model_dump() for c in chunks)
+            all_glossary.extend(glossary)
+            all_bibliography.extend(bibliography)
+            graph_fragments.append(graph_sql)
+        except Exception as e:  # noqa: BLE001 — name it, skip it, report it
+            skipped.append((bundle_path.name, str(e)[:160]))
+            print(f"  [ingest] SKIP {bundle_path.name}: {str(e)[:160]}", flush=True)
+    if skipped:
+        (ARTIFACTS / "mko_skipped.json").write_text(
+            __import__("json").dumps(skipped, indent=1), encoding="utf-8"
+        )
         by_type: dict[str, int] = {}
         for u in bundle.units:
             by_type[u.type] = by_type.get(u.type, 0) + 1
@@ -64,7 +81,29 @@ def main(argv: list[str]) -> int:
               f"{len(bibliography)} cited docs, "
               f"{graph_sql.count(chr(10))} graph rows")
 
+    # Incremental diff by unit content hash (MN 116 stable ids): only
+    # new/changed units need embedding on re-ingest.
     chunks_out = ARTIFACTS / "mko_chunks.jsonl"
+    changed_out = ARTIFACTS / "mko_changed.jsonl"
+    prev = {}
+    if chunks_out.exists():
+        for line in chunks_out.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                c = json.loads(line)
+                prev[(c["doc_id"], c["metadata"].get("unit_id"))] = c["metadata"].get("unit_hash")
+    changed = []
+    seen = set()
+    for c in all_chunks:
+        key = (c["doc_id"], c["metadata"].get("unit_id"))
+        seen.add(key)
+        if prev.get(key) != c["metadata"].get("unit_hash"):
+            changed.append(c)
+    removed = sum(1 for k in prev if k not in seen)
+    print(f"diff: {len(changed)} new/changed, "
+          f"{len(all_chunks) - len(changed)} unchanged, {removed} removed")
+    with changed_out.open("w", encoding="utf-8") as f:
+        for c in changed:
+            f.write(json.dumps(c) + "\n")
     with chunks_out.open("w", encoding="utf-8") as f:
         for c in all_chunks:
             f.write(json.dumps(c) + "\n")
@@ -74,10 +113,13 @@ def main(argv: list[str]) -> int:
     biblio_out.write_text(json.dumps(all_bibliography, ensure_ascii=False, indent=1), encoding="utf-8")
     graph_out = ARTIFACTS / "mko_graph.sql"
     graph_out.write_text("".join(graph_fragments), encoding="utf-8")
+    payloads_out = ARTIFACTS / "mko_unit_payloads.sql"
+    payloads_out.write_text("".join(payload_rows), encoding="utf-8")
+    print(f"wrote {payloads_out} ({len(payload_rows)} typed units)")
     print(f"wrote {chunks_out} ({len(all_chunks)} chunks), "
           f"{glossary_out} ({len(all_glossary)} terms), "
           f"{biblio_out} ({len(all_bibliography)} cited docs), {graph_out}")
-    return 0
+    return 3 if skipped else 0
 
 
 if __name__ == "__main__":

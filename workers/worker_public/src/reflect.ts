@@ -38,9 +38,12 @@ export async function reflect(
         },
       ],
       // reasoning shares this budget — starved budgets silently disable
-      // the reflection layer (null = no retry ever fires)
-      max_tokens: 700,
+      // the reflection layer (null = no retry ever fires); DeepSeek-V4
+      // card: keep reasoning on with headroom + temp 1.0 / top_p 1.0
+      max_tokens: 3072,
       reasoning_effort: "low",
+      temperature: 1.0,
+      top_p: 1.0,
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
     const m = (text ?? "").match(/\{[\s\S]*\}/);

@@ -90,9 +90,17 @@ export async function understandQuery(
       { role: "user", content: user },
     ],
     // the model always reasons; reasoning tokens share this budget — too
-    // small and the JSON is never reached (understanding silently degrades)
-    max_tokens: 1500,
+    // small and the JSON is never reached (understanding silently degrades).
+    // GLM-5 family defaults to reasoning_effort "max" when the parameter is
+    // not honored, so GLM needs headroom or reasoning starves the JSON.
+    max_tokens: model.includes("glm") ? 3072 : 1500,
     reasoning_effort: "low",
+    // Qwen3 thinking-mode sampling (model card): greedy/1.0 sampling
+    // degrades into repetition loops — the 10s/5s timeout nulls were the
+    // budget being eaten by loops, not by reasoning
+    temperature: 0.6,
+    top_p: 0.95,
+    top_k: 20,
   };
   // each attempt issues a FRESH call — re-racing a timed-out promise would
   // retry nothing. Generous first attempt: reasoning + the full JSON must
@@ -109,8 +117,11 @@ export async function understandQuery(
     try {
       const got = await Promise.race([call, timeout]);
       if (got) return got;
-    } catch {
-      /* retry */
+    } catch (e) {
+      // account rate-limited: a retry in the same minute will also fail —
+      // degrade to vanilla retrieval immediately instead of burning the
+      // second attempt (TTFT surgery)
+      if (String(e).includes("3021") || String(e).includes("rate")) return null;
     }
   }
   console.warn("query understanding unavailable — vanilla retrieval");

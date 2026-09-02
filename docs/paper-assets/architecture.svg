@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+  <style>
+    .box { fill: #ffffff; stroke: #334155; stroke-width: 1.5; rx: 8; }
+    .lane { fill: #eff6ff; stroke: #2563eb; stroke-width: 1.5; }
+    .gate { fill: #fefce8; stroke: #a16207; stroke-width: 1.5; }
+    .out  { fill: #f0fdf4; stroke: #15803d; stroke-width: 1.5; }
+    .ref  { fill: #ffffff; stroke: #94a3b8; stroke-width: 1.2; stroke-dasharray: 5 3; }
+    .t  { font-size: 13px; font-weight: bold; fill: #1e293b; }
+    .s  { font-size: 11px; fill: #475569; }
+    .edge { stroke: #334155; stroke-width: 1.5; fill: none; marker-end: url(#arr); }
+    .dedge { stroke: #94a3b8; stroke-width: 1.3; fill: none; stroke-dasharray: 5 3; marker-end: url(#arrd); }
+    .lbl { font-size: 10.5px; fill: #64748b; }
+    .ttl { font-size: 11px; fill: #64748b; letter-spacing: 2px; }
+  </style>
+
+  <text class="ttl" x="480" y="20" text-anchor="middle">HOW A QUESTION IS ANSWERED — OIML SMART AI</text>
+
+  <!-- inputs -->
+  <rect class="box" x="195" y="34" width="270" height="46" rx="8"/>
+  <text class="t" x="330" y="53" text-anchor="middle">Question</text>
+  <text class="s" x="330" y="69" text-anchor="middle">any language, any phrasing</text>
+
+  <rect class="ref" x="640" y="34" width="290" height="46" rx="8"/>
+  <text class="t" x="785" y="53" text-anchor="middle">Edition registry</text>
+  <text class="s" x="785" y="69" text-anchor="middle">status derived from supersession links</text>
+
+  <!-- parallel lanes -->
+  <rect class="lane" x="30" y="122" width="280" height="72" rx="8"/>
+  <text class="t" x="170" y="143" text-anchor="middle">Query understanding</text>
+  <text class="s" x="170" y="159" text-anchor="middle">small LLM: language, publication,</text>
+  <text class="s" x="170" y="173" text-anchor="middle">edition, terms, complexity</text>
+
+  <rect class="lane" x="340" y="122" width="280" height="72" rx="8"/>
+  <text class="t" x="480" y="143" text-anchor="middle">Dense retrieval</text>
+  <text class="s" x="480" y="159" text-anchor="middle">query embedding &#8594; Vectorize</text>
+  <text class="s" x="480" y="173" text-anchor="middle">runs concurrently with understanding</text>
+
+  <rect class="lane" x="650" y="122" width="280" height="72" rx="8"/>
+  <text class="t" x="790" y="143" text-anchor="middle">Lexical retrieval</text>
+  <text class="s" x="790" y="159" text-anchor="middle">full-corpus BM25 (D1 / FTS5)</text>
+  <text class="s" x="790" y="173" text-anchor="middle">exact identifiers, part numbers, terms</text>
+
+  <path class="edge" d="M 290 80 L 150 122"/>
+  <path class="edge" d="M 330 80 L 470 122"/>
+  <path class="edge" d="M 370 80 L 780 122"/>
+  <path class="dedge" d="M 660 80 L 560 122"/>
+  <text class="lbl" x="710" y="103" text-anchor="middle">doc / edition filters</text>
+
+  <!-- fusion -->
+  <rect class="box" x="250" y="240" width="460" height="52" rx="8"/>
+  <text class="t" x="480" y="261" text-anchor="middle">Reciprocal-rank fusion (k = 60)</text>
+  <text class="s" x="480" y="277" text-anchor="middle">cross-encoder rerank &#183; typed-chunk pin &#183; diversity caps</text>
+
+  <path class="edge" d="M 170 194 L 170 217 L 340 240"/>
+  <path class="edge" d="M 480 194 L 480 240"/>
+  <path class="edge" d="M 790 194 L 790 217 L 620 240"/>
+
+  <!-- answer model -->
+  <rect class="box" x="250" y="332" width="460" height="52" rx="8"/>
+  <text class="t" x="480" y="353" text-anchor="middle">Answer model &#8212; GLM-5.3-flash (all tiers)</text>
+  <text class="s" x="480" y="369" text-anchor="middle">generates from the retrieved passages only</text>
+
+  <path class="edge" d="M 480 292 L 480 332"/>
+
+  <!-- verification -->
+  <rect class="gate" x="250" y="424" width="460" height="64" rx="8"/>
+  <text class="t" x="480" y="445" text-anchor="middle">Post-generation verification</text>
+  <text class="s" x="480" y="461" text-anchor="middle">quote anchors match a cited passage verbatim &#183; [[u:&#8230;]] refs resolve</text>
+  <text class="s" x="480" y="475" text-anchor="middle">faithfulness judge sees the passages actually used</text>
+
+  <path class="edge" d="M 480 384 L 480 424"/>
+
+  <!-- outputs -->
+  <rect class="out" x="90" y="530" width="340" height="56" rx="8"/>
+  <text class="t" x="260" y="551" text-anchor="middle">Cited answer + typed blocks</text>
+  <text class="s" x="260" y="567" text-anchor="middle">cached by query hash + index version</text>
+
+  <rect class="box" x="530" y="530" width="340" height="56" rx="8"/>
+  <text class="t" x="700" y="551" text-anchor="middle">Off-corpus &#8594; canonical refusal</text>
+  <text class="s" x="700" y="567" text-anchor="middle">one sentence, never cached</text>
+
+  <path class="edge" d="M 400 488 L 300 530"/>
+  <path class="edge" d="M 560 488 L 660 530"/>
+  <text class="lbl" x="238" y="516" text-anchor="middle">verified</text>
+  <text class="lbl" x="722" y="516" text-anchor="middle">no supporting passage</text>
+</svg>

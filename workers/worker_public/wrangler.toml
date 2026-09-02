@@ -23,9 +23,29 @@ run_worker_first = ["/", "/api/"]
 [ai]
 binding = "AI"
 
+# Figure/image assets for answer contract v2 (TODO.remaining/03) — served
+# at /assets/u/<unit>.<ext> with immutable caching; keys are unit-keyed.
+[[r2_buckets]]
+binding = "UNIT_ASSETS"
+bucket_name = "rag-public-assets"
+
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "idx_oiml_public_v2"
+
+# Comparison lanes (TODO.model-rag): the annealment experiment indexes
+[[vectorize]]
+binding = "EXP_PRIMMEL"
+index_name = "idx_exp_primmel"
+
+[[vectorize]]
+binding = "EXP_COMPOSED"
+index_name = "idx_exp_composed"
+
+[[d1_databases]]
+binding = "EXP_DB"
+database_name = "rag-comparison"
+database_id = "85a1fa04-ef61-4a2d-8e85-23bbc0a3284d"
 
 [[kv_namespaces]]
 binding = "CACHE"
@@ -44,7 +64,7 @@ binding = "INTERNAL_SERVICE"
 service = "rag-internal"
 
 [vars]
-INDEX_VERSION = "public-v2.57-mko-clean"
+INDEX_VERSION = "public-v2.80-citelabels"
 ANON_DAY_ASK = "20"
 ANON_DAY_SEARCH = "50"
 KEY_DAY_ASK_DEFAULT = "2000"
@@ -54,6 +74,11 @@ EXEMPT_IPS = "218.188.43.254"
 OIDC_ISSUER = "https://id.oimlsmart.org"
 OIDC_REDIRECT_URI = "https://ai.oimlsmart.org/auth/callback"
 OIDC_CLIENT_ID = "oiml-rag"
+# TODO.ai-platform/03 — the "my account" live-data delegation: the platform
+# the assistant reads AS the user (the RFC 8693 exchange's scope target).
+# Absent/blank → the account chip answers live-unavailable honestly.
+SMART_PLATFORM_API = "https://demo.oimlsmart.org"
+SMART_PLATFORM_CLIENT_ID = "oiml-smart"
 
 [observability]
 enabled = true

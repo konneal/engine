@@ -6,6 +6,8 @@ export interface SessionClaims {
   sub: string;
   name?: string;
   email?: string;
+  /** OIDC picture claim (avatar URL) — present when the OP issues it */
+  picture?: string;
   roles: string[];
   iat: number;
   exp: number;
@@ -29,15 +31,26 @@ async function hmac(secret: string, data: string): Promise<string> {
     .replace(/=+$/, "");
 }
 
-export async function mintSessionCookie(secret: string, claims: Omit<SessionClaims, "exp" | "iat">): Promise<string> {
+export async function mintSessionToken(secret: string, claims: Omit<SessionClaims, "exp" | "iat">): Promise<{ token: string; expiresAt: number }> {
   const full: SessionClaims = { ...claims, iat: Date.now(), exp: Date.now() + SESSION_TTL_SEC * 1000 };
   const payload = btoa(JSON.stringify(full))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
   const sig = await hmac(secret, payload);
-  const value = `${payload}.${sig}`;
-  return `${SESSION_COOKIE}=${value}; Path=/; Max-Age=${SESSION_TTL_SEC}; HttpOnly; Secure; SameSite=Lax`;
+  return { token: `${payload}.${sig}`, expiresAt: full.exp };
+}
+
+export async function mintSessionCookie(secret: string, claims: Omit<SessionClaims, "exp" | "iat">): Promise<string> {
+  const { token } = await mintSessionToken(secret, claims);
+  return sessionCookieFromToken(token);
+}
+
+/** The Set-Cookie value for an already-minted session token (the sign-in
+ *  mints ONCE and both the cookie and the bubble Bearer carry it —
+ *  TODO.ai-platform/03's live-data window keys off the one token). */
+export function sessionCookieFromToken(token: string): string {
+  return `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_TTL_SEC}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 export function parseCookies(req: Request): Record<string, string> {
@@ -52,7 +65,11 @@ export function parseCookies(req: Request): Record<string, string> {
 
 export async function readSession(req: Request, secret: string | undefined): Promise<SessionClaims | null> {
   if (!secret) return null;
-  const raw = parseCookies(req)[SESSION_COOKIE];
+  // The cookie is the same-origin posture; the Bearer form is the bubble
+  // bridge (bubble.ts) — the same signed payload, sent cross-origin by
+  // the embedded panel. Cookie first so a stale stored token never
+  // shadows a live cookie session on the ai property itself.
+  const raw = rawSessionToken(req);
   if (!raw) return null;
   const [payload, sig] = raw.split(".");
   if (!payload || !sig) return null;
@@ -67,6 +84,16 @@ export async function readSession(req: Request, secret: string | undefined): Pro
   } catch {
     return null;
   }
+}
+
+/** The raw session token as presented (the cookie wins the tie, exactly
+ *  as readSession) — the live-data window's KV key derives from it
+ *  (TODO.ai-platform/03; the key is the token's hash, never the token). */
+export function rawSessionToken(req: Request): string | null {
+  const raw =
+    parseCookies(req)[SESSION_COOKIE] ??
+    (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  return raw || null;
 }
 
 export function clearSessionCookie(): string {

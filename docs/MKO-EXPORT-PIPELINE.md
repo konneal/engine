@@ -39,18 +39,20 @@ document (from the metanorma-document checkout, branch
 `feat/model-validation-l1-declarations`, PR #45):
 
 ```bash
-bundle exec ruby -e '
-  require "metanorma/document"
-  require "metanorma/iso/document"
-  require "metanorma/mko"
-  %w[sources/r060/1 sources/r060/2 sources/r060/3].each do |src|
-    xml  = File.read(ENV["HOME"] + "/src/mn/mn-samples-oiml/#{src}/document.xml")
-    pres = File.read(ENV["HOME"] + "/src/mn/mn-samples-oiml/#{src}/document.presentation.xml")
-    puts Metanorma::Mko.export(xml, to: "bundles", presentation_xml: pres)
-  end
-'
-.venv/bin/python scripts/ingest_mko.py bundles/*.mko
+# one command, gated (live since 2026-08-29):
+.venv/bin/python -m ingest.cli mko              # export → ingest → enrich → verify-gate → wire → fts → graph
+.venv/bin/python -m ingest.cli mko --dry        # counts + coverage check only
 ```
+
+The pipeline enforces the stage order this path proved matters: the
+`verify` gate refuses to wire chunks that lack contextual preambles
+(the 2026-08-28 regression — un-enriched upserts dropped retrieval
+R@5 from 95% to 90%), and it stops before shipping (INDEX_VERSION
+bump + deploy stay human). Stage 5 (wire) needs
+`CLOUDFLARE_API_TOKEN` in the environment; enrichment upserts
+enriched vectors live as it runs, so wiring is idempotent
+bookkeeping afterwards. The underlying per-stage commands (for
+reference / partial runs):
 
 When the umbrella wiring lands (metanorma PR #591) this becomes
 `metanorma compile document.adoc -x mko` and the Ruby step disappears —
@@ -58,14 +60,20 @@ the ingest side does not change.
 
 ## Worked example: OIML R 60-1 (load cells)
 
-`oiml-r-60-1.mko` → ingest output:
+`oiml-r-60-1.mko` → ingest output (producer @e6918cb):
 
 ```
-154 units (clause=71, term=59, table=6, figure=4, example=2, reference=12)
-  → 135 chunks, 59 terms, 12 cited docs, 539 graph rows
+155 units (clause=72, term=59, table=6, figure=4, example=2, reference=12)
+  → 136 chunks, 59 terms, 12 cited docs, 541 graph rows
 canonical: OIML R 60-1 (edition 2)
 ```
 
+**Full-corpus run (2026-08-29, live):** 36 documents → 3,020 enriched
+chunks (clause 1,913 / table 371 / term 113 / note 77 / formula 37 /
+annex 32 / example 8), 113 glossary concepts, 342 cited docs, 3,561
+section nodes + cites/defines edges in D1. Retrieval held at baseline
+(R@5 95%, AP 0.875, MRR 0.893) after widening the rerank window to 10
+for the enlarged clean lane.
 ## Full-corpus validation (2026-08-28)
 
 All **37** compiled sample documents (R/D/B/G/E + OIML-CS admin + parts
@@ -97,6 +105,11 @@ nested/boilerplate).*
   (edges total 242; the remaining rows are node inserts).
 - 12 cited documents (OIML V 1:2013, R 111, …) as native Relaton items —
   the citation targets are addressable objects, not strings.
+
+## Answer contract v2 stages (live)
+
+- `to_payload_sql` → `artifacts/mko_unit_payloads.sql` → D1 `unit_payloads` (573 typed units; `mirror` stripped for serving size, 60KB cap)
+- Figure assets → R2 `rag-public-assets` at unit-keyed keys, served at `/assets/u:<id>.<ext>` (immutable); `unit_payloads.payload.uri` updated to the canonical route (producer `uri` is null today — upstream asset-contract ask, metanorma-document#50)
 
 ## How the artifacts feed the existing stages
 

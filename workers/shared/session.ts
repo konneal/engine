@@ -52,7 +52,14 @@ export function parseCookies(req: Request): Record<string, string> {
 
 export async function readSession(req: Request, secret: string | undefined): Promise<SessionClaims | null> {
   if (!secret) return null;
-  const raw = parseCookies(req)[SESSION_COOKIE];
+  // Cookie or Bearer — the Bearer form is the bubble bridge's session
+  // token (the public worker forwards it on the federation hop; the
+  // same signed payload the cookie carries).
+  let raw: string | undefined = parseCookies(req)[SESSION_COOKIE];
+  if (!raw) {
+    const m = (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
+    raw = m?.[1]?.trim();
+  }
   if (!raw) return null;
   const [payload, sig] = raw.split(".");
   if (!payload || !sig) return null;
