@@ -53,9 +53,11 @@ def api(path: str, body: dict) -> dict:
 
 
 def enrich_chunks(chunks: list[dict], lane: str) -> list[dict]:
-    """Send chunks through /admin/enrich to generate + cache preambles.
-    The upsert to production is idempotent for already-indexed chunks.
-    For new chunks (primmel), this is the intended first indexing."""
+    """Generate situating preambles via /admin/enrich mode:"context" —
+    context ONLY, never an upsert: this endpoint's default mode writes the
+    enriched chunk into the PRODUCTION index, which is how 1,126 lane
+    vectors leaked there on 2026-09-02. Lane chunks are embedded and
+    upserted into THEIR OWN index in embed_and_upsert below."""
     enriched = []
     batch = 6
     total = len(chunks)
@@ -63,7 +65,7 @@ def enrich_chunks(chunks: list[dict], lane: str) -> list[dict]:
     for i in range(0, total, batch):
         b = chunks[i : i + batch]
         try:
-            res = api("/admin/enrich", {"chunks": [
+            res = api("/admin/enrich", {"mode": "context", "chunks": [
                 {"id": c["id"], "text": c["text"][:1500], "metadata": c["metadata"]}
                 for c in b
             ]})

@@ -1104,6 +1104,13 @@ async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request): Prom
   const chunks = Array.isArray(body?.chunks) ? body.chunks : [];
   if (chunks.length === 0 || chunks.length > 8) return err(400, "invalid_input", "chunks: 1-8 required");
   const force = body?.force === true;
+  // mode:"context" generates/returns the situating preamble WITHOUT
+  // embedding or upserting — the comparison-lane builders use it so lane
+  // chunks can never land in the production index (the 2026-09-02
+  // incident: 1,126 lane vectors entered production through this
+  // endpoint's upsert side effect). Default mode stays the production
+  // enrichment flow (context + embed + upsert in place).
+  const contextOnly = body?.mode === "context";
   const model = typeof env.ENRICH_MODEL === "string" && env.ENRICH_MODEL ? env.ENRICH_MODEL : MODELS.enrich;
 
   const usage = { prompt_tokens: 0, completion_tokens: 0, requests: 0, cache_hits: 0 };
@@ -1142,6 +1149,7 @@ async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request): Prom
         } else {
           usage.cache_hits += 1;
         }
+        if (contextOnly) return { id: c.id, ok: true, cached, context };
         const original = typeof c.metadata.chunk_text === "string" && c.metadata.chunk_text ? c.metadata.chunk_text : c.text;
         const enriched = `${context}\n\n${original}`;
         const vector = await embed(env.AI, MODELS.embed, enriched.slice(0, 6000));
