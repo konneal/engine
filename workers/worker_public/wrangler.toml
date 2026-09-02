@@ -64,7 +64,7 @@ binding = "INTERNAL_SERVICE"
 service = "rag-internal"
 
 [vars]
-INDEX_VERSION = "public-v2.78-citelabels"
+INDEX_VERSION = "public-v2.80-citelabels"
 ANON_DAY_ASK = "20"
 ANON_DAY_SEARCH = "50"
 KEY_DAY_ASK_DEFAULT = "2000"
