@@ -139,7 +139,7 @@ def run(docs: list[str] | None = None, limit: int | None = None, batch: int = 6,
         return 1
 
     ok = fail = 0
-    with httpx.Client(timeout=120) as client:
+    with httpx.Client(timeout=300) as client:
         for i in range(0, len(specs), min(batch, 6)):
             chunk = specs[i : i + min(batch, 6)]
             try:
@@ -157,7 +157,7 @@ def run(docs: list[str] | None = None, limit: int | None = None, batch: int = 6,
                         fail += 1
                         print(f"  FAIL {u['id']}: {r.get('error')}")
                 usage = body.get("usage", {})
-                print(f"  {min(i + len(chunk), len(specs))}/{len(specs)} (ok={ok} fail={fail} gen={usage.get('requests', 0)} cached={usage.get('cache_hits', 0)})")
+                print(f"  {min(i + len(chunk), len(specs))}/{len(specs)} (ok={ok} fail={fail} gen={usage.get('requests', 0)} cached={usage.get('cache_hits', 0)})", flush=True)
             except Exception as e:  # noqa: BLE001
                 fail += len(chunk)
                 print(f"  batch FAIL: {e}")
