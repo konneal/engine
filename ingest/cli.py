@@ -287,7 +287,7 @@ def probe() -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ingest")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None), ("fts", None), ("mko", None), ("primmel", None), ("model-plane", None)]:
+    for name, fn in [("parse", build), ("embed", embed), ("upsert", upsert), ("probe", probe), ("enrich", run_enrich), ("graph", graph_build), ("tables", None), ("fts", None), ("mko", None), ("primmel", None), ("model-plane", None), ("sections", None)]:
         sp = sub.add_parser(name)
         sp.add_argument("--limit", type=int, default=None)
         sp.add_argument("--corpus", default=None)
@@ -302,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--dry", action="store_true")
         sp.add_argument("--skip-fts", action="store_true")
         sp.add_argument("--skip-graph", action="store_true")
+        sp.add_argument("--docs", default=None)
     # the model plane (TODO.ai-platform/05): derive from the smart
     # checkout's committed bundles; --check is the freshness gate (a
     # package change re-indexes); --apply loads the D1 node store.
@@ -360,6 +361,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.no_pins:
             extra.append("--no-pins")
         return model_plane_main(extra)
+    elif args.cmd == "sections":
+        from .sections import run as run_sections
+        return run_sections(
+            docs=[d for d in (args.docs or "").split(",") if d.strip()] or None,
+            limit=args.limit,
+            batch=args.batch,
+            dry=args.dry,
+        )
     return 0
 
 

@@ -12,6 +12,7 @@ import precisionPrompt from "../prompts/precision.md";
 import { embed } from "./ai";
 import { scoreFaithfulness } from "./faithfulness";
 import enrichmentPrompt from "../prompts/enrichment.md";
+import sectionSummaryPrompt from "../prompts/section-summary.md";
 import { reflect } from "./reflect";
 import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
@@ -1166,6 +1167,87 @@ async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request): Prom
   return json({ results, usage });
 }
 
+/** Section-summary units (FABLE/BEAR multi-granularity, arXiv:2601.18116):
+ *  the corpus's clause chunks start at depth 2 ("3.1"), so the tree has no
+ *  depth-1 nodes. This endpoint writes them: a summary of each top-level
+ *  clause generated from its child chunks' excerpts (quality-first lane,
+ *  KV-cached per unit id), embedded as toc-path ⊕ summary à la FABLE's
+ *  internal-node indexing, and upserted as a navigation node — serving
+ *  descends from it to quotable leaf clauses (pipeline.ts section
+ *  descent). Credential, batching and ledger mirror /admin/enrich. */
+async function handleSectionUnit(env: Env, ctx: ExecutionContext, req: Request): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const units = Array.isArray(body?.units) ? body.units : [];
+  if (units.length === 0 || units.length > 6) return err(400, "invalid_input", "units: 1-6 required");
+  const model = typeof env.ENRICH_MODEL === "string" && env.ENRICH_MODEL ? env.ENRICH_MODEL : MODELS.enrich;
+
+  const usage = { prompt_tokens: 0, completion_tokens: 0, requests: 0, cache_hits: 0 };
+  const results = await Promise.all(
+    units.map(async (u: any) => {
+      const m = u?.metadata ?? {};
+      if (!u?.id || typeof u?.id !== "string" || !m?.doc_id || !m?.clause_anchor || !Array.isArray(u?.children) || u.children.length === 0) {
+        return { id: u?.id ?? null, ok: false, error: "invalid unit (id, metadata.doc_id, metadata.clause_anchor, children required)" };
+      }
+      try {
+        const cacheKey = `s:${u.id}`;
+        let summary = body?.force === true ? null : await env.CACHE.get(cacheKey);
+        const cached = !!summary;
+        if (!summary) {
+          const head = `${m.docidentifier ?? m.doc_id} §${m.clause_anchor}${m.clause_title ? " — " + m.clause_title : ""}`;
+          const listing = u.children
+            .slice(0, 12)
+            .map((c: any) => `§${c.anchor ?? ""}${c.title ? " " + c.title : ""} — ${String(c.excerpt ?? "").slice(0, 260)}`)
+            .join("\n");
+          const res: any = await env.AI.run(model, {
+            messages: [
+              { role: "system", content: sectionSummaryPrompt.trimEnd() },
+              { role: "user", content: `${head}\n\nSub-clauses:\n${listing}` },
+            ],
+            max_tokens: 900,
+            reasoning_effort: "low",
+          });
+          const raw = typeof res?.response === "string" && res.response.trim() ? res.response : res?.choices?.[0]?.message?.content;
+          summary = typeof raw === "string" ? raw.trim().replace(/^["']|["']$/g, "").slice(0, 500) : "";
+          if (!summary) return { id: u.id, ok: false, error: "empty summary" };
+          if (res?.usage) {
+            usage.prompt_tokens += Number(res.usage.prompt_tokens ?? 0);
+            usage.completion_tokens += Number(res.usage.completion_tokens ?? 0);
+          }
+          usage.requests += 1;
+          ctx.waitUntil(env.CACHE.put(cacheKey, summary, { expirationTtl: 2_592_000 }));
+        } else {
+          usage.cache_hits += 1;
+        }
+        const childAnchors = u.children.map((c: any) => c.anchor).filter(Boolean).join(",");
+        const text = `§${m.clause_anchor}${m.clause_title ? " " + m.clause_title : ""} — ${summary}\nCovers: ${childAnchors}`;
+        const vectorText = `${m.docidentifier ?? m.doc_id} §${m.clause_anchor} ${text}`.slice(0, 2000);
+        const vector = await embed(env.AI, MODELS.embed, vectorText);
+        await env.VECTORIZE.upsert([
+          { id: u.id, values: vector, metadata: { ...m, chunk_text: text, section_summary: "1", child_anchors: childAnchors, ctx: "1" } },
+        ]);
+        return { id: u.id, ok: true, cached, children: u.children.length };
+      } catch (e: any) {
+        return { id: u.id, ok: false, error: String(e?.message ?? e).slice(0, 200) };
+      }
+    }),
+  );
+  const ok = results.filter((r: any) => r.ok).length;
+  console.log("section units:", ok, "/", results.length, "usage:", JSON.stringify(usage));
+  if (usage.requests > 0) {
+    ctx.waitUntil(
+      env.DB.prepare(
+        "INSERT INTO spend (day, tier, model, requests) VALUES (?1,'enrich',?2,?3) ON CONFLICT(day, tier, model) DO UPDATE SET requests = requests + ?3",
+      )
+        .bind(today(), model, usage.requests)
+        .run(),
+    );
+  }
+  return json({ results, usage });
+}
+
 
 /** RAGAS-style metric battery (G13): judge an (question, answer, passages)
  *  triple — faithfulness, answer relevancy, context precision. Driven by
@@ -1803,6 +1885,7 @@ export default {
     }
 
     if (req.method === "POST" && (path === "/admin/enrich" || path === "/v1/admin/enrich")) return handleEnrich(env, ctx, req);
+    if (req.method === "POST" && (path === "/admin/section" || path === "/v1/admin/section")) return handleSectionUnit(env, ctx, req);
     if (req.method === "POST" && (path === "/admin/vectors")) return handleVectors(env, req);
     if (req.method === "POST" && path === "/admin/caption") return handleCaption(env, req);
     // unit assets (answer contract v2): immutable, unit-keyed figure images

@@ -213,3 +213,39 @@ bonus rungs / follow-up paper): F1, F2, F3, F7, F10 (deterministic
 witnesses, exactly like L8/L9). **Build next** (serving work, not corpus
 work): F4, F5, F8. **Programme scale** (with the smart estate): F6, F9,
 F11, F12.
+
+## FABLE adaptations (structural retrieval, 2026-09-02)
+
+FABLE/BEAR (arXiv:2601.18116) retrieves over LLM-built semantic forests;
+we adapt its serving techniques to a corpus that already IS a tree —
+Metanorma clause anchors chain parent→child natively, so no index-time
+tree-builder runs at all (the paper's entire offline cost collapses to
+~1,400 synthetic depth-1 summary nodes, ≈$3 one-time). Three techniques
+ship in the serving path (`src/structural.ts`), each gated by the golden
+suite:
+
+1. **Structural propagation** (their TreeExpansion, Eq. 7): a hit's
+   score blends with its ancestors' (topic continuity) and descendants'
+   (subtopic heat) — a section whose clauses are collectively hot rises;
+   a hot section lifts its clauses. Spread-scaled like edition steering,
+   so the cross-encoder's own signal always dominates.
+2. **Position-preserving evidence order** (their NodeFusion): passages
+   are presented in document reading order per publication (publications
+   by best rank) — synthesis quality depends on arrangement, not just
+   set membership. Applied in `buildMessages`, so every consumer (ask,
+   research, lanes) inherits it.
+3. **Ancestor-descendant dedup**: near-duplicate chunks of one clause
+   chain (parent §3.1 vs child §3.1.2 repeating its text) collapse to
+   the stronger one before the window is cut.
+
+Plus the **multi-granularity index** (their internal-node indexing): the
+corpus's chunks start at depth 2 ("3.1") — depth-1 nodes ("§3") did not
+exist as retrievable objects. `/admin/section` (admin-token gated,
+mirrors `/admin/enrich`) generates, embeds (toc-path ⊕ summary style)
+and upserts them; the pipeline descends from a ranked section unit to
+its quotable child clauses and retires the synthetic summary (citations
+must quote source clauses, never our own summaries). Driver:
+`ingest/cli.py sections` (resumable — KV-cached per unit id). And the
+eval harness reports **EIR** (context utilization: cited/retrieved at
+the answer) — the precision-side counterpart to witness recall, after
+their EIR metric.

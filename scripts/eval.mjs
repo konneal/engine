@@ -73,6 +73,26 @@ async function runCase(c) {
   const citeText = cites.map((x) => `${x.docidentifier ?? ""} ${x.doc_id ?? ""}`).join(" ");
 
   const refused = isRefusal(answer); // the pinned sentence anywhere, or the drift family
+
+  // ── context utilization (EIR — FABLE/BEAR's "share of retrieved
+  // information that is actually relevant", measured at the answer: how
+  // many of the served passages the answer actually cites). Label
+  // reconstruction mirrors pipeline.ts passageLabel (language marker
+  // dropped, edition appended only when absent, garbage anchors hidden).
+  // Report-only — a retrieval-precision signal, never a gate (a
+  // fully-cited wrong answer still fails on content). ──
+  const labelOf = (c) => {
+    const id = (c.docidentifier || c.doc_id || "source").replace(/\s*\(([A-Z])\)\s*$/, "").trim();
+    const edition = c.edition && !id.includes(c.edition) ? ":" + c.edition : "";
+    const raw = String(c.clause_anchor ?? "");
+    const garbage = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(raw) || (raw.startsWith("_") && raw.length > 12);
+    const anchor = garbage || !raw ? "" : ` §${raw}`;
+    return `${id}${edition}${anchor}`;
+  };
+  const eir = !cites.length || refused
+    ? null
+    : cites.filter((c) => new RegExp(`\\[${labelOf(c).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s*:|\\])`).test(answer)).length / cites.length;
+
   if (c.expect.refusal) {
     refused ? pass("refusal (pinned or drift family)") : fail(`expected refusal, got: ${answer.slice(0, 100)}`);
   } else if (refused && c.expect.allow_refusal) {
@@ -225,6 +245,7 @@ async function runCase(c) {
     checks,
     answer: answer.slice(0, 400),
     citations: cites.map((x) => `${x.docidentifier}:${x.edition} §${x.clause_anchor}`),
+    eir,
   };
 }
 
@@ -299,9 +320,11 @@ const rate = passed / results.length;
 mkdirSync(new URL("../artifacts/", import.meta.url), { recursive: true });
 const faithScores = results.filter((r) => r.faithfulness !== undefined).map((r) => r.faithfulness);
 const avgFaith = faithScores.length ? (faithScores.reduce((a, b) => a + b, 0) / faithScores.length).toFixed(2) : null;
+const eirScores = results.filter((r) => typeof r.eir === "number").map((r) => r.eir);
+const avgEir = eirScores.length ? (eirScores.reduce((a, b) => a + b, 0) / eirScores.length).toFixed(2) : null;
 writeFileSync(
   new URL("../artifacts/eval-report.json", import.meta.url),
-  JSON.stringify({ base: BASE, at: new Date().toISOString(), passed, total: results.length, rate, avg_faithfulness: avgFaith, results }, null, 1),
+  JSON.stringify({ base: BASE, at: new Date().toISOString(), passed, total: results.length, rate, avg_faithfulness: avgFaith, avg_eir: avgEir, results }, null, 1),
 );
-console.log(`\ngolden eval: ${passed}/${results.length} (${(rate * 100).toFixed(0)}%)${avgFaith ? ` · faithfulness ${avgFaith}` : ""} — threshold ${(THRESHOLD * 100).toFixed(0)}%`);
+console.log(`\ngolden eval: ${passed}/${results.length} (${(rate * 100).toFixed(0)}%)${avgFaith ? ` · faithfulness ${avgFaith}` : ""}${avgEir ? ` · EIR ${avgEir}` : ""} — threshold ${(THRESHOLD * 100).toFixed(0)}%`);
 process.exit(rate >= THRESHOLD ? 0 : 1);

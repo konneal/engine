@@ -19,7 +19,7 @@ git fetch origin main --quiet
 echo "── guards OK: clean main at $(git rev-parse --short HEAD) ──"
 
 npm run typecheck > /dev/null && echo "── typecheck OK ──"
-node --test --experimental-strip-types tests/refs.test.ts tests/lexical.test.ts tests/anchors.test.ts > /dev/null 2>&1 \
+node --test --experimental-strip-types tests/refs.test.ts tests/lexical.test.ts tests/anchors.test.ts tests/structural.test.ts > /dev/null 2>&1 \
   && echo "── unit suites OK ──"
 
 # ── build the site ──

@@ -21,6 +21,7 @@ import { rrfFuse } from "./hybrid";
 import { lexicalPrefilter } from "./lexical";
 import { toHits } from "./lib/hit";
 import { QueryUnderstanding } from "./understand";
+import { structuralPropagation, positionOrder, ancestorDescendantDedup } from "./structural";
 
 export interface ChunkMeta {
   doc_id: string;
@@ -39,6 +40,12 @@ export interface ChunkMeta {
   /** answer contract v2: typed MKO units carry their unit id + block type */
   unit_id?: string;
   block?: string;
+  /** section-summary unit (FABLE multi-granularity, arXiv:2601.18116): a
+   *  depth-1 clause summary vector — a navigation node whose children
+   *  (child_anchors CSV) are quotable leaf clauses. The corpus's real
+   *  chunks start at depth 2, so these nodes cannot collide with them. */
+  section_summary?: string;
+  child_anchors?: string;
 }
 
 export interface Hit {
@@ -548,6 +555,14 @@ export async function retrieve(
     }
   }
 
+  // ── Structural propagation (FABLE TreeExpansion, arXiv:2601.18116) ──
+  // The corpus IS a tree: clause anchors chain parent→child, so a hit's
+  // score blends with its ancestors' (topic continuity) and descendants'
+  // (subtopic heat) — a section whose clauses are collectively hot rises,
+  // and a hot section lifts its clauses. Pure post-retrieval re-scoring
+  // over metadata the chunks already carry; no new index lane required.
+  hits = structuralPropagation(hits);
+
   // Per-publication diversity, keyed by normalized identity: overview
   // chunks are near-duplicates across editions — at most ONE per
   // publication; clause chunks get a higher cap so content can fill slots.
@@ -622,6 +637,64 @@ export async function retrieve(
       }
     }
   }
+
+  // ── Section-summary units → leaf evidence (FABLE multi-granularity) ──
+  // A depth-1 summary vector that ranked is a navigation node, not
+  // quotable evidence: fetch its top child clauses (metadata-filtered,
+  // same query vector) so the model gets source text to cite, then retire
+  // the synthetic summary — the answer contract grounds claims in source
+  // clauses, never in our own summaries. The summary stays only when no
+  // child answered (it is then the doc's sole representative).
+  const sectionHit = finalHits.find(
+    (h) => h.metadata.section_summary === "1" && h.metadata.child_anchors && h.score > 0,
+  );
+  if (sectionHit && vector) {
+    try {
+      const kids = sectionHit
+        .metadata.child_anchors!.split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 25);
+      if (kids.length) {
+        const cv = await env.VECTORIZE.query(vector, {
+          topK: 3,
+          returnMetadata: "all",
+          filter: {
+            $and: [
+              { doc_id: { $eq: sectionHit.metadata.doc_id } },
+              { clause_anchor: { $in: kids } },
+            ],
+          },
+        });
+        const childHits = (cv.matches ?? [])
+          .filter((m: any) => !m.metadata?.section_summary)
+          .map((m: any) => ({
+            id: m.id,
+            score: m.score * 0.8,
+            metadata: m.metadata as ChunkMeta,
+            text: (m.metadata?.chunk_text as string) ?? "",
+          }))
+          .filter((c: Hit) => !finalHits.some((h) => h.id === c.id))
+          .slice(0, 2);
+        if (childHits.length) {
+          finalHits = [...finalHits.filter((h) => h !== sectionHit), ...childHits];
+          console.log(
+            "section descent:",
+            sectionHit.metadata.docidentifier,
+            "§" + sectionHit.metadata.clause_anchor,
+            "→",
+            childHits.map((c: Hit) => "§" + c.metadata.clause_anchor).join(", "),
+          );
+        }
+      }
+    } catch {
+      // additive lane; primary results stand
+    }
+  }
+
+  // Same-chain near-duplicate collapse (FABLE ancestor-descendant dedup)
+  finalHits = ancestorDescendantDedup(finalHits);
+
   return { hits: finalHits, filters: filters ?? {} };
 }
 
@@ -806,7 +879,10 @@ export function buildMessages(
     const anchor = garbage || !raw ? "" : ` §${raw}`;
     return `${id}${edition}${anchor}`;
   };
-  for (const h of hits) {
+  // passages in document reading order (FABLE NodeFusion): same-doc
+  // clauses read top-to-bottom, docs by best rank — synthesis quality
+  // depends on arrangement, not just the selected set
+  for (const h of positionOrder(hits)) {
     const st = h.metadata.status === "withdrawn" || h.metadata.status === "superseded" ? ` [${h.metadata.status}]` : "";
     const label = `${passageLabel(h.metadata)}${st}`;
     // answer contract v2: typed passages declare their unit id so the

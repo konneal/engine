@@ -145,7 +145,39 @@ The measurement confirms the annealment hypothesis **with nuance**:
    lane), not a representation effect. The producer-side fix (unit-level
    vocabulary registers, metanorma-document#53 item 3) would close it.
 
-## 5. Next steps
+## 5. Independent replication: FABLE/BEAR
+
+Concurrent work reaches the same conclusion from the other direction.
+FABLE/BEAR (arXiv:2601.18116, v1 Jan 2026 "FABLE", v2 May 2026 "BEAR")
+builds LLM-constructed semantic forests and retrieves over them with
+bi-path navigation. Their ablations, on general corpora:
+
+- hierarchical node-level retrieval beats flat chunks by **+27 points**
+  at a 4K-token evidence budget;
+- LLM semantic chunking alone reaches near-optimal completeness at 4K
+  tokens where fixed-length chunking needs 128K (**64× efficiency**);
+- the full forest matches full-context Gemini-2.5-Pro with **94% fewer
+  tokens**;
+- on BrowseComp-plus, swapping only the retriever (same LLM) moved an
+  agent from rank 11 to near the top — retrieval architecture, not model
+  scale, was the binding constraint.
+
+Their stated limitation is our thesis: "FABLE requires upfront indexing
+and benefits most from semantically structured documents. Its advantages
+diminish on highly unstructured corpora." Producer-native structure
+(MKO, Primmel) is the ceiling of that benefit — the tree arrives
+authored, not inferred.
+
+**Our adaptation inverts their index-time cost.** FABLE pays an LLM to
+BUILD the hierarchy (chunk → tree → summaries) because their corpora are
+unstructured. OIML documents arrive as trees: clause anchors chain
+parent→child natively, so Metanorma publications skip the LLM tree-builder
+entirely — we only synthesize the ~1,400 missing depth-1 summary nodes
+(one-time, ≈$3, quality-first lane) and adopt three serving techniques
+(structural propagation, position-preserving ordering, ancestor-descendant
+dedup; see docs/knowledge-annealment.md "FABLE adaptations").
+
+## 6. Next steps
 
 - Index the remaining lanes (A plain, B adoc, E ablation) to complete
   the 6×10 matrix
