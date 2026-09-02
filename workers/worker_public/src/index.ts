@@ -1221,7 +1221,7 @@ async function handleSectionUnit(env: Env, ctx: ExecutionContext, req: Request):
               { role: "system", content: sectionSummaryPrompt.trimEnd() },
               { role: "user", content: `${head}\n\nSub-clauses:\n${listing}` },
             ],
-            max_tokens: 900,
+            max_tokens: 1600, // parity with the chunk-enrichment call — 900 starved ~40% of section summaries (model-card budget rule)
             reasoning_effort: "low",
           });
           const raw = typeof res?.response === "string" && res.response.trim() ? res.response : res?.choices?.[0]?.message?.content;
