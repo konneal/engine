@@ -268,8 +268,10 @@ def _run_sql(path: Path) -> None:
     fts_run_sql(path)
 
 
-def _esc(s: str) -> str:
-    return s.replace("'", "''")
+def _esc(s) -> str:
+    # bundle fields can arrive as lists (observed: two dead_load geometry
+    # constraint names) — serialize anything non-string verbatim
+    return (s if isinstance(s, str) else json.dumps(s, ensure_ascii=False)).replace("'", "''")
 
 
 def apply() -> None:
