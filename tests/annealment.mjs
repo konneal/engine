@@ -67,15 +67,18 @@ if (laneXIdx >= 0) {
       const hits = d.hits ?? [];
       const hay = hits.map((h) => `${h.docidentifier ?? ""} §${h.clause_anchor ?? ""} ${h.clause_title ?? ""} ${h.text ?? ""}`).join(" | ");
       const anchors = hits.map((h) => `§${h.clause_anchor ?? ""}`).join(" ");
+      // the witness must appear WITHIN one passage (co-occurrence spans
+      // a passage, never across hits)
+      const witnessOk = !c.witness || hits.some((h) => new RegExp(c.witness, "i").test(`${h.clause_title ?? ""} ${h.text ?? ""}`));
       const citeOk = !c.expect.citation_any || new RegExp(c.expect.citation_any, "i").test(hay);
       const anchorOk = !c.expect.anchor_any || new RegExp(c.expect.anchor_any).test(anchors);
       const artifactOk = !c.expect.artifact || hits.some((h) => h.block === c.expect.artifact);
-      const ok = citeOk && anchorOk && artifactOk;
+      const ok = witnessOk && citeOk && anchorOk && artifactOk;
       if (ok) lp++;
       byRungLane[c.rung] = byRungLane[c.rung] || { pass: 0, total: 0 };
       if (ok) byRungLane[c.rung].pass++;
       byRungLane[c.rung].total++;
-      if (!ok) console.log(`FAIL ${c.rung} ${c.id} c=${citeOk} an=${anchorOk} art=${artifactOk}`);
+      if (!ok) console.log(`FAIL ${c.rung} ${c.id} w=${witnessOk} c=${citeOk} an=${anchorOk} art=${artifactOk}`);
     } catch (e) {
       console.log("ERR", c.rung, c.id, String(e).slice(0, 80));
     }
