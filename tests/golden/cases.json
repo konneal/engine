@@ -371,7 +371,7 @@
   },
   {
     "id": "model-requirement-mpe",
-    "query": "Explain the requirement /req/metrological/mpe: what machine limit does the platform's verdict engine evaluate for it, and which clause of R 60-1 declares it?",
+    "query": "Explain the requirement /req/metrological/mpe of OIML R 60: what machine limit does the platform's verdict engine evaluate, with which units, and for which applicability?",
     "expect": {
       "answer_any": [
         "lookupMPE|p_LC"
@@ -405,7 +405,7 @@
   },
   {
     "id": "model-disagreement-posture",
-    "query": "For /req/metrological/humidity-ch: what is the maximum-load humidity effect limit, and does the model agree with the test standard's form criterion on it?",
+    "query": "For OIML R 60, /req/metrological/humidity-ch: what is the maximum-load humidity effect limit, and does the model declare a discrepancy with the prose clause?",
     "expect": {
       "answer_any": [
         "contradict|disagree|differ|conflict|however|but"
