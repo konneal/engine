@@ -27,7 +27,7 @@ for (const c of laneXIdx >= 0 ? [] : cases) {
     const answer = d.answer ?? "";
     const cites = (d.citations ?? []).map((x) => `${x.docidentifier ?? ""} §${x.clause_anchor ?? ""} ${x.snippet ?? ""}`).join(" | ");
     const blocks = d.blocks ?? [];
-    const answerOk = (c.expect.answer_any ?? []).every((r) => new RegExp(r, "i").test(answer));
+    const answerOk = !c.expect.answer_any || c.expect.answer_any.some((r) => new RegExp(r, "i").test(answer));
     const citeOk = !c.expect.citation_any || new RegExp(c.expect.citation_any).test(cites);
     const anchorOk = !c.expect.anchor_any || new RegExp(c.expect.anchor_any).test(cites);
     const artifactOk = !c.expect.artifact || blocks.some((b) => b.type === c.expect.artifact);

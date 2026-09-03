@@ -598,9 +598,14 @@ export async function retrieve(
   // per-doc diversity cap counts typed chunks against the same doc key —
   // without this guarantee the model never sees a unit id to reference.
   let finalHits = diversified.slice(0, LIMITS.rerankKeep);
-  if (filters?.doc_number) {
+  // family scope: the hard doc filter, else the understanding's family
+  // (parts/annexes match the base number — "60" covers "60-1", "60-2")
+  const pinFamily = filters?.doc_number ?? u?.doc_number ?? null;
+  if (pinFamily) {
     const sameDocTyped = (h: Hit) =>
-      !!h.metadata.unit_id && !!h.metadata.block && h.metadata.doc_number === filters.doc_number;
+      !!h.metadata.unit_id &&
+      !!h.metadata.block &&
+      (h.metadata.doc_number === pinFamily || h.metadata.doc_number?.startsWith(`${pinFamily}-`));
     {
       // the pin guarantees the BEST query-overlap typed unit a slot — not
       // merely "some" typed unit. Otherwise a doc-scoped figure question
