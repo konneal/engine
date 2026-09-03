@@ -617,12 +617,14 @@ export async function retrieve(
             score: rs ? rs[i] : m.score,
           }))
           .filter((x: any) => x.term && x.definition);
-        // one entry per DISTINCT term — the same concept is often defined
-        // by several publications and the top-2 would repeat it (observed:
-        // "maximum number of load cell verification intervals" twice, the
-        // first instance from the wrong family)
+        // one entry per DISTINCT term, and only candidates the cross-encoder
+        // actually deems relevant (score > 0) — generic near-misses
+        // ("certification" for a CASCO-vocabulary question) anchor the
+        // answer to the generic definition and crowd out the specific one.
+        // The family union below keeps ALL candidates: the typed pin has
+        // its own overlap gate.
         const byTerm = new Map<string, (typeof ranked)[number]>();
-        for (const r of ranked) if (!byTerm.has(r.term)) byTerm.set(r.term, r);
+        for (const r of ranked) if (r.score > 0 && !byTerm.has(r.term)) byTerm.set(r.term, r);
         glossary = [...byTerm.values()].sort((a, b) => b.score - a.score).slice(0, 2);
         if (glossary.length) console.log("glossary link:", glossary.map((g2) => g2.term).join(", "));
       }
