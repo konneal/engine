@@ -638,47 +638,37 @@ export async function retrieve(
   // without this guarantee the model never sees a unit id to reference.
   let finalHits = diversified.slice(0, LIMITS.rerankKeep);
   // family scope: the hard doc filter, else the understanding's family,
-  // else the vocabulary link's defining publications — chosen by SUPPORT
-  // IN THE RETRIEVAL POOL (the same concept is defined by several
-  // publications; the pool's top hits say which family this question is
-  // actually about — observed: n_LC pinned R 76-2's table while every
-  // retrieved passage was R 60)
-  const glossaryFamily = (() => {
-    if (!glossary.length) return null;
-    const support = new Map<string, number>();
-    for (const h of hits.slice(0, 10)) {
-      const dn = String(h.metadata.doc_number ?? "");
-      if (dn) support.set(dn, (support.get(dn) ?? 0) + 1);
-    }
-    const base = (dn: string) => dn.split("-")[0];
-    let best: { dn: string; s: number } | null = null;
-    for (const g of glossary) {
-      if (!g.doc_number) continue;
-      let s = 0;
-      for (const [dn, n] of support) if (base(dn) === base(g.doc_number)) s += n;
-      if (!best || s > best.s) best = { dn: g.doc_number, s };
-    }
-    return best?.dn ?? null;
-  })();
-  const pinFamily = filters?.doc_number ?? u?.doc_number ?? glossaryFamily;
-  if (pinFamily) {
-    // base-family match, both directions: producer corpora disagree on
-    // part numbering (the MKO table carries "60", the vocab concept
-    // "60-1" — same publication family, different granularity)
+  // else the UNION of the vocabulary link's candidate families — a value
+  // question can straddle families that define near-identical tables
+  // (n_LC class B = 5 000 exists in R 60-1 AND R 76-2); pickTypedChunk's
+  // overlap + top-prose-anchor scoring then picks the right table among
+  // them instead of the family choice deciding in advance
+  const glossaryFamilies = new Set<string>();
+  for (const g of glossary) if (g.doc_number) glossaryFamilies.add(g.doc_number.split("-")[0]);
+  const pinFamily = filters?.doc_number ?? u?.doc_number ?? null;
+  const pinFamilies = new Set<string>(pinFamily ? [pinFamily.split("-")[0]] : [...glossaryFamilies]);
+  if (pinFamilies.size) {
     const base = (dn?: string) => String(dn ?? "").split("-")[0];
     const sameDocTyped = (h: Hit) =>
-      !!h.metadata.unit_id && !!h.metadata.block && base(h.metadata.doc_number) === base(pinFamily);
+      !!h.metadata.unit_id && !!h.metadata.block && pinFamilies.has(base(h.metadata.doc_number));
     {
       // the pin guarantees the BEST query-overlap typed unit a slot — not
-      // merely "some" typed unit. Otherwise a doc-scoped figure question
-      // keeps an unrelated dirty-lane table (typed ⇒ pin skipped) and the
-      // figure unit never reaches the model, leaving the multimodal path
-      // and [[u:…]] references unreachable. Table-value questions are
-      // unaffected: their table wins the overlap score outright.
+      // merely "some" typed unit. Hard doc scope pins unconditionally
+      // (existing behavior); the glossary-family union (no hard scope)
+      // pins only on real query overlap — the picker always returns
+      // SOMETHING, and a near-zero-overlap table riding the window on
+      // every vocabulary-linked query would be pollution.
       const typed = pickTypedChunk(query, hits.filter(sameDocTyped), hits);
-      if (typed && !finalHits.some((h) => h.id === typed.id)) {
+      const hardScope = !!pinFamily;
+      const overlap = (() => {
+        if (!typed || hardScope) return Infinity;
+        const terms = query.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((t) => t.length > 2);
+        const hay = `${typed.metadata.clause_title ?? ""} ${typed.text}`.toLowerCase();
+        return terms.filter((t) => hay.includes(t)).length;
+      })();
+      if (typed && overlap >= 3 && !finalHits.some((h) => h.id === typed.id)) {
         finalHits = [...finalHits.slice(0, LIMITS.rerankKeep - 1), typed];
-        console.log("typed pin:", typed.metadata.docidentifier, "§", typed.metadata.clause_anchor, `(${typed.metadata.block})`);
+        console.log("typed pin:", typed.metadata.docidentifier, "§", typed.metadata.clause_anchor, `(${typed.metadata.block})${hardScope ? "" : " [glossary families]"}`);
 
         // small-to-big (the hierarchy every bundle carries): an
         // embedded object answers WITH its clause — if the parent
