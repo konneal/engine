@@ -214,7 +214,7 @@ witnesses, exactly like L8/L9). **Build next** (serving work, not corpus
 work): F4, F5, F8. **Programme scale** (with the smart estate): F6, F9,
 F11, F12.
 
-## FABLE adaptations (structural retrieval, 2026-09-02)
+## Structural retrieval (the clause tree, adapted from FABLE/BEAR, arXiv:2601.18116)
 
 FABLE/BEAR (arXiv:2601.18116) retrieves over LLM-built semantic forests;
 we adapt its serving techniques to a corpus that already IS a tree —
@@ -249,3 +249,21 @@ must quote source clauses, never our own summaries). Driver:
 eval harness reports **EIR** (context utilization: cited/retrieved at
 the answer) — the precision-side counterpart to witness recall, after
 their EIR metric.
+
+## Era 3: execution (the frontier is live)
+
+Beyond the ladder, the machine objects are EXECUTED, not retrieved:
+
+- **Verdicts** (`src/verdict.ts`): a question naming a constraint or
+  machine limit gets the check evaluated against its stated values —
+  pass / the standard's own violation word / void naming what is
+  missing — attached as data the answer must present faithfully.
+  Counterfactuals are free (values are values).
+- **Provable absence** (`/v1/absence`): an enumeration certificate
+  over the standard's model plane — absent means "N nodes enumerated,
+  0 matches", never a bare refusal.
+- **Answer verification** (`/v1/verify`): the deterministic contract
+  battery plus a judged faithfulness score, exposed for any answer.
+
+The full mechanism reference — every serving layer with its staircase
+(what the layer below cannot do) — is `docs/sota-mechanisms.md`.

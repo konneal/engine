@@ -6,23 +6,23 @@ become a vector. Producer projectors (`ingest/primmel.py`, `ingest/mko.py`,
 those dicts into the wire shape — validated, target-checked, and
 schema-locked.
 
-## Why (the incident this prevents)
+## Why one door (the failure modes it forecloses)
 
-On 2026-09-02 the lane builders were found to have hand-rolled metadata
-per script with no tie between a chunk and its TARGET index. Consequences,
-all observed in production:
+Hand-rolled per-script metadata — no tie between a chunk and its TARGET
+index — fails in four characteristic ways, each of which the adapter
+makes structurally impossible:
 
-- **1,126 lane vectors inside the production index** (200 primmel, 648
-  exp_composed, 278 exp_mko) — a lane chunk enriched through
-  `/admin/enrich`'s embed+upsert side effect landed in `env.VECTORIZE`
-  and was cited in live answers. Purged via wrangler delete-vectors;
-  inventory archived at `artifacts/production-strays-20260902.json`.
-- **Corpus vocabulary drift** — `primmel` vs `exp_primmel`, edition
-  `"2021"` vs `"2"` between builds of one lane.
-- **Producer UUID anchors reaching citations** (`§_eb46a3a3-…`) — hidden
-  at citation time in serving, never fixed at the source.
-- **Wire-time size failures** — VECTOR_UPSERT_ERROR 40016/40017 (metadata
-  > 10KB, oversized chunk_text) discovered only at the upsert call.
+- **cross-index contamination** — a chunk written to an index its corpus
+  does not belong to (target gating refuses at adapt time and payload
+  time);
+- **corpus vocabulary drift** — the same corpus under different names,
+  or edition values in inconsistent forms (the registry and the schema
+  are the single source of truth);
+- **unciteable anchors** — producer UUID anchors reaching citations
+  (stripped at build time; serving hides any that remain as defense in
+  depth);
+- **wire-time size failures** — metadata over the index limit,
+  discovered only at the upsert call (validated before any wire call).
 
 ## The contract
 
@@ -50,7 +50,7 @@ Validators (build-time, before any wire call):
 - **wire size** — serialized metadata ≤ 9,000 bytes (Vectorize hard limit
   10KB).
 
-### Target gating — the structural incident guard
+### Target gating — the structural guard
 
 `TARGET_CORPORA` maps every index to the corpora it may hold:
 
