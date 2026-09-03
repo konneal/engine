@@ -662,10 +662,12 @@ export async function retrieve(
   })();
   const pinFamily = filters?.doc_number ?? u?.doc_number ?? glossaryFamily;
   if (pinFamily) {
+    // base-family match, both directions: producer corpora disagree on
+    // part numbering (the MKO table carries "60", the vocab concept
+    // "60-1" — same publication family, different granularity)
+    const base = (dn?: string) => String(dn ?? "").split("-")[0];
     const sameDocTyped = (h: Hit) =>
-      !!h.metadata.unit_id &&
-      !!h.metadata.block &&
-      (h.metadata.doc_number === pinFamily || h.metadata.doc_number?.startsWith(`${pinFamily}-`));
+      !!h.metadata.unit_id && !!h.metadata.block && base(h.metadata.doc_number) === base(pinFamily);
     {
       // the pin guarantees the BEST query-overlap typed unit a slot — not
       // merely "some" typed unit. Otherwise a doc-scoped figure question
