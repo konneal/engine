@@ -1840,7 +1840,8 @@ export default {
         if (!key) return err(401, "unauthorized", "Provide a valid API key.");
       }
       const body = await readJson(req);
-      const standard = standardForDocNumber(String(body?.standard ?? body?.query ?? ""));
+      const namedStd = namedDocumentIn(String(body?.standard ?? ""));
+      const standard = standardForDocNumber(namedStd?.doc_number ?? String(body?.standard ?? "").trim());
       const topic = String(body?.topic ?? "").trim().toLowerCase();
       if (!standard || !topic) return err(400, "invalid_input", "standard (e.g. \"R 60\") and topic are required");
       try {
