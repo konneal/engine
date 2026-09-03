@@ -203,7 +203,21 @@ entirely — we only synthesize the ~1,400 missing depth-1 summary nodes
 (structural propagation, position-preserving ordering, ancestor-descendant
 dedup; see docs/knowledge-annealment.md "FABLE adaptations").
 
-## 6. Next steps
+## 6. Beyond the matrix: the frontier is executable
+
+The matrix's ceiling is retrieval. The same model objects that win L8
+are machine-checkable, so the serving system now EXECUTES them: a
+question naming a constraint is evaluated deterministically (verdict,
+the standard's own violation word, the arithmetic shown — attached as
+data, never generated prose), hypothetical values evaluate the same way,
+absence over a standard's model plane returns an enumeration certificate
+rather than a refusal, and any answer is checkable against the corpus
+(verbatim-quote containment, object-reference resolution, judged
+faithfulness). These capabilities exist because the corpus is a model;
+no text representation can follow them at any scale — the frontier the
+ladder points at, now live.
+
+## 7. Next steps
 
 - Index the remaining lanes (A plain, B adoc, E ablation) to complete
   the 6×10 matrix
