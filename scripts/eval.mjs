@@ -110,6 +110,15 @@ async function runCase(c) {
   if (c.expect.citation_any) {
     (cites.length && re(c.expect.citation_any).test(citeText)) ? pass(`citation ~/${c.expect.citation_any}/`) : fail(`no citation matching /${c.expect.citation_any}/ (got: ${citeText.slice(0, 120)})`);
   }
+  // ── the verdict-engine legs (TODO.era3/01): a server-computed verdict
+  // block must ride the response with the expected verdict ──
+  if (c.expect.block_verdict) {
+    const blocks = body.blocks ?? [];
+    const vb = blocks.find((b) => b.type === "verdict");
+    vb && vb.payload?.verdict === c.expect.block_verdict
+      ? pass(`verdict block: ${c.expect.block_verdict}`)
+      : fail(`no verdict block with verdict "${c.expect.block_verdict}" (blocks: ${JSON.stringify(blocks.map((b) => `${b.type}:${b.payload?.verdict ?? ""}`)).slice(0, 120)})`);
+  }
   if (c.expect.citation_all) {
     cites.length && cites.every((x) => re(c.expect.citation_all).test(`${x.docidentifier ?? ""} ${x.doc_id ?? ""}`))
       ? pass(`all citations ~/${c.expect.citation_all}/`)

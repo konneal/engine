@@ -448,5 +448,16 @@
       "model_absent": true,
       "allow_refusal": true
     }
+  },
+  {
+    "id": "verdict-dead-load-geometry",
+    "query": "For OIML R 60, /constraint/dead_load_max_geometry: for a load cell with E_max 30000 v, the lab proposes testing to D_max 26000 v — is the dead-load maximum geometry valid?",
+    "expect": {
+      "answer_any": [
+        "void|invalid|fail|violat"
+      ],
+      "block_verdict": "fail",
+      "citation_any": "R ?60"
+    }
   }
 ]

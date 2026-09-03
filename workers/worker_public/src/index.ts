@@ -21,6 +21,7 @@ import { contractV2, tableRetyped } from "./refs";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
 import { bindModelNode, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
+import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { rawSessionToken } from "./session";
 
@@ -766,6 +767,27 @@ async function handleAsk(
     console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause");
   }
   const modelNote = boundModel ? modelGroundingBlock(boundModel) : undefined;
+  // ── the verdict engine (TODO.era3/01) ──
+  // the worker EXECUTES the bound node's machine checks against the
+  // question's stated values; the model narrates the computed verdict
+  // and the verdict BLOCK is server-built — data, never generated prose
+  const machineVerdict = boundModel ? machineEvaluate(boundModel.content, q.query) : null;
+  const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : undefined;
+  const verdictBlock = machineVerdict
+    ? {
+        unit_id: boundModel!.node_id,
+        type: "verdict",
+        docidentifier: `OIML SMART model (${boundModel!.standard})`,
+        payload: {
+          verdict: machineVerdict.verdict,
+          on_violation: machineVerdict.on_violation,
+          violation_meaning: machineVerdict.violation_meaning,
+          missing: machineVerdict.missing,
+          checks: machineVerdict.checks,
+        },
+      }
+    : null;
+  if (machineVerdict) console.log("verdict engine:", boundModel!.node_id, "→", machineVerdict.verdict.toUpperCase(), machineVerdict.missing.length ? `(missing ${machineVerdict.missing.join(",")})` : "");
   try {
     const tR = Date.now();
     // ── The "my account" live read (TODO.ai-platform/03) — resolved
@@ -875,7 +897,7 @@ async function handleAsk(
     hits,
     q.lang,
     keptHistory,
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, machineNote].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
@@ -925,7 +947,7 @@ async function handleAsk(
           const c2 = canonical0.includes(REFUSAL_ANSWER)
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
             : await contractV2(env.DB, canonical0, usedHits);
-          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2.blocks, context_applied: ctxApplied });
+          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: verdictBlock ? [...c2.blocks, verdictBlock] : c2.blocks, context_applied: ctxApplied });
           telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang);
           const canonical = c2.text;
           // streamed answers can't be regenerated mid-flight; enforcement
@@ -1045,7 +1067,7 @@ async function handleAsk(
   if (finalAnchors.violations.length > 0) {
     console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified — not caching");
   }
-  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: c2ns.blocks, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: verdictBlock ? [...c2ns.blocks, verdictBlock] : c2ns.blocks, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
@@ -1809,6 +1831,77 @@ export default {
     // comparison lane query (TODO.model-rag): direct retrieval against a
     // comparison index, bypassing the full ask pipeline — for the annealment
     // runner and the /compare demo
+    // ── Provable absence (TODO.era3/02): deterministic enumeration proof ──
+    if (req.method === "POST" && (path === "/api/absence" || path === "/v1/absence")) {
+      const isApi = path.startsWith("/v1/");
+      let key: ApiKey | null = null;
+      if (isApi) {
+        key = await authenticate(env, req);
+        if (!key) return err(401, "unauthorized", "Provide a valid API key.");
+      }
+      const body = await readJson(req);
+      const standard = standardForDocNumber(String(body?.standard ?? body?.query ?? ""));
+      const topic = String(body?.topic ?? "").trim().toLowerCase();
+      if (!standard || !topic) return err(400, "invalid_input", "standard (e.g. \"R 60\") and topic are required");
+      try {
+        const nodes = (await env.DB.prepare("SELECT node_id, kind, name, content FROM model_nodes WHERE standard = ?1").bind(standard).all()).results ?? [];
+        const tokens = topic.split(/\s+/).filter((t: string) => t.length > 2);
+        const matches: unknown[] = [];
+        for (const n of nodes as any[]) {
+          const hay = `${n.name ?? ""} ${n.content ?? ""}`.toLowerCase();
+          if (tokens.some((t: string) => hay.includes(t))) {
+            matches.push({ node_id: n.node_id, kind: n.kind });
+          }
+        }
+        const chunks = (await env.DB.prepare("SELECT COUNT(*) AS n FROM chunks WHERE corpus = 'smart-model' AND (docidentifier LIKE ?1 OR doc_id LIKE ?2)").bind(`%${body?.standard}%`, `%${body?.standard}%`).first()) as any;
+        return json({
+          standard,
+          topic,
+          enumerated: { model_nodes: nodes.length, smart_model_chunks: chunks?.n ?? 0 },
+          matches: matches.slice(0, 20),
+          verdict: matches.length === 0 ? "absent" : "present",
+          scope: `the model plane of ${standard} (all model nodes) — the enumeration is exhaustive over that scope; prose outside the modeled families is not claimed`,
+        });
+      } catch (e) {
+        return err(502, "absence_failed", String(e).slice(0, 200));
+      }
+    }
+
+    // ── Self-verification (TODO.era3/03): the deterministic battery, exposed ──
+    if (req.method === "POST" && (path === "/api/verify" || path === "/v1/verify")) {
+      const isApi = path.startsWith("/v1/");
+      let key: ApiKey | null = null;
+      if (isApi) {
+        key = await authenticate(env, req);
+        if (!key) return err(401, "unauthorized", "Provide a valid API key.");
+      }
+      const body = await readJson(req);
+      const answer = typeof body?.answer === "string" ? body.answer : "";
+      const query = typeof body?.query === "string" ? body.query.trim() : "";
+      if (!answer || !query) return err(400, "invalid_input", "answer and query are required");
+      try {
+        const u = await understandQuery(env.AI, MODELS.understand, query, [], []);
+        const retrieved = await retrieve(env, query, { understanding: u });
+        const passages = retrieved.hits.map((h: Hit) => h.text);
+        const anchors = checkQuoteAnchors(answer, passages);
+        const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);
+        const validRefs = refs.filter((r) => retrieved.hits.some((h: Hit) => h.metadata.unit_id === r));
+        const checks = [
+          { name: "quote_anchors", deterministic: true, pass: anchors.violations.length === 0, detail: `${anchors.violations.length} of ${anchors.total} quoted spans absent from the retrieved passages` },
+          { name: "unit_references", deterministic: true, pass: refs.length === validRefs.length, detail: refs.length ? `${validRefs.length}/${refs.length} unit references resolve to served units` : "no unit references" },
+          { name: "citations_present", deterministic: true, pass: /\[[^\]]*(OIML|ISO)[^\]]*\]/.test(answer), detail: "normative claims should carry a passage citation" },
+        ];
+        const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h: Hit) => h.text));
+        return json({
+          checks,
+          judged: faith ? { name: "faithfulness", deterministic: false, score: faith.score, ungrounded_claims: faith.ungrounded_claims.slice(0, 5) } : null,
+          passages_used: retrieved.hits.length,
+        });
+      } catch (e) {
+        return err(502, "verify_failed", String(e).slice(0, 200));
+      }
+    }
+
     if (req.method === "POST" && (path === "/api/lane" || path === "/v1/lane")) {
       const isApi = path.startsWith("/v1/");
       let key: ApiKey | null = null;
