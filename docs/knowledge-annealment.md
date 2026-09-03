@@ -208,11 +208,11 @@ data source for downstream systems.
 
 ## Frontier sequencing
 
-**Measurable NOW with existing objects** (fold into the comparison as
-bonus rungs / follow-up paper): F1, F2, F3, F7, F10 (deterministic
-witnesses, exactly like L8/L9). **Build next** (serving work, not corpus
-work): F4, F5, F8. **Programme scale** (with the smart estate): F6, F9,
-F11, F12.
+**LIVE** (serving the public today): F1 verdicts, F2 counterfactuals, F3
+provable absence, F8 answer verification. **Within reach of the current
+model plane** (deterministic witnesses, no producer dependency): F7
+edition diffs, F10 note overrides. **Programme scale** (instance
+execution and estate data): F4, F5, F6, F9, F11, F12.
 
 ## Structural retrieval (the clause tree, adapted from FABLE/BEAR, arXiv:2601.18116)
 

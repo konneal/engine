@@ -191,6 +191,21 @@ mechanical post-generation verification of every answer (quote anchors,
 unit references, retyped-table detection) with a faithfulness judge that
 sees the passages actually used.
 
+Two structural additions complete the retrieval story. First, the
+corpus is a tree — every chunk carries its clause anchor — and the
+serving path uses the tree: a hit's score blends its neighbouring
+clauses' scores, evidence is presented to the answer model in document
+reading order, and a ranked section summary resolves to its quotable
+child clauses (adapted from FABLE/BEAR, ref 7, at none of its index-time
+cost, because Metanorma documents arrive as trees rather than needing
+one inferred). Second, everyday words rarely match defined terms — the
+one gap that failed for every corpus representation equally — so a
+terminology index of the corpus's defined concepts links a question's
+phrasing to candidate terms, and the answer model adjudicates and leads
+with the corpus's own term, quoting its definition ("my output keeps
+drifting" resolves to *span stability*, with the verbatim definition and
+its defining clause cited).
+
 ## 5. Editions and trust
 
 Which edition applies is as consequential as what it says. The service's
@@ -227,6 +242,21 @@ interface renders the exact object. Small verbatim values in prose are
 permitted and mechanically verified against the source. The payload
 never passes through the model's output, so it cannot be corrupted by
 generation.
+
+The same principle extends from rendering to judgment: the model never
+judges what a machine can compute. Where the corpus's machine-readable
+models carry checkable objects — a constraint with an OCL expression, a
+requirement with a threshold limit — a question naming one gets it
+EXECUTED: the question's values bind to the rule's own parameters, the
+check evaluates deterministically, and the verdict (pass, or the
+standard's own violation word, with the arithmetic shown, or void naming
+exactly what is missing) is attached to the answer as computed data.
+Two sibling capabilities complete the set: provable absence (a topic
+that a standard does not constrain returns an enumeration certificate
+over its entire model plane — N nodes enumerated, zero matches — rather
+than a refusal) and answer verification (any answer checkable against
+the corpus: verbatim-quote containment, object-reference resolution, a
+judged faithfulness score labeled as judged).
 
 <Figure
   id="fig-contract"
