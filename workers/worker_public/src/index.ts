@@ -868,7 +868,7 @@ async function handleAsk(
   const vocabNote = retrieved.glossary?.length
     ? "Vocabulary binding — defined terms in the indexed corpus that may name this question's subject:\n" +
       retrieved.glossary.map((g) => `- ${g.term} (${g.docidentifier}): ${g.definition}`).join("\n") +
-      "\nIf one of these names what the question describes, answer with that defined term and cite its defining publication."
+      "\nIf the question describes a symptom or behavior in everyday words, OPEN the answer by naming the matching defined term, quote its definition, and cite its defining publication; keep using that term throughout."
     : undefined;
   const { messages, usedHits } = buildMessages(
     q.query,

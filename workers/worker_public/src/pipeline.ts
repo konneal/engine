@@ -63,7 +63,7 @@ export interface Retrieved {
    *  candidates for the question's subject — the answer model adjudicates
    *  among them (dense retrieval alone binds everyday words to the wrong
    *  term: measured "keeps drifting" → creep 0.69 vs durability 0.54) */
-  glossary?: { term: string; definition: string; docidentifier: string; score: number }[];
+  glossary?: { term: string; definition: string; docidentifier: string; doc_number: string; score: number }[];
 }
 
 // Short follow-ups are usually elliptical ("and the limits?") — fold the
@@ -592,15 +592,55 @@ export async function retrieve(
     if (diversified.length >= LIMITS.rerankKeep + 2) break;
   }
 
+  // ── Vocabulary link (the L2 nomenclature bridge) ──
+  // Everyday words don't match defined terms — the one gap every
+  // comparison lane fails. Dense candidates + cross-encoder rerank, and
+  // the ANSWER model adjudicates among the top-2 (the entity-linking
+  // pattern: retrieval proposes, generation disambiguates — naive top-1
+  // dense binding picks the wrong term). Runs BEFORE the typed pin: the
+  // candidates' defining publications also anchor the pin's family (a
+  // term question names the family even when the question text doesn't).
+  let glossary: NonNullable<Retrieved["glossary"]> = [];
+  if (env.GLOSSARY && vector) {
+    try {
+      const g = await env.GLOSSARY.query(vector, { topK: 5, returnMetadata: "all" });
+      const cands = (g.matches ?? []).filter((m: any) => m.score >= 0.5);
+      if (cands.length) {
+        const texts = cands.map((m: any) => String(m.metadata?.chunk_text ?? ""));
+        const rs = await rerank(env.AI, MODELS.rerank, query, texts);
+        const ranked = cands
+          .map((m: any, i: number) => ({ m, r: rs ? rs[i] : m.score }))
+          .sort((a: any, b: any) => b.r - a.r)
+          .slice(0, 2);
+        glossary = ranked
+          .map(({ m, r }: any) => ({
+            term: String(m.metadata?.clause_title ?? "").trim(),
+            definition: String(m.metadata?.chunk_text ?? "").split(" — ").slice(1).join(" — ").slice(0, 300),
+            docidentifier: String(m.metadata?.docidentifier ?? ""),
+            doc_number: String(m.metadata?.doc_number ?? ""),
+            score: r,
+          }))
+          .filter((x: any) => x.term && x.definition);
+        if (glossary.length) console.log("glossary link:", glossary.map((g2) => g2.term).join(", "));
+      }
+    } catch {
+      // additive lane; primary results stand
+    }
+  }
+
   // answer contract v2 — typed-chunk pin (FINAL position): doc-scoped
   // queries get ONE typed unit chunk (table first) guaranteed a slot.
   // Prose outranks serialized tables under the cross-encoder AND the
   // per-doc diversity cap counts typed chunks against the same doc key —
   // without this guarantee the model never sees a unit id to reference.
   let finalHits = diversified.slice(0, LIMITS.rerankKeep);
-  // family scope: the hard doc filter, else the understanding's family
-  // (parts/annexes match the base number — "60" covers "60-1", "60-2")
-  const pinFamily = filters?.doc_number ?? u?.doc_number ?? null;
+  // family scope: the hard doc filter, else the understanding's family,
+  // else the vocabulary link's defining publications (a term question
+  // names the family even when the question text doesn't)
+  const glossaryFamily = glossary.length
+    ? glossary.find((g) => g.doc_number)?.doc_number ?? null
+    : null;
+  const pinFamily = filters?.doc_number ?? u?.doc_number ?? glossaryFamily;
   if (pinFamily) {
     const sameDocTyped = (h: Hit) =>
       !!h.metadata.unit_id &&
@@ -704,39 +744,6 @@ export async function retrieve(
 
   // Same-chain near-duplicate collapse (FABLE ancestor-descendant dedup)
   finalHits = ancestorDescendantDedup(finalHits);
-
-  // ── Vocabulary link (the L2 nomenclature bridge) ──
-  // Everyday words don't match defined terms — the one gap every
-  // comparison lane fails. Dense candidates + cross-encoder rerank, and
-  // the ANSWER model adjudicates among the top-2 (the entity-linking
-  // pattern: retrieval proposes, generation disambiguates — naive top-1
-  // dense binding picks the wrong term).
-  let glossary: Retrieved["glossary"] = [];
-  if (env.GLOSSARY && vector) {
-    try {
-      const g = await env.GLOSSARY.query(vector, { topK: 5, returnMetadata: "all" });
-      const cands = (g.matches ?? []).filter((m: any) => m.score >= 0.5);
-      if (cands.length) {
-        const texts = cands.map((m: any) => String(m.metadata?.chunk_text ?? ""));
-        const rs = await rerank(env.AI, MODELS.rerank, query, texts);
-        const ranked = cands
-          .map((m: any, i: number) => ({ m, r: rs ? rs[i] : m.score }))
-          .sort((a: any, b: any) => b.r - a.r)
-          .slice(0, 2);
-        glossary = ranked
-          .map(({ m, r }: any) => ({
-            term: String(m.metadata?.clause_title ?? "").trim(),
-            definition: String(m.metadata?.chunk_text ?? "").split(" — ").slice(1).join(" — ").slice(0, 300),
-            docidentifier: String(m.metadata?.docidentifier ?? ""),
-            score: r,
-          }))
-          .filter((x: any) => x.term && x.definition);
-        if (glossary!.length) console.log("glossary link:", glossary!.map((g2) => g2.term).join(", "));
-      }
-    } catch {
-      // additive lane; primary results stand
-    }
-  }
 
   return { hits: finalHits, filters: filters ?? {}, ...(glossary?.length ? { glossary } : {}) };
 }
