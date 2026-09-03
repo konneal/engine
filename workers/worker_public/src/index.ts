@@ -972,17 +972,30 @@ async function handleAsk(
     const anchors = checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
     const hasTableUnit = used.some((h: Hit) => h.metadata.unit_id && h.metadata.block === "table");
     const retyped = tableRetyped(answer, hasTableUnit);
-    if (anchors.violations.length > 0 || retyped) {
-      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "— regenerating");
-      const note = retyped
-        ? "Correction notice: your draft reproduced a table as markdown although a typed table unit was available. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:<unit id>]] from the passage header where the table belongs. Do not render any table as markdown."
+    // presenting a served table's DATA without its unit reference is the
+    // same contract violation as retyping it — the HARD RULE wants the
+    // token wherever the table's values carry the answer
+    const unreferenced = (() => {
+      if (!hasTableUnit || answer.includes("[[u:")) return false;
+      const norm = (s: string) => (s.match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, ""));
+      const nums = norm(answer);
+      if (nums.length < 2) return false;
+      const tableNums = new Set(
+        norm(used.filter((h: Hit) => h.metadata.unit_id && h.metadata.block === "table").map((h: Hit) => h.text).join(" ")),
+      );
+      return nums.filter((n) => tableNums.has(n)).length >= 2;
+    })();
+    if (anchors.violations.length > 0 || retyped || unreferenced) {
+      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "— regenerating");
+      const note = retyped || unreferenced
+        ? "Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:<unit id>]] from the passage header where the table belongs. Do not render any table as markdown."
         : ANCHOR_CORRECTION_NOTE;
       const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }]);
       if (corrected) {
         const correctedAnswer = canonicalRefusal(corrected);
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
         const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
-        if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped)) {
+        if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped) || (unreferenced && correctedAnswer.includes("[[u:"))) {
           answer = correctedAnswer;
         }
       }
