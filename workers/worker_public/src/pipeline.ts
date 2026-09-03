@@ -609,18 +609,21 @@ export async function retrieve(
         const texts = cands.map((m: any) => String(m.metadata?.chunk_text ?? ""));
         const rs = await rerank(env.AI, MODELS.rerank, query, texts);
         const ranked = cands
-          .map((m: any, i: number) => ({ m, r: rs ? rs[i] : m.score }))
-          .sort((a: any, b: any) => b.r - a.r)
-          .slice(0, 2);
-        glossary = ranked
-          .map(({ m, r }: any) => ({
+          .map((m: any, i: number) => ({
             term: String(m.metadata?.clause_title ?? "").trim(),
             definition: String(m.metadata?.chunk_text ?? "").split(" — ").slice(1).join(" — ").slice(0, 300),
             docidentifier: String(m.metadata?.docidentifier ?? ""),
             doc_number: String(m.metadata?.doc_number ?? ""),
-            score: r,
+            score: rs ? rs[i] : m.score,
           }))
           .filter((x: any) => x.term && x.definition);
+        // one entry per DISTINCT term — the same concept is often defined
+        // by several publications and the top-2 would repeat it (observed:
+        // "maximum number of load cell verification intervals" twice, the
+        // first instance from the wrong family)
+        const byTerm = new Map<string, (typeof ranked)[number]>();
+        for (const r of ranked) if (!byTerm.has(r.term)) byTerm.set(r.term, r);
+        glossary = [...byTerm.values()].sort((a, b) => b.score - a.score).slice(0, 2);
         if (glossary.length) console.log("glossary link:", glossary.map((g2) => g2.term).join(", "));
       }
     } catch {
@@ -635,11 +638,28 @@ export async function retrieve(
   // without this guarantee the model never sees a unit id to reference.
   let finalHits = diversified.slice(0, LIMITS.rerankKeep);
   // family scope: the hard doc filter, else the understanding's family,
-  // else the vocabulary link's defining publications (a term question
-  // names the family even when the question text doesn't)
-  const glossaryFamily = glossary.length
-    ? glossary.find((g) => g.doc_number)?.doc_number ?? null
-    : null;
+  // else the vocabulary link's defining publications — chosen by SUPPORT
+  // IN THE RETRIEVAL POOL (the same concept is defined by several
+  // publications; the pool's top hits say which family this question is
+  // actually about — observed: n_LC pinned R 76-2's table while every
+  // retrieved passage was R 60)
+  const glossaryFamily = (() => {
+    if (!glossary.length) return null;
+    const support = new Map<string, number>();
+    for (const h of hits.slice(0, 10)) {
+      const dn = String(h.metadata.doc_number ?? "");
+      if (dn) support.set(dn, (support.get(dn) ?? 0) + 1);
+    }
+    const base = (dn: string) => dn.split("-")[0];
+    let best: { dn: string; s: number } | null = null;
+    for (const g of glossary) {
+      if (!g.doc_number) continue;
+      let s = 0;
+      for (const [dn, n] of support) if (base(dn) === base(g.doc_number)) s += n;
+      if (!best || s > best.s) best = { dn: g.doc_number, s };
+    }
+    return best?.dn ?? null;
+  })();
   const pinFamily = filters?.doc_number ?? u?.doc_number ?? glossaryFamily;
   if (pinFamily) {
     const sameDocTyped = (h: Hit) =>
