@@ -135,8 +135,9 @@ def build(corpus_filter: str | None, limit: int | None) -> None:
     ARTIFACTS.mkdir(exist_ok=True)
     corpora = ["clean", "dirty"] if corpus_filter in (None, "all") else [corpus_filter]
     docs = []
+    language_excluded: list = []
     for corpus in corpora:
-        loaded = load_corpus(corpus)
+        loaded = load_corpus(corpus, excluded_out=language_excluded)
         print(f"{corpus}: parsed {len(loaded)} docs")
         docs.extend(loaded)
 
@@ -174,6 +175,10 @@ def build(corpus_filter: str | None, limit: int | None) -> None:
         "docs_indexable": len(indexable),
         "docs_dropped_precedence": len(dropped),
         "shells": [d.doc_id for d in shells],
+        # issue #72: whole editions excluded from the EN index by content
+        # language verification (the checked-in list is
+        # ingest/corpus-exclusions.yaml — keep it current)
+        "language_excluded": [c.model_dump() for c in language_excluded],
         "chunks": len(chunks),
         "family_chunks": len(family_chunks),
         "by_language": {},
@@ -183,7 +188,12 @@ def build(corpus_filter: str | None, limit: int | None) -> None:
         report["by_language"][d.language] = report["by_language"].get(d.language, 0) + 1
         report["by_doctype"][d.doctype or "?"] = report["by_doctype"].get(d.doctype or "?", 0) + 1
     (ARTIFACTS / "report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
-    print(json.dumps({k: v for k, v in report.items() if k not in ("shells",)}, indent=1))
+    print(json.dumps({k: v for k, v in report.items() if k not in ("shells", "language_excluded")}, indent=1))
+    if language_excluded:
+        print(f"  ! {len(language_excluded)} non-EN edition(s) excluded from the EN index (issue #72):")
+        for c in language_excluded:
+            origin = "exclusion list" if c.listed else "NEW DETECTION — add it to ingest/corpus-exclusions.yaml"
+            print(f"    - {c.doc_id}: declared {c.declared}, content {c.detected} [{origin}]")
     print(f"wrote {CHUNKS_PATH} ({len(chunks)} chunks)")
 
 def embed(limit: int | None) -> None:

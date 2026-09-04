@@ -7,6 +7,7 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 
 from .config import CLEAN_DIR, DIRTY_DIR, INGEST_LANGUAGES, SHELL_WORD_THRESHOLD
+from .langid import check_doc_language, load_exclusions
 from .status import status_for
 from .models import DocRecord, Section
 
@@ -29,7 +30,7 @@ LANG_FROM_SLUG = [
     ("-ara", "ar"), ("-ar", "ar"),
     ("-fra", "fr"), ("-fr", "fr"), ("-f", "fr"),
     ("-ger", "de"), ("-deu", "de"), ("-de", "de"), ("-d", "de"),
-    ("-esp", "es"), ("-es", "es"),
+    ("-esp", "es"), ("-spa", "es"), ("-es", "es"),
     ("-per", "fa"), ("-fas", "fa"), ("-fa", "fa"),
     ("-ukr", "uk"), ("-uk", "uk"),
     ("-srp", "sr"), ("-sr", "sr"),
@@ -380,11 +381,20 @@ def parse_doc(doc_root: Path, corpus: str, slug: str, ident_override: str | None
     )
 
 
-def load_corpus(corpus: str) -> list[DocRecord]:
+def load_corpus(corpus: str, excluded_out: list | None = None) -> list[DocRecord]:
+    """Parse one corpus into DocRecords, applying the EN-only gate.
+
+    The declared language is source metadata and lies (issue #72: R 79:2015
+    ES declares :language: en), so EN-declared documents are verified
+    against their content (ingest/langid.py); a confident non-EN verdict —
+    or a checked-in entry on ingest/corpus-exclusions.yaml — excludes the
+    WHOLE edition. `excluded_out`, when passed, collects the LanguageCheck
+    verdicts for the build report."""
     root = CLEAN_DIR if corpus == "clean" else DIRTY_DIR
     docs: list[DocRecord] = []
     if not root.is_dir():
         return docs
+    exclusions = load_exclusions()
     for doc_root in sorted(root.iterdir()):
         if not doc_root.is_dir() or doc_root.name.startswith("."):
             continue
@@ -405,6 +415,15 @@ def load_corpus(corpus: str) -> list[DocRecord]:
             except Exception as e:  # noqa: BLE001 — one bad doc must not stop the run
                 print(f"  ! parse error {slug}: {e}")
                 continue
+            if rec:
+                check = check_doc_language(rec, exclusions)
+                if check.excluded:
+                    if excluded_out is not None:
+                        excluded_out.append(check)
+                    origin = "on the exclusion list" if check.listed else "DETECTED — record it in ingest/corpus-exclusions.yaml"
+                    print(f"  ! non-EN edition excluded {rec.doc_id} ({rec.docidentifier} {rec.edition}): "
+                          f"declared {check.declared}, content {check.detected} [{origin}] {check.evidence}")
+                    continue
             if rec and rec.language in INGEST_LANGUAGES:
                 docs.append(rec)
     return docs

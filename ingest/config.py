@@ -52,4 +52,7 @@ SHELL_WORD_THRESHOLD = 100
 # English-only index (2026-08-24 user directive): multilingual chunks made
 # follow-up questions retrieve unrelated content; non-English documents
 # are excluded at ingest. Output language stays a serving-time concern.
+# The declared language is verified against the content (ingest/langid.py,
+# issue #72); whole-edition exclusions are recorded with evidence in
+# ingest/corpus-exclusions.yaml.
 INGEST_LANGUAGES = {"en"}

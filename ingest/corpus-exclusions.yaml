@@ -1,0 +1,40 @@
+# EN-only corpus (2026-08-24 directive) — whole-edition exclusions (issue #72).
+#
+# Every edition whose CONTENT is not English is excluded from the EN index,
+# and the exclusion is recorded here with its evidence. The ingest verifier
+# (ingest/langid.py) derives the actual language from the content — source
+# metadata lies (both entries below declare :language: en) — and a
+# checked-in entry wins over an inconclusive sample. Exclusion is
+# whole-edition, never per-chunk: the official French/Spanish annexes
+# inside EN editions (R 76:2006 sec 17) stay.
+#
+# Entry shape: doc_id (the ingest identity, corpus:slug — identifier+year
+# alone cannot tell the ES 2015 edition from the EN one), the identifier as
+# the source (mis)declared it, declared vs detected language, the detection
+# evidence, and the date.
+exclusions:
+  - doc_id: "dirty:r79-2015-spa"
+    docidentifier: "OIML R 79:2015 (E)"
+    edition: "2015"
+    declared_language: en
+    detected_language: es
+    evidence: >-
+      The whole edition is the Spanish text served as EN (sec 3.11
+      'producto' surfaced against English queries; it also poisoned
+      family-relative edition steering against the legitimate R 79:1997 EN
+      chunks). Stopword hits over 3493 sampled body words
+      (verify/document.html): es=787, fr=339, en=36.
+    detected_on: "2026-08-31"
+    reference: "oimlsmart/rag#72"
+  - doc_id: "dirty:r144-2013-e"
+    docidentifier: "OIML R 144-1:2013 (E)"
+    edition: "2013"
+    declared_language: en
+    detected_language: fr
+    evidence: >-
+      Header declares :language: en with an (E) identifier, but the body is
+      French ('Le dispositif d'ajustage de mise à zéro doit…', clause 6.3).
+      Stopword hits over 4573 sampled body words (verify/document.html):
+      fr=786, es=374, en=240.
+    detected_on: "2026-09-04"
+    reference: "oimlsmart/rag#72"

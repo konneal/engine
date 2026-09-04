@@ -30,6 +30,8 @@ from ingest.mko import (  # noqa: E402
     to_graph_sql,
     to_payload_sql,
 )
+from ingest.langid import check_doc_language, load_exclusions, normalize_language  # noqa: E402
+from ingest.config import INGEST_LANGUAGES  # noqa: E402
 
 ARTIFACTS = Path(__file__).resolve().parents[1] / "artifacts"
 
@@ -51,11 +53,22 @@ def main(argv: list[str]) -> int:
     # the gated pipeline fails loudly. Resilience is throughput, never a
     # way to hide defects.
     skipped: list[tuple[str, str]] = []
+    exclusions = load_exclusions()
     for raw in argv:
         bundle_path = Path(raw).expanduser()
         try:
             bundle = MkoBundle(bundle_path)
             doc = to_doc_record(bundle)
+            # EN-only gate (issue #72): verify the bundle's language against
+            # its content; a confident non-EN verdict excludes the edition
+            check = check_doc_language(doc, exclusions)
+            declared = normalize_language(doc.language)
+            if check.excluded or declared not in INGEST_LANGUAGES:
+                origin = "exclusion list" if check.listed else "DETECTED — record it in ingest/corpus-exclusions.yaml"
+                detail = (f"declared {check.declared}, detected {check.detected} [{origin}] {check.evidence}"
+                          if check.excluded else f"declared {doc.language} (not in INGEST_LANGUAGES)")
+                print(f"  [ingest] EXCLUDED (non-EN) {bundle.slug}: {detail}", flush=True)
+                continue
             chunks = to_chunks(bundle, doc)
             glossary = to_glossary(bundle, doc)
             bibliography = to_bibliography(bundle, doc)
