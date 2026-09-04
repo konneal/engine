@@ -6,7 +6,7 @@ export const REFUSAL_ANSWER = "I don't have information on this in the indexed O
 // the model occasionally paraphrases the refusal sentence ("...information
 // on how to make lasagna in the indexed..."); the API contract is the
 // exact canonical sentence — normalize variants, keep the redirect tail
-const REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the indexed OIML publications\.?/i;
+const REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the indexed OIML (?:publications|passages|documents|corpus)\.?/i;
 
 // Upstream wording drift (rag#88, the golden refusal pin recalibrated
 // 2026-09-01): the model now also refuses with no pinned sentence at all —
