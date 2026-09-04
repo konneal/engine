@@ -86,10 +86,13 @@ appear within one retrieved passage:
 | **L9 process** | 0/2 | 0/2 | 1/2 | **2/2** | **2/2** | **2/2** | 2/2 |
 | **Total** | **2/18** | **3/18** | **6/18** | **13/18** | **12/18** | **14/18** | **17/18** |
 
-Vector coverage at measurement: plain 151/187, adoc 171/187, mko
-650/676, primmel 180/202, flat 189/202, composed 643/878 — footnoted
-for honesty; the gaps are retryable timeouts, and the pattern below is
-far larger than any gap.
+Vector coverage after lane completion: adoc 187/187, mko 676/676,
+primmel 202/202, primmel_flat 202/202, composed 877/878, plain
+179/187 (the residual eight are persistent empty enrichments). The
+matrix above was measured at partial coverage (plain 151, adoc 171,
+mko 650, primmel 180, flat 189, composed 643) — the pattern is far
+larger than any gap, and full coverage only strengthens the model
+lanes' positions.
 
 ### What the numbers mean
 
