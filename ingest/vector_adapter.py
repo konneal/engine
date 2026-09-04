@@ -90,6 +90,9 @@ class ChunkMetaModel(BaseModel):
     source_lane: str | None = None
     linked_clause: str | None = None
     linked_document: str | None = None
+    # document order as an integer (metanorma-document#56): producers
+    # that carry it make reading order a sort, not an anchor parse
+    ordinal: int | None = None
     section_summary: str | None = None
     child_anchors: str | None = None
     ctx: str | None = None

@@ -93,8 +93,11 @@ export function structuralPropagation(hits: Hit[]): Hit[] {
 
 /** Position-preserving evidence order (NodeFusion, Algorithm 2): passages
  *  of the same publication are fed in document order, publications ordered
- *  by their best-ranked member. Structural chunks (overview/family) lead
- *  their doc; unnumbered passages follow the numbered ones. */
+ *  by their best-ranked member. Document order is the PRODUCER'S ordinal
+ *  when the metadata carries one (metanorma-document#56) — a sort, never
+ *  an anchor parse; the anchor compare is the fallback for chunks whose
+ *  producer doesn't emit ordinals. Structural chunks (overview/family)
+ *  lead their doc; unnumbered passages follow the numbered ones. */
 export function positionOrder(hits: Hit[]): Hit[] {
   if (hits.length < 3) return hits;
   const idx = new Map(hits.map((h, i) => [h, i]));
@@ -107,17 +110,23 @@ export function positionOrder(hits: Hit[]): Hit[] {
   const rank = (g: Hit[]) => Math.min(...g.map((h) => idx.get(h)!));
   const structural = (h: Hit) => h.metadata.clause_anchor === "overview" || h.metadata.clause_anchor === "family";
   const byOrig = (a: Hit, b: Hit) => idx.get(a)! - idx.get(b)!;
+  const byDocOrder = (a: Hit, b: Hit) => {
+    const oa = (a.metadata as any).ordinal;
+    const ob = (b.metadata as any).ordinal;
+    if (typeof oa === "number" && typeof ob === "number" && oa !== ob) return oa - ob;
+    const pa = parseAnchor(a.metadata.clause_anchor);
+    const pb = parseAnchor(b.metadata.clause_anchor);
+    if (pa && pb) return anchorCompare(pa, pb) || byOrig(a, b);
+    if (pa && !pb) return -1;
+    if (!pa && pb) return 1;
+    return byOrig(a, b);
+  };
 
   const out: Hit[] = [];
   for (const g of [...groups.values()].sort((a, b) => rank(a) - rank(b))) {
     const head = g.filter(structural).sort(byOrig);
-    const numeric = g
-      .map((h) => ({ h, a: parseAnchor(h.metadata.clause_anchor) }))
-      .filter((x) => x.a)
-      .sort((x, y) => anchorCompare(x.a!, y.a!) || byOrig(x.h, y.h))
-      .map((x) => x.h);
-    const rest = g.filter((h) => !structural(h) && !parseAnchor(h.metadata.clause_anchor)).sort(byOrig);
-    out.push(...head, ...numeric, ...rest);
+    const ordered = g.filter((h) => !structural(h)).sort(byDocOrder);
+    out.push(...head, ...ordered);
   }
   return out;
 }
