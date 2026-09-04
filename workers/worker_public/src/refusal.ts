@@ -18,6 +18,8 @@ const REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the 
 const REFUSAL_DRIFT: RegExp[] = [
   /\b(can'?t|cannot|couldn'?t|unable)\b[^.]{0,120}?\b(indexed )?OIML publications\b/i,
   /\bno real answer to give\b[^.]{0,120}?\bOIML\b/i,
+  /\b(?:falls|well) outside\b[^.]{0,120}?\b(?:what I can answer|my scope|the scope of)\b/i,
+  /\boutside (?:of )?what (?:I|this service) can answer\b/i,
 ];
 
 /** Start of the sentence containing offset `i` (after the nearest ". ",
