@@ -253,8 +253,10 @@ async function runCase(c) {
     ok: checks.every((x) => x.startsWith("✓")),
     checks,
     answer: answer.slice(0, 400),
-    citations: cites.map((x) => `${x.docidentifier}:${x.edition} §${x.clause_anchor}`),
+    citations: cites.map((x) => `${x.docidentifier}:${x.edition} §${x.clause_anchor}${x.corpus && x.corpus !== "oiml" && x.corpus !== "dirty" ? ` [${x.corpus}]` : ""}`),
     eir,
+    n_used: cites.length,
+    n_cited: eir === null ? null : Math.round(eir * cites.length),
   };
 }
 

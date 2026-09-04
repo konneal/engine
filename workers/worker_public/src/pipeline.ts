@@ -759,6 +759,24 @@ export async function retrieve(
   // Same-chain near-duplicate collapse (FABLE ancestor-descendant dedup)
   finalHits = ancestorDescendantDedup(finalHits);
 
+  // ── Relevance-floored window (the evidence-budget principle) ──
+  // A full window of near-miss passages costs tokens and attention while
+  // good answers cite only what they need (measured: median 10 served,
+  // 1–2 cited). Serve what can matter: passages within a fraction of
+  // the top score, plus every structurally-guaranteed unit — typed pins
+  // and the passages appended after ranking (their scores are not
+  // cross-encoder comparable). Never fewer than two.
+  {
+    const top = Math.max(...finalHits.map((h) => h.rerank_score ?? h.score));
+    const floored = finalHits.filter(
+      (h) => h.rerank_score === undefined || (h.rerank_score ?? h.score) >= 0.25 * top || !!h.metadata.unit_id || h.metadata.clause_anchor === "family",
+    );
+    if (floored.length >= 2) {
+      if (floored.length < finalHits.length) console.log("window floor:", finalHits.length, "→", floored.length, "passages");
+      finalHits = floored;
+    }
+  }
+
   return { hits: finalHits, filters: filters ?? {}, ...(glossary?.length ? { glossary } : {}) };
 }
 
