@@ -272,6 +272,10 @@ def upsert() -> None:
     print(f"upserting {len(vectors)} vectors")
     cf.vectorize_upsert(vectors, state)
     print("done")
+    # the corpus changed under the answer cache — cached answers quoting
+    # replaced/deleted chunks keep serving until the generation bump
+    # (oimlsmart/rag#72)
+    print("corpus changed: bump the answer-cache generation — scripts/invalidate_answer_cache.py")
 
 
 def probe() -> None:

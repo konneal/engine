@@ -8,6 +8,12 @@
 # whole-edition, never per-chunk: the official French/Spanish annexes
 # inside EN editions (R 76:2006 sec 17) stay.
 #
+# OPS: an entry added here only takes the edition out of FUTURE ingests.
+# After the live deletion (D1 rag-public.chunks + Vectorize), bump the
+# answer-cache corpus generation or cached answers quoting the excluded
+# edition keep serving until TTL (the 2026-09-04 incident):
+#   RAG_PUBLIC_KV=0f65d12cc77c41b5b91086de1c04f6da .venv/bin/python scripts/invalidate_answer_cache.py
+#
 # Entry shape: doc_id (the ingest identity, corpus:slug — identifier+year
 # alone cannot tell the ES 2015 edition from the EN one), the identifier as
 # the source (mis)declared it, declared vs detected language, the detection

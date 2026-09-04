@@ -61,6 +61,7 @@ const TOOLS = [
       type: "object" as const,
       properties: {
         query: { type: "string", description: "The question" },
+        fresh: { type: "boolean", description: "Skip the answer cache and regenerate from the live corpus (default false)" },
       },
       required: ["query"],
     },
@@ -109,7 +110,7 @@ async function callTool(env: Env, name: string, args: any): Promise<{ content: A
   if (name === "oiml_ask") {
     const query = String(args?.query ?? "").slice(0, 2000);
     if (!query) throw new Error("query is required");
-    const data = await rag(env, "/api/ask", { query, stream: false });
+    const data = await rag(env, "/api/ask", { query, stream: false, ...(args?.fresh ? { fresh: true } : {}) });
     const cites = (data.citations ?? [])
       .map((c: any) => `${c.docidentifier}${c.clause_anchor ? " §" + c.clause_anchor : ""}`)
       .join(", ");

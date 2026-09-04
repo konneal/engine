@@ -133,6 +133,17 @@ class CF:
             self._post(url, {"ids": ids[i : i + 100]})
             print(f"  deleted {min(i + 100, len(ids))}/{len(ids)}")
 
+    def kv_get(self, namespace_id: str, key: str) -> str | None:
+        r = self._request("GET", f"{BASE}/accounts/{ACCOUNT_ID}/storage/kv/namespaces/{namespace_id}/values/{key}")
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.text
+
+    def kv_put(self, namespace_id: str, key: str, value: str) -> None:
+        r = self._request("PUT", f"{BASE}/accounts/{ACCOUNT_ID}/storage/kv/namespaces/{namespace_id}/values/{key}", content=value.encode())
+        r.raise_for_status()
+
     def vectorize_query(self, vec: list[float], top_k: int = 5) -> list[dict[str, Any]]:
         data = self._post(
             f"{BASE}/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}/query",

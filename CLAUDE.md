@@ -138,6 +138,12 @@ reasoning mode, sampling and a budget the reasoning cannot starve.
 - Wire-stage ops without REST tokens: embed+upsert via `/admin/enrich`
   (binding, contexts KV-cached), deletions via wrangler OAuth
   `vectorize delete-vectors`, reads via `/admin/vectors`.
+- Answer-cache invalidation after corpus surgery (issue #72): both answer
+  caches (exact `a:` + semantic `sc:` in KV) are namespaced by
+  INDEX_VERSION + a corpus-generation stamp (`sys:corpus_gen`). After a
+  live deletion or re-index, bump it:
+  `RAG_PUBLIC_KV=0f65d12cc77c41b5b91086de1c04f6da .venv/bin/python scripts/invalidate_answer_cache.py`
+  (old-generation entries miss and TTL out; ~60s KV edge propagation).
 - Eval: golden ×3 with witness-span containment (tests/retrieval.mjs);
   `node scripts/variance.mjs` (determinism), `node scripts/feedback-triage.mjs`
   (thumbs-down clustering — hashes only, by privacy design).

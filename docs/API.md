@@ -71,7 +71,8 @@ Request:
   "query":  "What is the maximum permissible error for class III?",  // required, ≤8000 chars
   "lang":   "fr",            // optional 2-letter hint; answers follow the question's language
   "stream": true,            // SSE (default for /api/ask); false → single JSON
-  "fresh":  false,           // true skips the answer cache (regenerate)
+  "fresh":  false,           // true skips BOTH answer caches (exact + semantic) and
+                             // regenerates from the live corpus; the refreshed answer re-fills the cache
   "prev":   "previous user question",          // optional, helps follow-up retrieval
   "history": [ {"role":"user","content":"..."}, {"role":"assistant","content":"..."} ],  // last ≤20 turns
   "context": {                          // optional, the declared context (see §2.1.1)
@@ -354,6 +355,10 @@ transparency for integrators and the eval battery.
 ### 2.2 Behavior guarantees
 - Refusals are never cached or served from the semantic cache
 - Conversational/contextual turns are never served from caches
+- Both answer caches are namespaced by INDEX_VERSION (bumped on deploy)
+  and a corpus-generation stamp (KV `sys:corpus_gen`, bumped by
+  `scripts/invalidate_answer_cache.py` after corpus surgery) — a corpus
+  change makes old-generation entries miss, never serve
 - Edition awareness: when the question names a publication, answers are
   steered to the ACTIVE edition (derived publication registry)
 - ISO/IEC corpus: federated for signed-in members only; leakage is

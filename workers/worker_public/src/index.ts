@@ -24,6 +24,7 @@ import { bindModelNode, modelCitation, modelEcho, modelGroundingBlock, modelNode
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { rawSessionToken } from "./session";
+import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested, semanticCacheKey } from "./answercache";
 
 export interface Env {
   AI: any;
@@ -190,10 +191,8 @@ function userImageDataUrl(body: any): string | null {
   return img;
 }
 
-async function cacheGet(env: Env, ns: string, query: string, lang?: string) {
-  const key = `a:${env.INDEX_VERSION}:${ns}:${await sha256Hex(
-    `${query.toLowerCase().replace(/\s+/g, " ").trim()}|${lang ?? ""}`,
-  )}`;
+async function cacheGet(env: Env, gen: string, ns: string, query: string, lang?: string) {
+  const key = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(query, lang)));
   const hit = await env.CACHE.get(key, "json");
   return hit ? { key, value: hit as any } : null;
 }
@@ -445,12 +444,17 @@ async function handleAsk(
   const { kept: keptHistory, overflow } = splitHistory(history, budget);
   const summary = overflow.length >= 2 ? ((await summarizeHistory(env.AI, MODELS.understand, overflow)) ?? undefined) : undefined;
   let retrieved;
-  // fresh=true (regenerate) skips the cache read; contextual follow-ups and
-  // fresh=true (regenerate) skips the cache read; contextual follow-ups,
-  // declared-context asks and image asks skip the cache entirely — the
-  // answer depends on the conversation / declared context / image, not
-  // the query text alone
-  const cached = body?.fresh === true || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, ns, q.query, q.lang);
+  // fresh (regenerate) skips the cache read; contextual follow-ups,
+  // declared-context asks, draft asks and image asks skip the cache
+  // entirely — the answer depends on the conversation / declared context
+  // / image, not the query text alone. The fresh parse is answercache's
+  // single freshRequested, honored at every answer-cache read below.
+  const fresh = freshRequested(body);
+  // the corpus-generation stamp (KV sys:corpus_gen) namespaces both
+  // answer caches; corpus surgery bumps it (scripts/invalidate_answer_
+  // cache.py) and old-generation entries miss (oimlsmart/rag#72)
+  const gen = await corpusGen(env.CACHE);
+  const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
@@ -489,7 +493,7 @@ async function handleAsk(
   // answered question — serve from the semantic cache WITHOUT paying the
   // understanding call. Contextual turns and declared-context asks never
   // take this path (they always run understanding + live retrieval);
-  // fresh=true already bypassed the exact cache above.
+  // fresh already bypassed the exact cache above and bypasses this one.
   let understanding: any = null;
   // a query naming a model node (/req/…, /term/…) is node-SCOPED: its
   // embedding sits near every other node-scoped ask about the same
@@ -497,10 +501,10 @@ async function handleAsk(
   // node's answer for another (observed run-to-run across the golden
   // model legs). Node-scoped queries use the exact cache only.
   const nodeScoped = !!modelNodeRefIn(q.query) || !!modelNodeRefIn(declaredCtx?.label);
-  if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && body?.fresh !== true) {
+  if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && !fresh) {
     const wv0 = (await warmEmbed) ?? null;
     if (wv0) {
-      const sc0 = await semanticCacheGet(env, wv0);
+      const sc0 = await semanticCacheGet(env, gen, wv0);
       if (sc0) {
         console.log("semantic cache hit (pre-understanding)");
         telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang);
@@ -621,12 +625,12 @@ async function handleAsk(
   // semantic cache: near-duplicate of a recently answered question —
   // serves the stored answer with a `similar: true` marker (checked only
   // for standalone knowledge questions; contextual turns, declared-context
-  // asks and image asks always run live; fresh=true regenerates,
-  // bypassing this cache too)
-  if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !userImage && body?.fresh !== true) {
+  // asks and image asks always run live; fresh regenerates, bypassing
+  // this cache too)
+  if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !userImage && !fresh) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
-      const sc = await semanticCacheGet(env, warmVec);
+      const sc = await semanticCacheGet(env, gen, warmVec);
       if (sc) {
         console.log("semantic cache hit");
         telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang);
@@ -960,9 +964,9 @@ async function handleAsk(
           }
           if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(REFUSAL_ANSWER)) {
             const wv = (await warmEmbed) ?? null;
-            if (wv) semanticCachePut(env, ctx, wv, { answer: canonical, citations: cites, model, query_hash: queryHash });
+            if (wv) semanticCachePut(env, ctx, gen, wv, { answer: canonical, citations: cites, model, query_hash: queryHash });
             ctx.waitUntil(
-              env.CACHE.put(await cacheKey(env, ns, q.query, q.lang), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
+              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
           }
           controller.close();
@@ -1071,10 +1075,10 @@ async function handleAsk(
   const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
-    if (warmVec) semanticCachePut(env, ctx, warmVec, out);
+    if (warmVec) semanticCachePut(env, ctx, gen, warmVec, out);
   }
   if (cacheable) {
-    const ck = await cacheKey(env, ns, q.query, q.lang);
+    const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }
   telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
@@ -1100,12 +1104,6 @@ function sseResponse(events: unknown[], cors: Record<string, string>): Response 
       ...cors,
     },
   });
-}
-
-async function cacheKey(env: Env, ns: string, query: string, lang?: string) {
-  return `a:${env.INDEX_VERSION}:${ns}:${await sha256Hex(
-    `${query.toLowerCase().replace(/\s+/g, " ").trim()}|${lang ?? ""}`,
-  )}`;
 }
 
 async function handleSearch(
@@ -1652,9 +1650,9 @@ async function editionNote(env: Env, u: { doc_number?: string | null } | null): 
 // ── Semantic answer cache (G6) ──
 // Near-duplicate queries re-pay the whole pipeline. Bucket KV by a
 // leading-dimension signature of the query embedding; confirm with full
-// cosine >= 0.97 before serving. Same INDEX_VERSION namespace as the
-// answer cache (index changes invalidate both). Single entry per bucket
-// (v1): collisions overwrite, never mix.
+// cosine >= 0.97 before serving. Same INDEX_VERSION + corpus-generation
+// namespace as the answer cache (deploys and corpus surgery invalidate
+// both). Single entry per bucket (v1): collisions overwrite, never mix.
 function cosine(a: number[], b: number[]): number {
   let dot = 0;
   let na = 0;
@@ -1671,9 +1669,9 @@ function scSignature(v: number[]): string {
   return v.slice(0, 16).map((x) => x.toFixed(2)).join(",");
 }
 
-async function semanticCacheGet(env: Env, vec: number[]): Promise<{ answer: string; citations: unknown[]; model: string; query_hash: string; context_applied?: unknown } | null> {
+async function semanticCacheGet(env: Env, gen: string, vec: number[]): Promise<{ answer: string; citations: unknown[]; model: string; query_hash: string; context_applied?: unknown } | null> {
   try {
-    const raw = await env.CACHE.get(`sc:${env.INDEX_VERSION}:${scSignature(vec)}`, "json") as any;
+    const raw = await env.CACHE.get(semanticCacheKey(env.INDEX_VERSION, gen, scSignature(vec)), "json") as any;
     if (!raw?.v || !Array.isArray(raw.v) || raw.v.length !== vec.length) return null;
     if (cosine(raw.v, vec) < 0.97) return null;
     return raw;
@@ -1682,10 +1680,10 @@ async function semanticCacheGet(env: Env, vec: number[]): Promise<{ answer: stri
   }
 }
 
-function semanticCachePut(env: Env, ctx: ExecutionContext, vec: number[], payload: { answer: string; citations: unknown[]; model: string; query_hash: string }): void {
+function semanticCachePut(env: Env, ctx: ExecutionContext, gen: string, vec: number[], payload: { answer: string; citations: unknown[]; model: string; query_hash: string }): void {
   const v = vec.map((x) => Number(x.toFixed(3)));
   ctx.waitUntil(
-    env.CACHE.put(`sc:${env.INDEX_VERSION}:${scSignature(vec)}`, JSON.stringify({ v, ...payload }), { expirationTtl: LIMITS.cacheTtlSec }),
+    env.CACHE.put(semanticCacheKey(env.INDEX_VERSION, gen, scSignature(vec)), JSON.stringify({ v, ...payload }), { expirationTtl: LIMITS.cacheTtlSec }),
   );
 }
 
