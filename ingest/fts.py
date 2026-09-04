@@ -9,6 +9,11 @@ corpus, not merely re-rank dense hits. Sources:
   to the serving lanes (corpus "oiml", tier "curated", producer "mko")
 - contextual preambles from artifacts/enriched-contexts.jsonl when present
   (Anthropic contextual BM25)
+
+Whole-edition EN-only exclusions (ingest/corpus-exclusions.yaml, issue #72)
+are honored at the load door for every source — a lane artifact can predate
+an exclusion, and the checked-in list is the record of what the EN index
+refuses.
 """
 from __future__ import annotations
 
@@ -21,6 +26,7 @@ import time
 from pathlib import Path
 
 from .config import ARTIFACTS
+from .langid import load_exclusions
 
 CHUNKS = ARTIFACTS / "chunks.jsonl"
 MKO_CHUNKS = ARTIFACTS / "mko_chunks.jsonl"
@@ -58,6 +64,22 @@ def _detect_language(text: str) -> str | None:
     return best
 
 
+# — whole-edition EN-only exclusions (issue #72) —
+# The checked-in list is the audit record of what the EN index refuses;
+# EVERY source lane honors it here at the load door. The parse gate keeps
+# chunks.jsonl clean, but a lane artifact can predate an exclusion — the
+# table lane's table_chunks_enrich.jsonl was generated before the R 79:2015
+# ES entry and re-imported 6 excluded-edition chunks into the lexical lane.
+_excluded_ids_cache: frozenset[str] | None = None
+
+
+def _excluded_ids() -> frozenset[str]:
+    global _excluded_ids_cache
+    if _excluded_ids_cache is None:
+        _excluded_ids_cache = frozenset(e.doc_id for e in load_exclusions())
+    return _excluded_ids_cache
+
+
 def _esc(s: str) -> str:
     return s.replace("'", "''")
 
@@ -84,6 +106,9 @@ def _insert_sql(rec: dict, contexts: dict[str, str]) -> tuple[str, bool] | None:
         md["corpus"] = "oiml"
         md["tier"] = "curated"
         md["producer"] = "mko"
+    doc_id = str(md.get("doc_id") or rec.get("doc_id") or "")
+    if doc_id in _excluded_ids():
+        return None  # whole-edition EN-only exclusion (issue #72)
     body = rec.get("text") or md.get("chunk_text") or ""
     body = re.sub(r"\s+", " ", body).strip()
     if not body:
@@ -106,7 +131,7 @@ def _insert_sql(rec: dict, contexts: dict[str, str]) -> tuple[str, bool] | None:
         "clause_anchor, clause_title, status, superseded_by, corpus, tier, text, fts_text, "
         "unit_id, block) VALUES ("
         f"'{_esc(str(rec['id']))}',"
-        f"'{_esc(str(md.get('doc_id') or rec.get('doc_id') or ''))}',"
+        f"'{_esc(doc_id)}',"
         f"'{_esc(str(md.get('docidentifier') or ''))}',"
         f"'{_esc(str(md.get('doctype') or ''))}',"
         f"'{_esc(str(md.get('doc_number') or ''))}',"
