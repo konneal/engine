@@ -30,11 +30,28 @@ echo "── building site ──"
 TOML="workers/worker_public/wrangler.toml"
 CURRENT=$(sed -n 's/.*INDEX_VERSION = "public-v\([0-9][0-9.]*\).*/\1/p' "$TOML" | head -1)
 [ -n "$CURRENT" ] || fail "could not parse INDEX_VERSION from $TOML"
+# drift guard: the toml must track what is DEPLOYED. The bump edit is not
+# committed by this script, so a checkout or a parallel session can lose
+# it — bumping from a stale number reuses a live cache namespace and
+# serves pre-change answers. Sync from /health first, then bump.
+LIVE=$(curl -sf "https://ai.oimlsmart.org/health" | sed -n 's/.*"public-v\([0-9][0-9.]*\).*/\1/p' | head -1)
+if [ -n "$LIVE" ] && [ "$LIVE" != "$CURRENT" ]; then
+  LIVE_MAJOR=$(echo "$LIVE" | cut -d. -f1)
+  LIVE_MINOR=$(echo "$LIVE" | cut -d. -f2)
+  CUR_MINOR=$(echo "$CURRENT" | cut -d. -f2)
+  if [ "$LIVE_MAJOR" != "$(echo "$CURRENT" | cut -d. -f1)" ] || [ "$LIVE_MINOR" -lt "$CUR_MINOR" ]; then
+    fail "toml INDEX_VERSION ($CURRENT) is AHEAD of live ($LIVE) — deploy the committed state or reconcile manually"
+  fi
+  echo "── version drift: toml $CURRENT behind live $LIVE — syncing toml first ──"
+  sed -i '' "s/public-v${CURRENT}/public-v${LIVE}/" "$TOML"
+  CURRENT="$LIVE"
+fi
 MAJOR=$(echo "$CURRENT" | cut -d. -f1)
 MINOR=$(echo "$CURRENT" | cut -d. -f2)
 NEXT="${MAJOR}.$((MINOR + 1))"
 sed -i '' "s/public-v${CURRENT}/public-v${NEXT}/" "$TOML"
 echo "── INDEX_VERSION: public-v${CURRENT} → public-v${NEXT} ──"
+echo "   (commit this bump via your next PR — the script deliberately never commits)"
 
 # ── deploy ──
 echo "── deploying ──"
