@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -39,15 +40,91 @@ PINS_PATH = Path(__file__).resolve().parent / "model_plane_pins.json"
 MAX_TEXT = 1800
 
 
-def smart_repo() -> Path | None:
-    """The smart checkout: SMART_REPO, else the estate's sibling layout."""
+BUNDLES_INDEX = "browser/public/data/model-plane/index.json"
+
+
+def _sibling_candidates() -> list[Path]:
+    """The estate's sibling layout: the checkout next to this repo, then
+    the canonical ~/src/oimlsmart/smart."""
+    return [Path(__file__).resolve().parents[2] / "smart", Path.home() / "src/oimlsmart/smart"]
+
+
+def smart_repo_candidates() -> list[Path]:
     declared = os.environ.get("SMART_REPO", "").strip()
-    candidates = [Path(declared)] if declared else []
-    candidates += [Path(__file__).resolve().parents[2] / "smart", Path.home() / "src/oimlsmart/smart"]
-    for c in candidates:
-        if (c / "browser/public/data/model-plane/index.json").is_file():
+    cands = ([Path(declared)] if declared else []) + _sibling_candidates()
+    # the sibling next to this repo can BE ~/src/oimlsmart/smart (the
+    # estate layout) — name each real candidate once
+    out: list[Path] = []
+    seen: set[str] = set()
+    for c in cands:
+        key = str(c.resolve())
+        if key not in seen:
+            seen.add(key)
+            out.append(c)
+    return out
+
+
+def _has_bundles(repo: Path) -> bool:
+    return (repo / BUNDLES_INDEX).is_file()
+
+
+def _git_branch(repo: Path) -> str:
+    """The checkout's current branch, read straight from .git/HEAD (no
+    subprocess; worktree .git files resolved). '' when unreadable."""
+    git = repo / ".git"
+    try:
+        head = git / "HEAD"
+        if git.is_file():
+            # worktree/submodule: '.git' holds 'gitdir: <path>'
+            line = git.read_text(encoding="utf-8").strip()
+            if not line.startswith("gitdir:"):
+                return ""
+            gitdir = Path(line.split(":", 1)[1].strip())
+            head = (repo / gitdir if not gitdir.is_absolute() else gitdir) / "HEAD"
+        ref = head.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if ref.startswith("ref: refs/heads/"):
+        return ref.removeprefix("ref: refs/heads/")
+    if re.fullmatch(r"[0-9a-f]{40}", ref):
+        return f"detached @ {ref[:12]}"
+    return ""
+
+
+def _display(path: Path) -> str:
+    home = str(Path.home())
+    s = str(path)
+    return "~" + s[len(home):] if s.startswith(home + os.sep) else s
+
+
+def smart_repo(candidates: list[Path] | None = None) -> Path | None:
+    """The smart checkout: SMART_REPO, else the estate's sibling layout —
+    the first candidate carrying the committed model-plane bundles."""
+    for c in (smart_repo_candidates() if candidates is None else candidates):
+        if _has_bundles(c):
             return c
     return None
+
+
+def smart_repo_diagnosis(candidates: list[Path] | None = None) -> str:
+    """Why no candidate qualified — per-candidate detail so a checkout that
+    EXISTS but lacks the bundles (parked on a legacy branch) is named with
+    its branch instead of vanishing into a generic SKIP (the misread that
+    produced oimlsmart/smart#252)."""
+    cands = smart_repo_candidates() if candidates is None else candidates
+    notes = []
+    for c in cands:
+        if not c.is_dir():
+            notes.append(f"{_display(c)} does not exist")
+            continue
+        branch = _git_branch(c)
+        where = f" (branch {branch})" if branch else ""
+        notes.append(f"found {_display(c)}{where} but no {BUNDLES_INDEX} — not a v2 checkout carrying the committed bundles")
+    if not notes:
+        return "no candidates at all"
+    if all(not c.is_dir() for c in cands):
+        return "; ".join(notes)
+    return "; ".join(notes) + " — declare SMART_REPO to a v2 checkout"
 
 
 def load_bundles(repo: Path) -> dict[str, dict]:
@@ -63,8 +140,6 @@ def load_bundles(repo: Path) -> dict[str, dict]:
 
 def _urn_parts(base_urn: str) -> tuple[str, str, str]:
     # urn:oiml:pub:r:60:2021 → ("r", "60", "2021")
-    import re
-
     m = re.match(r"^urn:oiml:pub:([rdbge]):(\d{1,3})(?::(\d{4}))?$", base_urn or "", re.I)
     if not m:
         return "", "", ""
@@ -317,10 +392,13 @@ def main(argv: list[str]) -> int:
     do_apply = "--apply" in argv
     repo = smart_repo()
     if repo is None:
+        diag = smart_repo_diagnosis()
         if do_check:
-            print("model-plane freshness: SKIP — SMART_REPO undeclared and no sibling smart checkout carries the bundles")
+            # the honest SKIP (exit 0 — the contract CI's ingest job rides
+            # on) — but now it says WHY, per candidate
+            print(f"model-plane freshness: SKIP — {diag}")
             return 0
-        raise SystemExit("no smart checkout found (set SMART_REPO)")
+        raise SystemExit(f"no smart checkout found: {diag}")
     if do_check:
         return check(repo)
     build(repo, write_pins=write_pins)
