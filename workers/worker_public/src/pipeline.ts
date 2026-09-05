@@ -323,6 +323,48 @@ export async function retrieve(
   // a defined term → the documents that define it; a named publication →
   // its family/successors. Same query vector, graph-filtered candidates —
   // vocabulary mismatch stops mattering when the graph carries the link.
+  // Path A (rag#137): the concept link drives the SAME resolver — linked
+  // TERM → defining documents. Unlike the reverted candidate-family
+  // routing (every chunk of every candidate's family, which flooded the
+  // pool with the wrong domain), this is narrow: the definitional clauses
+  // of the linked concepts. "actual quantity" (defined by R 87) brings
+  // the prepackage domain in without the weigh-labeler families.
+  if (glossary.length && env.DB && vector) {
+    try {
+      const numbers = new Set<string>();
+      for (const gl of glossary.slice(0, 3)) {
+        if (gl.term.length < 3) continue;
+        const rows = await env.DB.prepare(
+          "SELECT e.src AS doc FROM graph_edges e JOIN graph_nodes c ON e.dst = c.id WHERE e.kind = 'defines' AND c.kind = 'concept' AND (c.label = ?1 OR c.label LIKE ?2) LIMIT 12",
+        )
+          .bind(gl.term, `%${gl.term}%`)
+          .all() as any;
+        for (const r of rows.results ?? []) {
+          const m = String(r.doc ?? "").match(/^doc:OIML-[A-Z]-(\d+)-/);
+          if (m) numbers.add(m[1]!);
+        }
+      }
+      if (numbers.size) {
+        const gc = await env.VECTORIZE.query(vector, {
+          topK: 12,
+          returnMetadata: "all",
+          filter: { doc_number: { $in: [...numbers] } },
+        });
+        const seenIds0 = new Set(matches.map((m: any) => m.id));
+        let merged0 = 0;
+        for (const m of (gc.matches ?? []).slice(0, 6)) {
+          if (!seenIds0.has(m.id)) {
+            matches.push({ id: m.id, score: m.score * 0.75, metadata: m.metadata });
+            seenIds0.add(m.id);
+            merged0++;
+          }
+        }
+        if (merged0) console.log("concept graph:", [...numbers].join(","), "— merged", merged0);
+      }
+    } catch {
+      // additive lane; primary results stand
+    }
+  }
   if (opts.graphDocNumbers?.length && vector) {
     try {
       const g = await env.VECTORIZE.query(vector, {
