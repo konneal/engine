@@ -261,6 +261,82 @@ export async function retrieve(
     }
   }
 
+  // ── Vocabulary link (the L2 nomenclature bridge) ──
+  // Everyday words don't match defined terms — the one gap every
+  // comparison lane fails. Dense candidates + cross-encoder rerank, and
+  // the ANSWER model adjudicates among the top-3 (the entity-linking
+  // pattern: retrieval proposes, generation disambiguates — naive top-1
+  // dense binding picks the wrong term). Computed HERE, before the pool
+  // closes, because the candidates' defining publications also ROUTE the
+  // pool: a question whose concept link lands in a family the primary
+  // lanes missed (colloquial "bag of flour sold by weight" → the
+  // prepackage domain) gets that family's passages merged like the graph
+  // lane does — the concept link is a family router, not just a note.
+  let glossary: NonNullable<Retrieved["glossary"]> = [];
+  if (env.GLOSSARY && vector) {
+    try {
+      const g = await env.GLOSSARY.query(vector, { topK: 5, returnMetadata: "all" });
+      const cands = (g.matches ?? []).filter((m: any) => m.score >= 0.5);
+      if (cands.length) {
+        const texts = cands.map((m: any) => String(m.metadata?.chunk_text ?? ""));
+        const rs = await rerank(env.AI, MODELS.rerank, query, texts);
+        const ranked = cands
+          .map((m: any, i: number) => ({
+            term: String(m.metadata?.clause_title ?? "").trim(),
+            definition: String(m.metadata?.chunk_text ?? "").split(" — ").slice(1).join(" — ").slice(0, 300),
+            docidentifier: String(m.metadata?.docidentifier ?? ""),
+            doc_number: String(m.metadata?.doc_number ?? ""),
+            score: rs ? rs[i] : m.score,
+          }))
+          .filter((x: any) => x.term && x.definition);
+        // one entry per DISTINCT CONCEPT, and only candidates the
+        // cross-encoder actually deems relevant (score > 0). Distinctness
+        // is spelling-normalized: "Weigh labeler"/"Weigh labeller" are
+        // one concept in two spellings — without normalization the note's
+        // slots burn on variants while the domain-bridging concept one
+        // rank down ("actual quantity" — the PREPACKAGE domain) never
+        // reaches the adjudicator.
+        const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/labeler\b/g, "labeller").replace(/\s+/g, " ").trim();
+        const byTerm = new Map<string, (typeof ranked)[number]>();
+        for (const r of ranked) if (r.score > 0) {
+          const k = norm(r.term);
+          if (!byTerm.has(k)) byTerm.set(k, r);
+        }
+        glossary = [...byTerm.values()].sort((a, b) => b.score - a.score).slice(0, 3);
+        if (glossary.length) console.log("glossary link:", glossary.map((g2) => g2.term).join(", "));
+      }
+    } catch {
+      // additive lane; primary results stand
+    }
+  }
+
+  // the concept link routes the pool: the candidates' families merge like
+  // the graph lane (0.7 discount — proposed by concept, not yet ranked)
+  if (glossary.length && vector) {
+    const families = [...new Set(glossary.map((g) => g.doc_number.split("-")[0]).filter(Boolean))];
+    if (families.length) {
+      try {
+        const g2 = await env.VECTORIZE.query(vector, {
+          topK: 10,
+          returnMetadata: "all",
+          filter: { doc_number: { $in: families } },
+        });
+        const seenIds = new Set(matches.map((m: any) => m.id));
+        let merged = 0;
+        for (const m of (g2.matches ?? []).slice(0, 6)) {
+          if (!seenIds.has(m.id)) {
+            matches.push({ id: m.id, score: m.score * 0.7, metadata: m.metadata });
+            seenIds.add(m.id);
+            merged++;
+          }
+        }
+        if (merged) console.log("glossary families:", families.join(","), "— merged", merged);
+      } catch {
+        // additive lane; primary results stand
+      }
+    }
+  }
+
   // ── Graph lane ──
   // The D1 projection (relaton structure + Glossarist defines edges)
   // resolves what the query's WORDS map to in the corpus's own structure:
@@ -590,47 +666,6 @@ export async function retrieve(
       if (isOverview) overviews += 1;
     }
     if (diversified.length >= LIMITS.rerankKeep + 2) break;
-  }
-
-  // ── Vocabulary link (the L2 nomenclature bridge) ──
-  // Everyday words don't match defined terms — the one gap every
-  // comparison lane fails. Dense candidates + cross-encoder rerank, and
-  // the ANSWER model adjudicates among the top-2 (the entity-linking
-  // pattern: retrieval proposes, generation disambiguates — naive top-1
-  // dense binding picks the wrong term). Runs BEFORE the typed pin: the
-  // candidates' defining publications also anchor the pin's family (a
-  // term question names the family even when the question text doesn't).
-  let glossary: NonNullable<Retrieved["glossary"]> = [];
-  if (env.GLOSSARY && vector) {
-    try {
-      const g = await env.GLOSSARY.query(vector, { topK: 5, returnMetadata: "all" });
-      const cands = (g.matches ?? []).filter((m: any) => m.score >= 0.5);
-      if (cands.length) {
-        const texts = cands.map((m: any) => String(m.metadata?.chunk_text ?? ""));
-        const rs = await rerank(env.AI, MODELS.rerank, query, texts);
-        const ranked = cands
-          .map((m: any, i: number) => ({
-            term: String(m.metadata?.clause_title ?? "").trim(),
-            definition: String(m.metadata?.chunk_text ?? "").split(" — ").slice(1).join(" — ").slice(0, 300),
-            docidentifier: String(m.metadata?.docidentifier ?? ""),
-            doc_number: String(m.metadata?.doc_number ?? ""),
-            score: rs ? rs[i] : m.score,
-          }))
-          .filter((x: any) => x.term && x.definition);
-        // one entry per DISTINCT term, and only candidates the cross-encoder
-        // actually deems relevant (score > 0) — generic near-misses
-        // ("certification" for a CASCO-vocabulary question) anchor the
-        // answer to the generic definition and crowd out the specific one.
-        // The family union below keeps ALL candidates: the typed pin has
-        // its own overlap gate.
-        const byTerm = new Map<string, (typeof ranked)[number]>();
-        for (const r of ranked) if (r.score > 0 && !byTerm.has(r.term)) byTerm.set(r.term, r);
-        glossary = [...byTerm.values()].sort((a, b) => b.score - a.score).slice(0, 2);
-        if (glossary.length) console.log("glossary link:", glossary.map((g2) => g2.term).join(", "));
-      }
-    } catch {
-      // additive lane; primary results stand
-    }
   }
 
   // answer contract v2 — typed-chunk pin (FINAL position): doc-scoped
