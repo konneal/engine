@@ -20,6 +20,11 @@ const REFUSAL_DRIFT: RegExp[] = [
   /\bno real answer to give\b[^.]{0,120}?\bOIML\b/i,
   /\b(?:falls|well) outside\b[^.]{0,120}?\b(?:what I can answer|my scope|the scope of)\b/i,
   /\boutside (?:of )?what (?:I|this service) can answer\b/i,
+  // "I can't answer that — weather forecasting is outside my scope":
+  // requires the refusal verb, so a scope DISCUSSION inside a real answer
+  // ("this exemption is outside the scope of R 60") never matches
+  /\bI can[’']?t answer\b[^.]{0,100}?\bscope\b/i,
+  /^\s*I don[’']?t have any indexed OIML \w+(?:s)? (?:covering|about|on)\b/im,
 ];
 
 /** Start of the sentence containing offset `i` (after the nearest ". ",
