@@ -310,32 +310,12 @@ export async function retrieve(
     }
   }
 
-  // the concept link routes the pool: the candidates' families merge like
-  // the graph lane (0.7 discount — proposed by concept, not yet ranked)
-  if (glossary.length && vector) {
-    const families = [...new Set(glossary.map((g) => g.doc_number.split("-")[0]).filter(Boolean))];
-    if (families.length) {
-      try {
-        const g2 = await env.VECTORIZE.query(vector, {
-          topK: 10,
-          returnMetadata: "all",
-          filter: { doc_number: { $in: families } },
-        });
-        const seenIds = new Set(matches.map((m: any) => m.id));
-        let merged = 0;
-        for (const m of (g2.matches ?? []).slice(0, 6)) {
-          if (!seenIds.has(m.id)) {
-            matches.push({ id: m.id, score: m.score * 0.7, metadata: m.metadata });
-            seenIds.add(m.id);
-            merged++;
-          }
-        }
-        if (merged) console.log("glossary families:", families.join(","), "— merged", merged);
-      } catch {
-        // additive lane; primary results stand
-      }
-    }
-  }
+  // NOTE: candidate-family pool routing was measured and REVERTED (rag#137
+  // experiment, 2026-09-05): the wrong-domain candidates' families (the
+  // labeler concepts, R 51/R 45) merged at the same discount and DILUTED
+  // the pool — canary fell 3/6 → 1/6. Candidate-level families cannot
+  // adjudicate domains; only the answer model can (it does, when the
+  // family's content reaches it).
 
   // ── Graph lane ──
   // The D1 projection (relaton structure + Glossarist defines edges)
