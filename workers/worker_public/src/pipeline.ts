@@ -598,6 +598,39 @@ export async function retrieve(
     }
   }
 
+// ── Concept-anchored steering (rag#137) ──
+// The vocabulary link names the corpus's own concepts for the question's
+// subject; their DEFINING publications get a small rerank boost — the same
+// spread-scaled steering idiom as edition steering. Measured motivation:
+// for everyday-goods phrasing the right family's chunks sit at dense rank
+// 3 and are then BURIED by the cross-encoder under instrument-markings
+// vocabulary (R 111/R 76 "label" clauses outrank R 79's overview for
+// "rules for the label on a bag of flour"). The concept link knows the
+// subject's family ("actual quantity" → R 87, "Prepackage" → R 79); the
+// boost is what lets that knowledge survive the cross-encoder. The answer
+// model still adjudicates among the boosted families' passages.
+if (glossary.length && hits.length > 1) {
+  const fams = new Set(glossary.map((g) => g.doc_number.split("-")[0]).filter(Boolean));
+  if (fams.size) {
+    const scored = hits.map((h) => h.rerank_score ?? h.score);
+    const spread = Math.max(...scored) - Math.min(...scored);
+    if (spread > 0) {
+      let boosted = 0;
+      for (const h of hits) {
+        const base = String(h.metadata.doc_number ?? "").split("-")[0];
+        if (fams.has(base)) {
+          h.rerank_score = (h.rerank_score ?? h.score) + spread * 0.15;
+          boosted++;
+        }
+      }
+      if (boosted) {
+        console.log("concept steering: +", boosted, "hits in", [...fams].join(","));
+        hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
+      }
+    }
+  }
+}
+
 // Edition steering, family-relative: when the query does not pin an
   // edition, chunks from an OLDER edition of a publication are demoted
   // whenever a NEWER edition of the SAME publication is in the pool.
