@@ -93,6 +93,12 @@ class ChunkMetaModel(BaseModel):
     # document order as an integer (metanorma-document#56): producers
     # that carry it make reading order a sort, not an anchor parse
     ordinal: int | None = None
+    # the model plane (retrieval-export derivation): the unit's own
+    # versioning and identity, canonical per primmel/primmel-ts#65
+    model_version: str | None = None
+    model_node: str | None = None
+    model_kind: str | None = None
+    standard: str | None = None
     section_summary: str | None = None
     child_anchors: str | None = None
     ctx: str | None = None
