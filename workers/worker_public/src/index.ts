@@ -898,7 +898,7 @@ async function handleAsk(
   const vocabNote = retrieved.glossary?.length
     ? "Vocabulary binding — defined terms in the indexed corpus that may name this question's subject:\n" +
       retrieved.glossary.map((g) => `- ${g.term} (${g.docidentifier}): ${g.definition}`).join("\n") +
-      "\nIf the question describes a symptom or behavior in everyday words, OPEN the answer by naming the matching defined term, quote its definition, and cite its defining publication; keep using that term throughout."
+      "\nIf the question describes a symptom or behavior in everyday words, OPEN the answer by naming the matching defined term, quote its definition, and cite its defining publication; keep using that term throughout. Match TIME SCALE carefully: change under a constant load over minutes/hours is creep; change over months/years of use is span stability or durability — do not call long-term drift creep."
     : undefined;
   const { messages, usedHits } = buildMessages(
     q.query,

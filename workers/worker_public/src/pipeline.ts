@@ -118,7 +118,7 @@ function pickTypedChunk(query: string, candidates: Hit[], ranked: Hit[]): Hit | 
 // share almost no vocabulary with the B-series prose that answers them —
 // expand the retrieval query with the corpus's own terms so the window
 // contains the certification-system documents at all
-const PROCESS_EXPANSION = " OIML Certification System OIML-CS issuing authority application type evaluation certificate";
+const PROCESS_EXPANSION = " OIML Certification System OIML-CS OIML B 18 CASCO ISO/IEC 17000 conformity assessment issuing authority application type evaluation certificate";
 
 export async function retrieve(
   env: any,
