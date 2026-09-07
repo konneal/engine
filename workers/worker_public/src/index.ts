@@ -17,7 +17,7 @@ import { reflect } from "./reflect";
 import researchPromptText from "../prompts/research.md";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
 import { canonicalRefusal } from "./refusal";
-import { contractV2, tableRetyped } from "./refs";
+import { contractV2, tableRetyped, resolveBlocks } from "./refs";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
 import { bindModelNode, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
@@ -750,6 +750,10 @@ async function handleAsk(
   // (declared before the retrieval try: the account block, the refusal
   // gate, the prompt and the response all read them)
   let liveRecords: LiveRecord[] | undefined;
+  // set by the contract check when the answer presents a served table's
+  // data without its reference and the corrected retry still omitted the
+  // token — the worker then attaches the table block itself
+  let contractCompletionNeeded = false;
   let accountNote: string | undefined;
   // ── The model plane's node binding (TODO.ai-platform/05) ──
   // "this requirement" on a model surface grounds in the model NODE
@@ -1013,8 +1017,13 @@ async function handleAsk(
     })();
     if (anchors.violations.length > 0 || retyped || unreferenced) {
       console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "— regenerating");
+      // name the EXACT unit the token must reference — a generic note
+      // leaves the model guessing which id to write
+      const tableUnitId = unreferenced
+        ? used.find((h: Hit) => h.metadata.unit_id && h.metadata.block === "table")?.metadata.unit_id
+        : undefined;
       const note = retyped || unreferenced
-        ? "Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:<unit id>]] from the passage header where the table belongs. Do not render any table as markdown."
+        ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.`
         : ANCHOR_CORRECTION_NOTE;
       const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }]);
       if (corrected) {
@@ -1026,6 +1035,14 @@ async function handleAsk(
         }
       }
     }
+    // contract COMPLETION (the verdict-block philosophy): if the answer
+    // presents a served table's data and the model still did not write
+    // the reference after the corrected retry, the worker attaches the
+    // block itself — the renderer draws from the blocks array, so the
+    // table reaches the user exactly from the producer's payload with or
+    // without the model's inline token. The contract is mechanical, not
+    // a hope: two generation samples failing no longer ships a violation.
+    contractCompletionNeeded = unreferenced && !answer.includes("[[u:");
   }
 
   // ── Self-RAG reflection loop ──
@@ -1071,7 +1088,14 @@ async function handleAsk(
   if (finalAnchors.violations.length > 0) {
     console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified — not caching");
   }
-  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: verdictBlock ? [...c2ns.blocks, verdictBlock] : c2ns.blocks, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
+  // contract completion: the table the answer presented without its
+  // reference rides the blocks array anyway — resolved from the same D1
+  // payloads contractV2 uses, never fabricated
+  const completionBlocks = contractCompletionNeeded
+    ? await resolveBlocks(env.DB, used.filter((h: Hit) => h.metadata.unit_id && h.metadata.block === "table").map((h: Hit) => String(h.metadata.unit_id)).slice(0, 2))
+    : [];
+  if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
