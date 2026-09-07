@@ -1108,9 +1108,41 @@ async function handleAsk(
   // contract completion: the table the answer presented without its
   // reference rides the blocks array anyway — resolved from the same D1
   // payloads contractV2 uses, never fabricated
-  const completionBlocks = contractCompletionNeeded
-    ? await resolveBlocks(env.DB, used.filter((h: Hit) => h.metadata.unit_id && h.metadata.block === "table").map((h: Hit) => String(h.metadata.unit_id)).slice(0, 2))
-    : [];
+  let completionUnitIds = used.filter((h: Hit) => h.metadata.unit_id && h.metadata.block === "table").map((h: Hit) => String(h.metadata.unit_id)).slice(0, 2);
+
+  // D1 FALLBACK (the l3a determinism close): when no table unit reached
+  // the retrieval window but the answer presents numeric values from a
+  // table in the answer's own document family, look the table up in D1
+  // directly — the artifact must not depend on retrieval luck. This is
+  // the same guarantee the verdict block has: the worker ensures the
+  // data reaches the user.
+  if (!completionUnitIds.length && !answer.includes(REFUSAL_ANSWER)) {
+    try {
+      const answerNums = new Set((answer.match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, "")));
+      if (answerNums.size >= 2) {
+        const docIds = [...new Set(used.map((h: Hit) => h.metadata.doc_id).filter(Boolean))].slice(0, 3);
+        for (const docId of docIds) {
+          const rows = await env.DB.prepare(
+            "SELECT unit_id, payload FROM unit_payloads WHERE type = 'table' AND doc_id = ?1 LIMIT 8",
+          ).bind(docId).all<{ unit_id: string; payload: string }>();
+          for (const r of rows.results ?? []) {
+            const tableNums = new Set((String(r.payload).match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, "")));
+            let hits = 0;
+            for (const n of answerNums) if (tableNums.has(n)) hits++;
+            if (hits >= 2) {
+              completionUnitIds = [r.unit_id];
+              console.log("contract D1 fallback: table", r.unit_id, "in", docId, "—", hits, "matching values");
+              break;
+            }
+          }
+          if (completionUnitIds.length) break;
+        }
+      }
+    } catch {
+      // D1 fallback is additive; primary results stand
+    }
+  }
+  const completionBlocks = completionUnitIds.length ? await resolveBlocks(env.DB, completionUnitIds) : [];
   if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
   const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
