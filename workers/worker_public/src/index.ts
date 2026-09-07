@@ -1119,7 +1119,7 @@ async function handleAsk(
   if (!completionUnitIds.length && !answer.includes(REFUSAL_ANSWER)) {
     try {
       const answerNums = new Set((answer.match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, "")));
-      if (answerNums.size >= 2) {
+      if (answerNums.size >= 1) {
         const docIds = [...new Set(used.map((h: Hit) => h.metadata.doc_id).filter(Boolean))].slice(0, 3);
         for (const docId of docIds) {
           const rows = await env.DB.prepare(
