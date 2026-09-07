@@ -895,9 +895,22 @@ async function handleAsk(
   // the question's subject — the model adjudicates among them and uses
   // the corpus term (with its defining publication) when it names the
   // subject; everyday words stop hiding the defined term
-  const vocabNote = retrieved.glossary?.length
+  // filter the note by the understanding's own defined_terms when it
+  // identified them — the note bridges everyday words to the corpus
+  // term; when the understanding already named the right term, offering
+  // wrong alternatives (creep when the question is about months of use)
+  // gives the answer model a way to pick the wrong one
+  const glossaryForNote = (() => {
+    const g = retrieved.glossary ?? [];
+    if (!g.length) return g;
+    const dt = (understanding?.defined_terms ?? []).map((s: string) => s.toLowerCase());
+    if (!dt.length) return g;
+    const matched = g.filter((x) => dt.some((d: string) => x.term.toLowerCase().includes(d.split(" ")[0]) || d.includes(x.term.toLowerCase().split(" ")[0])));
+    return matched.length ? matched : g; // understanding named terms the glossary didn't carry — keep all
+  })();
+  const vocabNote = glossaryForNote.length
     ? "Vocabulary binding — defined terms in the indexed corpus that may name this question's subject:\n" +
-      retrieved.glossary.map((g) => `- ${g.term} (${g.docidentifier}): ${g.definition}`).join("\n") +
+      glossaryForNote.map((g) => `- ${g.term} (${g.docidentifier}): ${g.definition}`).join("\n") +
       "\nIf the question describes a symptom or behavior in everyday words, OPEN the answer by naming the matching defined term, quote its definition, and cite its defining publication; keep using that term throughout. Match TIME SCALE carefully: change under a constant load over minutes/hours is creep; change over months/years of use is span stability or durability — do not call long-term drift creep."
     : undefined;
   const { messages, usedHits } = buildMessages(
@@ -1042,7 +1055,11 @@ async function handleAsk(
     // table reaches the user exactly from the producer's payload with or
     // without the model's inline token. The contract is mechanical, not
     // a hope: two generation samples failing no longer ships a violation.
-    contractCompletionNeeded = unreferenced && !answer.includes("[[u:");
+    // ALWAYS complete the contract when a table unit was served and the
+    // model didn't reference it — the block is additive (the renderer
+    // shows it from the producer's payload regardless of the inline
+    // token), so there is no reason to condition on number-matching
+    contractCompletionNeeded = (unreferenced || hasTableUnit) && !answer.includes("[[u:");
   }
 
   // ── Self-RAG reflection loop ──
