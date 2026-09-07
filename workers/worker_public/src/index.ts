@@ -1115,18 +1115,22 @@ async function handleAsk(
     try {
       const answerNums = new Set((answer.match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, "")));
       if (answerNums.size >= 1) {
-        const docIds = [...new Set(used.map((h: Hit) => h.metadata.doc_id).filter(Boolean))].slice(0, 3);
-        for (const docId of docIds) {
+        // match by docidentifier (the chunks and unit_payloads use
+        // different doc_id schemes — 'dirty:r60-1-2006-eng' vs
+        // 'mko:oiml-r-60-1' — but both carry the publication name)
+        const fams = [...new Set(used.map((h: Hit) => h.metadata.docidentifier).filter(Boolean))].slice(0, 3);
+        for (const fam of fams) {
+          const base = String(fam).replace(/\s*\([A-Z]\)\s*$/, "").split(":")[0].trim();
           const rows = await env.DB.prepare(
-            "SELECT unit_id, payload FROM unit_payloads WHERE type = 'table' AND doc_id = ?1 LIMIT 8",
-          ).bind(docId).all<{ unit_id: string; payload: string }>();
+            "SELECT unit_id, payload FROM unit_payloads WHERE type = 'table' AND docidentifier LIKE ?1 LIMIT 8",
+          ).bind(`%${base}%`).all<{ unit_id: string; payload: string }>();
           for (const r of rows.results ?? []) {
             const tableNums = new Set((String(r.payload).match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, "")));
             let hits = 0;
             for (const n of answerNums) if (tableNums.has(n)) hits++;
             if (hits >= 1) {
               completionBlocks = await resolveBlocks(env.DB, [r.unit_id]);
-              console.log("contract D1 completion: table", r.unit_id, "in", docId, "—", hits, "matching values");
+              console.log("contract D1 completion: table", r.unit_id, "in", base, "—", hits, "matching values");
               break;
             }
           }
