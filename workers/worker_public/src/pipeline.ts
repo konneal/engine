@@ -758,7 +758,12 @@ if (glossary.length && hits.length > 1) {
         const hay = `${typed.metadata.clause_title ?? ""} ${typed.text}`.toLowerCase();
         return terms.filter((t) => hay.includes(t)).length;
       })();
-      if (typed && overlap >= 3 && !finalHits.some((h) => h.id === typed.id)) {
+      // tables are exempt from the overlap gate: a table in the window
+      // renders as a block and summarizes harmlessly — the pollution
+      // concern applies to other typed units, not to the one artifact
+      // the answer contract most needs to reach the user
+      const tableExempt = typed?.metadata.block === "table";
+      if (typed && (overlap >= 3 || tableExempt) && !finalHits.some((h) => h.id === typed.id)) {
         finalHits = [...finalHits.slice(0, LIMITS.rerankKeep - 1), typed];
         console.log("typed pin:", typed.metadata.docidentifier, "§", typed.metadata.clause_anchor, `(${typed.metadata.block})${hardScope ? "" : " [glossary families]"}`);
 
