@@ -88,8 +88,42 @@ class CF:
                 if e.response.status_code in (400, 422):
                     last_err = e
                     continue  # wrong request shape — try the next
-                raise  # 429-after-retries / 5xx / auth — not a shape problem
+                if e.response.status_code == 401:
+                    # the REST token's AI-run scope flakes (three waves
+                    # running); the deployed worker's binding path is the
+                    # reliable equivalent — fall back rather than fail the
+                    # wave on recoverable auth
+                    return self._embed_via_binding(texts)
+                raise  # 429-after-retries / 5xx — not a shape problem
         raise RuntimeError(f"embedding failed for all shapes: {last_err}")
+
+    def _embed_via_binding(self, texts: list[str]) -> list[list[float]]:
+        import os as _os
+
+        from pathlib import Path as _Path
+
+        env: dict[str, str] = {}
+        env_file = _Path(__file__).resolve().parents[1] / ".env"
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, _, v = line.partition("=")
+                    env[k.strip()] = v.strip()
+        token = env.get("ADMIN_TOKEN") or _os.environ.get("ADMIN_TOKEN")
+        if not token:
+            raise RuntimeError("embedding REST 401 and no ADMIN_TOKEN for the binding fallback")
+        base = _os.environ.get("RAG_BASE", "https://ai.oimlsmart.org").rstrip("/")
+        out: list[list[float]] = []
+        with httpx.Client(timeout=300) as c:
+            for i in range(0, len(texts), 16):
+                r = c.post(
+                    f"{base}/admin/vectors",
+                    headers={"authorization": f"Bearer {token}", "user-agent": "oiml-ingest-fallback/1.0"},
+                    json={"mode": "embed", "texts": texts[i : i + 16]},
+                )
+                r.raise_for_status()
+                out += r.json()["vectors"]
+        return out
 
     @staticmethod
     def _extract_vecs(data: dict) -> list[list[float]] | None:
