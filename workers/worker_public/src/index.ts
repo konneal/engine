@@ -1129,7 +1129,7 @@ async function handleAsk(
             const tableNums = new Set((String(r.payload).match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, "")));
             let hits = 0;
             for (const n of answerNums) if (tableNums.has(n)) hits++;
-            if (hits >= 2) {
+            if (hits >= 1) {
               completionUnitIds = [r.unit_id];
               console.log("contract D1 fallback: table", r.unit_id, "in", docId, "—", hits, "matching values");
               break;
