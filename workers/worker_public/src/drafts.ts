@@ -143,7 +143,7 @@ export function detectDraftIntent(query: string): "application_prefill" | null {
 /** Decode the exchanged token's roles for the platform (the service's
  *  OWN fetched token — decoded, never re-validated; livedata.ts's
  *  roleFamilyOf posture). */
-export function decodeServiceRoles(token: string, platformClientId: string): string[] {
+function decodeServiceRoles(token: string, platformClientId: string): string[] {
   try {
     const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
     const roles = payload?.service_roles?.[platformClientId];
@@ -198,7 +198,7 @@ interface Extraction {
 /** The extraction pass: the LLM reads the user's turns and PROPOSES the
  *  fields, each with the source span it was copied from. The guard
  *  disposes — a proposal the user never stated never rides the draft. */
-export async function extractDraftFields(ai: any, model: string, userTurns: string[]): Promise<Extraction | null> {
+async function extractDraftFields(ai: any, model: string, userTurns: string[]): Promise<Extraction | null> {
   const transcript = userTurns.map((t, i) => `${i + 1}. ${t}`).join("\n").slice(0, 12000);
   try {
     const res: any = await ai.run(model, {
@@ -319,7 +319,7 @@ interface ResolvedStandard {
 /** Resolve the named Recommendation against the documents registry: the
  *  family must exist (the ACTIVE edition is the draft's anchor), else
  *  the draft honestly has nothing to anchor on. */
-export async function resolveStandard(env: any, named: string): Promise<ResolvedStandard | null> {
+async function resolveStandard(env: any, named: string): Promise<ResolvedStandard | null> {
   const m =
     named.match(/^urn:oiml:pub:([rdbge]):(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i) ??
     named.match(/^(?:OIML\s+)?([RDBGE])\s*(\d{1,3})(?:-[0-9A-Za-z]+)?(?:\s*:\s*(\d{4}))?$/i);

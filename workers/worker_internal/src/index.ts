@@ -7,6 +7,9 @@
 
 import { sessionFrom } from "../../shared/auth";
 import { embed } from "../../shared/ai";
+import type { ChunkMeta, Hit } from "../../shared/chunk";
+
+export type { ChunkMeta, Hit };
 
 export interface Env {
   AI: any;
@@ -25,29 +28,6 @@ const json = (body: unknown, status = 200) =>
 
 const err = (status: number, code: string, message: string) =>
   json({ error: { code, message } }, status);
-
-interface ChunkMeta {
-  doc_id: string;
-  docidentifier: string;
-  doctype: string;
-  doc_number: string;
-  edition: string;
-  language: string;
-  clause_anchor: string;
-  clause_title: string;
-  tier: string;
-  corpus: string;
-  text_ref: string;
-  chunk_text?: string;
-  status?: string;
-}
-
-interface Hit {
-  id: string;
-  score: number;
-  metadata: ChunkMeta;
-  text: string;
-}
 
 function toHit(m: any): Hit {
   return {

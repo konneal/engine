@@ -14,7 +14,7 @@ const RRF_K = 60;
  *  Not a full BM25 (no IDF — we don't have corpus statistics in the
  *  worker); this is a lexical overlap score that catches exact terms
  *  that dense embeddings miss. */
-export function keywordScore(query: string, text: string): number {
+function keywordScore(query: string, text: string): number {
   const terms = query
     .toLowerCase()
     .replace(/[^\w\s-]/g, " ")

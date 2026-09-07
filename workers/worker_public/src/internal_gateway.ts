@@ -10,12 +10,6 @@ interface ServiceFetcher {
   fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
 }
 
-/** Any signed-in member gets both datasets (public + ISO). The tier
- *  distinction is: anonymous = public only, member = federated. */
-export function hasInternalAccess(): boolean {
-  return true;
-}
-
 /** Ask rag-internal for RRF-fused passages for the query. Returns [] on
  *  any failure — the public-only results then serve the member.
  *  `auth` forwards the caller's session in WHATEVER form it arrived

@@ -2,6 +2,7 @@
 // with per-rung witness grading. D-only rungs are skipped when the target
 // lane lacks primmel. Usage: node tests/annealment.mjs [--rung L3] [--lane C]
 import { readFileSync } from "node:fs";
+import { gradeWitness } from "./grade.mjs";
 
 const BASE = process.env.BASE_URL ?? "https://ai.oimlsmart.org";
 const KEY = readFileSync(".env", "utf8").match(/^KEY=(.+)$/m)?.[1]?.trim();
@@ -26,12 +27,9 @@ for (const c of laneXIdx >= 0 ? [] : cases) {
     const d = await res.json();
     const answer = d.answer ?? "";
     const cites = (d.citations ?? []).map((x) => `${x.docidentifier ?? ""} §${x.clause_anchor ?? ""} ${x.snippet ?? ""}`).join(" | ");
-    const blocks = d.blocks ?? [];
-    const answerOk = !c.expect.answer_any || c.expect.answer_any.some((r) => new RegExp(r, "i").test(answer));
-    const citeOk = !c.expect.citation_any || new RegExp(c.expect.citation_any).test(cites);
-    const anchorOk = !c.expect.anchor_any || new RegExp(c.expect.anchor_any).test(cites);
-    const artifactOk = !c.expect.artifact || blocks.some((b) => b.type === c.expect.artifact);
-    const ok = answerOk && citeOk && anchorOk && artifactOk;
+    const g = gradeWitness(c.expect, { answer, citeText: cites, anchorText: cites, artifactTypes: (d.blocks ?? []).map((b) => b.type) });
+    const { answer: answerOk, citation: citeOk, anchor: anchorOk, artifact: artifactOk } = g.legs;
+    const ok = g.ok;
     if (ok) pass++; else skip++;
     byRung[c.rung] = byRung[c.rung] || { pass: 0, total: 0 };
     if (ok) byRung[c.rung].pass++;
@@ -67,13 +65,19 @@ if (laneXIdx >= 0) {
       const hits = d.hits ?? [];
       const hay = hits.map((h) => `${h.docidentifier ?? ""} §${h.clause_anchor ?? ""} ${h.clause_title ?? ""} ${h.text ?? ""}`).join(" | ");
       const anchors = hits.map((h) => `§${h.clause_anchor ?? ""}`).join(" ");
-      // the witness must appear WITHIN one passage (co-occurrence spans
-      // a passage, never across hits)
-      const witnessOk = !c.witness || hits.some((h) => new RegExp(c.witness, "i").test(`${h.clause_title ?? ""} ${h.text ?? ""}`));
-      const citeOk = !c.expect.citation_any || new RegExp(c.expect.citation_any, "i").test(hay);
-      const anchorOk = !c.expect.anchor_any || new RegExp(c.expect.anchor_any).test(anchors);
-      const artifactOk = !c.expect.artifact || hits.some((h) => h.block === c.expect.artifact);
-      const ok = witnessOk && citeOk && anchorOk && artifactOk;
+      const g = gradeWitness(
+        { ...c.expect, witness: c.witness },
+        {
+          citeText: hay,
+          anchorText: anchors,
+          artifactTypes: hits.map((h) => h.block),
+          // the witness must appear WITHIN one passage (co-occurrence spans
+          // a passage, never across hits)
+          passages: hits.map((h) => `${h.clause_title ?? ""} ${h.text ?? ""}`),
+        },
+      );
+      const { witness: witnessOk, citation: citeOk, anchor: anchorOk, artifact: artifactOk } = g.legs;
+      const ok = g.ok;
       if (ok) lp++;
       byRungLane[c.rung] = byRungLane[c.rung] || { pass: 0, total: 0 };
       if (ok) byRungLane[c.rung].pass++;

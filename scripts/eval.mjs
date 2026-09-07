@@ -10,6 +10,7 @@
 // a member session never answers records) runs unconditionally.
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { gradeWitness, one, re } from "../tests/grade.mjs";
 
 const BASE = process.env.BASE_URL ?? "https://ai.oimlsmart.org";
 const envText = readFileSync(new URL("../.env", import.meta.url), "utf8");
@@ -37,9 +38,6 @@ if (!KEY) {
 }
 
 const cases = JSON.parse(readFileSync(new URL("../tests/golden/cases.json", import.meta.url), "utf8"));
-
-const one = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
-const re = (s, flags = "i") => new RegExp(s, flags);
 
 async function runCase(c) {
   const checks = [];
@@ -100,15 +98,19 @@ async function runCase(c) {
   } else {
     if (refused) fail("unexpected refusal");
     else pass("answered");
-    const anyPats = one(c.expect.answer_any);
-    if (anyPats.length) {
-      const hit = anyPats.find((p) => re(p).test(answer));
-      hit ? pass(`answer ~/${hit}/`) : fail(`answer lacks all of [${anyPats.join(", ")}]: ${answer.slice(0, 100)}`);
+    // answer_any semantics live in the shared grader (tests/grade.mjs) —
+    // the runner only renders its verdicts
+    const g = gradeWitness(c.expect, { answer });
+    if ("answer" in g.legs) {
+      g.legs.answer
+        ? pass(`answer ~/${g.matched.answer}/`)
+        : fail(`answer lacks all of [${one(c.expect.answer_any).join(", ")}]: ${answer.slice(0, 100)}`);
     }
     for (const p of one(c.expect.answer_none)) re(p).test(answer) ? fail(`answer contains forbidden /${p}/`) : pass(`answer clean of /${p}/`);
   }
   if (c.expect.citation_any) {
-    (cites.length && re(c.expect.citation_any).test(citeText)) ? pass(`citation ~/${c.expect.citation_any}/`) : fail(`no citation matching /${c.expect.citation_any}/ (got: ${citeText.slice(0, 120)})`);
+    const g = gradeWitness(c.expect, { citeText });
+    (cites.length && g.legs.citation) ? pass(`citation ~/${c.expect.citation_any}/`) : fail(`no citation matching /${c.expect.citation_any}/ (got: ${citeText.slice(0, 120)})`);
   }
   // ── the verdict-engine legs (TODO.era3/01): a server-computed verdict
   // block must ride the response with the expected verdict ──

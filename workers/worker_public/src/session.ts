@@ -53,7 +53,7 @@ export function sessionCookieFromToken(token: string): string {
   return `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_TTL_SEC}; HttpOnly; Secure; SameSite=Lax`;
 }
 
-export function parseCookies(req: Request): Record<string, string> {
+function parseCookies(req: Request): Record<string, string> {
   const out: Record<string, string> = {};
   const header = req.headers.get("cookie") ?? "";
   for (const part of header.split(";")) {

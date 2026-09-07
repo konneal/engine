@@ -1,4 +1,4 @@
-import { MODEL_CORPUS_NOTE } from "./modelplane";
+import { MODEL_CORPUS_NOTE } from "./modelplane.ts";
 
 export const MODELS = {
   embed: "@cf/qwen/qwen3-embedding-0.6b",  rerank: "@cf/baai/bge-reranker-base",
@@ -38,6 +38,74 @@ export const LIMITS = {
   // after watching logs for length rejections
   inputTokenBudget: 16000,
   maxPassageTokens: 900, // per-passage cap (clause chunks with tables can be huge)
+} as const;
+
+/** Tuned retrieval thresholds — every number the pipeline steers by.
+ *  Each carries the measurement that justifies it; changing one without
+ *  re-running the gates (golden ×3 + annealment ×6) is a guess. */
+export const THRESHOLDS = {
+  /** HyDE candidate score discount — hypothetical-answer vectors match
+   *  differently than question vectors; 0.7 keeps them competitive
+   *  without letting a bad hypothetical outrank the real query. */
+  hydeDiscount: 0.7,
+  /** Graph-lane candidate discount — graph-filtered chunks enter the
+   *  pool below the primary dense lane; they must earn their window
+   *  slot under the cross-encoder, not by graph membership alone. */
+  graphLaneDiscount: 0.75,
+  /** Concept-graph candidate discount — same rationale as the graph
+   *  lane: definitional content enters discounted. */
+  conceptGraphDiscount: 0.75,
+  /** Multi-hop sub-query discount — sub-question hits are unioned, not
+   *  RRF-fused; the discount keeps them from dominating the primary
+   *  ranking on their first appearance. */
+  subQueryDiscount: 0.8,
+  /** Federated-ISO discount — the public corpus answers by default;
+   *  internal ISO passages compete but don't preempt. */
+  federateDiscount: 0.95,
+  /** Overview-chunk demotion — overview chunks repeat title/doctype
+   *  boilerplate and embed strongly for name-like queries, crowding
+   *  clause chunks out of the rerank window. */
+  overviewDemotion: 0.85,
+  /** Glossary-link cosine floor — below this the dense match to a
+   *  defined term is noise, not a candidate. Calibrated on the
+   *  drifting→durability probe (durability-def 0.542, noise ~0.3). */
+  glossaryCosineFloor: 0.5,
+  /** Exact-term nudge (spread multiplier) — clause chunks whose head IS
+   *  the asked-for term get a decisive nudge because publication headers
+   *  contain the title words and the reranker alone is unreliable there;
+   *  >1 so it dominates the spread, unlike the additive steering boosts. */
+  termNudgeSpread: 1.5,
+  /** Concept-steering rerank boost (spread fraction) — the vocabulary
+   *  link's defining families get the edition-steering boost idiom.
+   *  0.15 is enough to lift in-family content past the cross-encoder's
+   *  vocabulary bias without overriding genuine relevance. */
+  conceptSteerSpread: 0.15,
+  /** Cross-publication recency boost (spread fraction) — a
+   *  current-edition publication ranks over stale ones; composed with
+   *  the family-relative demotion below. */
+  crossPubRecencySpread: 0.1,
+  /** Family-relative edition demotion (spread fraction) — superseded
+   *  editions are demoted when a newer edition of the same publication
+   *  is in the pool; a sibling one revision back still competes. */
+  familyDemoteSpread: 0.4,
+  /** Relevance-floored window — passages below this fraction of the
+   *  top rerank score leave the window (the evidence-budget principle;
+   *  structural units are exempt). */
+  windowFloorFraction: 0.25,
+  /** Small-to-big parent fetch discount — the parent clause enters at
+   *  a discount because it's supplementary grounding, not the answer. */
+  smallToBigDiscount: 0.7,
+  /** Section-descent child discount — children fetched from a ranked
+   *  depth-1 summary enter discounted. */
+  sectionDescentDiscount: 0.8,
+  /** History budget share — the fraction of the context budget the
+   *  conversation slice may consume; older turns overflow into the
+   *  compacted summary instead of starving the passages. */
+  historyBudgetShare: 0.3,
+  /** Process-expansion — appended to process-intent queries so the
+   *  certification-system documents surface; now includes the CASCO
+   *  vocabulary terms (B 18, ISO/IEC 17000). */
+  processExpansion: " OIML Certification System OIML-CS OIML B 18 CASCO ISO/IEC 17000 conformity assessment issuing authority application type evaluation certificate",
 } as const;
 
 /** Per-deployment model override: <ROLE>_MODEL (e.g. UNDERSTAND_MODEL)

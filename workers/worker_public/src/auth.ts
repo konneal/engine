@@ -32,15 +32,13 @@ const PLAIN_LANGUAGE: Record<string, string> = {
   origin_not_allowed: "That site may not connect the assistant to your account.",
 };
 
-export function authErrorText(reason: string): string {
+function authErrorText(reason: string): string {
   return PLAIN_LANGUAGE[reason] ?? "Sign-in failed. Please try again.";
 }
 
 // Two tiers only: anonymous (public index) and member (both indexes).
 // Estate roles (mc_member, etc.) are identity claims, NOT access gates
 // here — any authenticated user is a member.
-export const INTERNAL_ROLES: string[] = []; // deprecated: kept for API compat
-
 export interface AuthConfig {
   issuer: string;
   clientId: string;
@@ -48,7 +46,7 @@ export interface AuthConfig {
   sessionSecret: string;
 }
 
-export function authConfig(env: any): AuthConfig | null {
+function authConfig(env: any): AuthConfig | null {
   const issuer = env.OIDC_ISSUER ?? "https://id.oimlsmart.org";
   const clientId = env.OIDC_CLIENT_ID;
   const redirectUri = env.OIDC_REDIRECT_URI ?? "https://ai.oimlsmart.org/auth/callback";

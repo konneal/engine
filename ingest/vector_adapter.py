@@ -14,8 +14,9 @@ only at the wire.
 The contract:
 
   - ChunkMetaModel — the wire schema, mirroring the serving contract
-    (workers/worker_public/src/pipeline.ts ChunkMeta). Scalars only
-    (a Vectorize constraint), sizes validated BEFORE any wire call.
+    (workers/shared/chunk.ts ChunkMeta; tests/chunkmeta.test.ts fails
+    on drift). Scalars only (a Vectorize constraint), sizes validated
+    BEFORE any wire call.
   - VectorChunk — id + text + metadata; `upsert(vector, target)` builds
     the REST payload, refusing corpora that do not belong to the target.
   - The corpus registry — the SSOT for every `corpus` value in any
