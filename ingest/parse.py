@@ -12,13 +12,13 @@ from .status import status_for
 from .models import DocRecord, Section
 
 ATTR_RE = re.compile(r"^:([A-Za-z0-9_-]+):\s*(.*)$", re.M)
-DOCID_RE = re.compile(r"OIML\s+([RBV DGE])\s*(\d+)", re.I)
-BARE_DOCID_RE = re.compile(r"^([RBV DGE])\s*(\d+)", re.I)
+DOCID_RE = re.compile(r"OIML\s+([RBV DGES])\s*(\d+)", re.I)
+BARE_DOCID_RE = re.compile(r"^([RBV DGES])\s*(\d+)", re.I)
 # "Annexes to OIML R 60:2017" — the volume's own title declares its family
 ANNEX_TITLE_RE = re.compile(r"^\s*Annex(?:es)?\s+(?:to|of)\s+OIML\s+([A-Z])\s*-?\s*(\d+)", re.I)
 # slug is the pipeline's own naming from the official PDF filenames
 SLUG_ID_RE = re.compile(r"^([a-z]+)[-_]?(\d+)(?!\d)")
-SERIES = {"R", "D", "B", "G", "E", "V"}
+SERIES = {"R", "D", "B", "G", "E", "V", "S"}
 DOCTYPE_MAP = {
     "recommendation": "R",
     "document": "D",
@@ -84,15 +84,25 @@ def edition_from_slug(slug: str) -> str:
     return m.group(1) if m else ""
 
 
+def _sanitize_identifier(docid: str) -> str:
+    """Strip what never belongs in an identifier: language markers
+    (' (E)', ' (F)', ' (E/F)' — language is metadata) and placeholder
+    editions (':0000', ':XXXX' — OCR fallbacks, not years)."""
+    docid = re.sub(r"\s*\((?:E|F|E/F)\)\s*$", "", docid.strip())
+    docid = re.sub(r":(?:0000|XXXX)\b", "", docid)
+    return docid.strip()
+
 def classify_identifier(title: str, attrs: dict[str, str], slug: str) -> tuple[str, str, str]:
     """Identity precedence: a readable header docidentifier wins (it can
     correct the slug — e.g. sources/r120-1996-ara holds OIML D 117:2003);
     a title-declared annex volume beats an OCR-garbled header (R 60's
     annexes OCR as "OIML D 60"); a placeholder header ("OIML D X") defers
     to the slug, which comes from the official PDF filenames."""
-    docid = attrs.get("docidentifier", "")
+    docid = _sanitize_identifier(attrs.get("docidentifier", ""))
     dm = DOCID_RE.search(docid) or BARE_DOCID_RE.match(docid)
-    header_ok = bool(dm and dm.group(2).isdigit())
+    # a header identifier is readable only when its number is real (1-999,
+    # not the OCR-fallback 0) — "OIML D 0:0000 (E)" must lose to the slug
+    header_ok = bool(dm and dm.group(2).isdigit() and 0 < int(dm.group(2)) <= 999)
 
     tm = ANNEX_TITLE_RE.match(title or "")
     if tm:
@@ -121,10 +131,18 @@ def classify_identifier(title: str, attrs: dict[str, str], slug: str) -> tuple[s
     if not doc_number:
         m = re.search(r"(?:^|[a-z])(\d{1,3})", slug)
         doc_number = m.group(1) if m else ""
-    if doctype and doc_number.isdigit():
+    if doctype and doc_number.isdigit() and 0 < int(doc_number) <= 999:
         year = attrs.get("edition") or edition_from_slug(slug)
         suffix = f":{year}" if year else ""
         return f"OIML {doctype} {doc_number}{suffix}", doctype, doc_number
+    # nothing readable anywhere — a slug-derived guess still beats a
+    # placeholder ("OIML D X") for retrieval reachability
+    sm2 = SLUG_ID_RE.match(slug or "")
+    if sm2:
+        series, num = sm2.group(1).upper(), str(int(sm2.group(2)))
+        year = edition_from_slug(slug)
+        suffix = f":{year}" if year else ""
+        return f"OIML {series} {num}{suffix}", series, num
     return docid, doctype, doc_number
 
 

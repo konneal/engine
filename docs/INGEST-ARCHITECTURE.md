@@ -83,8 +83,41 @@ hand.
 | Graph projection | ✅ 7,128 nodes / 6,486 edges in D1; query lane live (defined_terms → defines → candidates) |
 | Chunking | prose-only today; ChunkRecordV2 typed blocks = next build (tables/equations/requirements) |
 | Enrichment | ✅ 99.4% corpus, KV-cached, content-hash invalidation designed |
-| Verification | ad-hoc (build counts); the invariant-gated VERIFY stage + data-quality report = next build |
+| Verification | unit suites + contract tests in CI (`npm run test:units`, pydantic↔TS wire contract, schema-union drift); the data-quality report loop = next build |
 | Orchestration | manual commands today; one-command pipeline (`ingest run --doc X`) when the above land |
+
+## Corpus operations (the wire loop, as of 2026-09-08)
+
+```
+parse            corpora → artifacts/chunks.jsonl (identifiers sanitized,
+                 placeholders never win — language markers and :0000/:XXXX
+                 fall to the slug-derived identity)
+retrieval-plane  primmel export → artifacts/model_chunks.jsonl (the
+                 model-plane CHUNK source; the projection's model-plane
+                 command feeds D1 nodes only)
+embed            content-aware resume: artifacts/embed_text_hashes.json
+                 (id → text hash) — changed text re-embeds, untouched ids
+                 never do (model chunk ids are content-independent hashes;
+                 id-keyed resume alone would pair stale vectors with fresh
+                 metadata)
+upsert           the internal worker's /admin/sync binding route
+                 (rag-internal.<account>.workers.dev — no REST token
+                 needed); the CLI's REST path defaults to the production
+                 index idx_oiml_public_v2
+reconcile        scripts/reconcile_index.py — enumerate the index (wrangler
+                 list-vectors), diff against the canonical chunk set,
+                 delete strays (--apply). Upserts never delete; this closes
+                 the loop.
+cache            scripts/invalidate_answer_cache.py (or wrangler kv put
+                 sys:corpus_gen) after any corpus surgery
+graph            ingest.cli graph (build) + graph --corpus apply (D1,
+                 wrangler; absolute --file path)
+gates            scripts/gates.sh — golden ×N + annealment ×M
+```
+
+The vector adapter (`ingest/vector_adapter.py`, contract in
+`docs/vector-adapter.md`) remains the ONLY door from any producer to any
+index: wire schema + target gating.
 
 ## PubID as the identity backbone
 
