@@ -225,10 +225,15 @@ def apply() -> int:
     if not OUT.exists():
         print("no graph.sql — run `graph` first")
         return 1
+    env = {"PATH": "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin",
+           "CLOUDFLARE_ACCOUNT_ID": "06cad8ae9a017c856ab496c6bca9a9d8"}
     r = subprocess.run(
-        ["npx", "wrangler", "d1", "execute", "rag-public", "--remote", "--file", str(OUT)],
+        # the file path must be ABSOLUTE: wrangler resolves it against its
+        # own cwd (the worker dir), not the repo root
+        ["npx", "wrangler", "d1", "execute", "rag-public", "--remote",
+         "--file", str(OUT.resolve() if not OUT.is_absolute() else OUT)],
         cwd=Path(__file__).resolve().parents[1] / "workers" / "worker_public",
-        env={"PATH": "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin", **{}},
+        env=env,
     )
     return r.returncode
 
