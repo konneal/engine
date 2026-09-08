@@ -104,5 +104,5 @@ export function toHits(matches: any[]): Hit[] {
 // directions. A mismatch fails typecheck here, not at the wire.
 type AssertNever<T extends never> = T;
 type ManifestField = (typeof CHUNK_META_FIELDS)[number];
-type _manifestMissingFromInterface = AssertNever<Exclude<ManifestField, keyof ChunkMeta>>;
-type _interfaceMissingFromManifest = AssertNever<Exclude<keyof ChunkMeta, ManifestField>>;
+export type _manifestMissingFromInterface = AssertNever<Exclude<ManifestField, keyof ChunkMeta>>;
+export type _interfaceMissingFromManifest = AssertNever<Exclude<keyof ChunkMeta, ManifestField>>;

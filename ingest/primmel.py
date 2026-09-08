@@ -18,7 +18,6 @@ from pathlib import Path
 
 import yaml
 
-from .models import Chunk, DocRecord
 
 DOCIDENTIFIER = "OIML R 60:2021"
 DOC_NUMBER = "60"

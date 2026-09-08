@@ -203,7 +203,6 @@ function roleFamilyOf(token: string, platformClientId: string): string {
   }
 }
 
-const LIVE_STORES = ["applications", "certificates", "testRequests"] as const;
 const MAX_RECORDS = 12;
 const PROGRESS_FOR = 3;
 
@@ -211,7 +210,7 @@ const PROGRESS_FOR = 3;
  *  filters server-side — a refused store contributes NOTHING, never an
  *  error into the answer) + the progress projection for the freshest
  *  applications. Every record maps 1:1 from a platform row. */
-export async function readMyAccount(env: any, cfg: LiveDataConfig, token: string): Promise<LiveRead> {
+export async function readMyAccount(_env: any, cfg: LiveDataConfig, token: string): Promise<LiveRead> {
   const auth = { authorization: `Bearer ${token}` };
   const readAt = new Date().toISOString();
   const family = roleFamilyOf(token, cfg.platformClientId);

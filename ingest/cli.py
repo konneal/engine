@@ -51,7 +51,6 @@ def attach_families(docs) -> list:
             ident = normalize_identifier(raw)
             edition = (d.edition or "").strip()
             title = d.title.split("—")[0].strip() if "—" in d.title else d.title
-            is_part = ident.startswith(base_ident + "-")
             rank = (
                 1 if d.corpus == "clean" else 0,
                 edition if edition.isdigit() else "0000",

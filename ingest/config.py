@@ -20,7 +20,11 @@ _load_dotenv()
 
 ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
 API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
-INDEX_NAME = os.environ.get("VECTORIZE_INDEX", "idx_oiml_public")
+# DEFAULT = the production index the worker serves (the 2026-09-08
+# near-miss: the default was the retired v1 name and a re-index quietly
+# landed there while production served v2 — explicit VECTORIZE_INDEX
+# still overrides, e.g. for comparison lanes).
+INDEX_NAME = os.environ.get("VECTORIZE_INDEX", "idx_oiml_public_v2")
 
 
 def _wrangler_oauth_token() -> str:

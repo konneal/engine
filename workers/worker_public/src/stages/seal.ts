@@ -10,7 +10,7 @@ export const seal: Stage = {
   run: (c) => {
     const before = c.hits.length;
     const scope = c.opts.sealScope!;
-    c.hits = c.hits.filter((h) => h.metadata.doc_number === scope.doc_number && (!scope.edition || h.metadata.edition === scope.edition));
+        c.hits = c.hits.filter((h) => h.metadata.doc_number === scope.doc_number && (!scope.edition || h.metadata.edition === scope.edition));
     console.log("context seal:", before, "→", c.hits.length, "candidates within", `doc#${scope.doc_number}${scope.edition ? "@" + scope.edition : ""}`);
   },
 };

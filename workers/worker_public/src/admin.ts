@@ -1,9 +1,9 @@
 // Admin-surface handlers: enrichment, section units, captions, vector
 // ops, judging, API-key management — every ADMIN_TOKEN-gated route's
 // behavior lives here (TODO.impl/23); index.ts only registers them.
-import { LIMITS, MODELS, num, roleModel, sha256Hex, today } from "./config";
+import { MODELS, num, sha256Hex, today } from "./config";
 import { embed } from "./ai";
-import { err, json, corsHeaders, readJson, type ApiKey } from "./lib/http";
+import { err, json, corsHeaders, readJson } from "./lib/http";
 import type { Env } from "./env";
 import enrichmentPrompt from "../prompts/enrichment.md";
 import sectionSummaryPrompt from "../prompts/section-summary.md";

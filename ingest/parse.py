@@ -343,8 +343,13 @@ def parse_doc(doc_root: Path, corpus: str, slug: str, ident_override: str | None
     if year_in_id:
         edition = year_in_id.group(1)
     elif not re.fullmatch(r"(19|20)\d{2}", edition):
-        # part/edition numbers like "2" are not years — never render as ":2"
-        edition = edition_from_slug(slug)
+        # part/edition numbers like "2" are not years — never render as ":2".
+        # The year form (what urns, seals and edition steering speak) comes
+        # from the revision DATE first, the slug second (r060's slug carries
+        # no year; its parts are Edition 2 (2021-10-01) — the chunk edition
+        # must be 2021).
+        m = re.search(r"(19|20)\d{2}", attrs.get("revdate", ""))
+        edition = m.group(1) if m else edition_from_slug(slug)
     language = explicit_slug_language(slug) or attrs.get("language", "").strip() or language_from_slug(slug)
     html_path = (
         metanorma_dir / "document.html"

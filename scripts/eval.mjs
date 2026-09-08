@@ -29,6 +29,11 @@ const REFUSAL = "I don't have information on this in the indexed OIML publicatio
 const REFUSAL_DRIFT = [
   /\b(can'?t|cannot|couldn'?t|unable)\b[^.]{0,120}?\b(indexed )?OIML publications\b/i,
   /\bno real answer to give\b[^.]{0,120}?\bOIML\b/i,
+  // 2026-09-08 drift: the model self-describes the scope instead of
+  // quoting the pin ("I'm the OIML SMART assistant, and I only answer
+  // questions about …") — still a refusal of the out-of-scope ask; an
+  // ANSWER to the ask never self-scopes like this
+  /\b(only answer|only covers?)\b[^.]{0,120}?\bOIML\b/i,
 ];
 const isRefusal = (answer) => answer.includes(REFUSAL) || REFUSAL_DRIFT.some((r) => r.test(answer));
 

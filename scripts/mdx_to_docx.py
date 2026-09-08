@@ -104,9 +104,6 @@ def convert(mdx_path: Path, out_dir: Path) -> Path:
     while i < len(lines):
         line = lines[i]
 
-        fig = FIGURE_RE.match(line.strip()) or (
-            FIGURE_RE.match("\n".join(lines[i : i + 6]).strip()) if line.strip().startswith("<Figure") else None
-        )
         if line.strip().startswith("<Figure"):
             block = [line]
             while not block[-1].strip().endswith("/>") and i + len(block) < len(lines):

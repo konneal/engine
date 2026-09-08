@@ -14,12 +14,11 @@ export { REFUSAL_ANSWER } from "./refusal";
 /** Fill {{TOKEN}} placeholders in a prompt data file. Unknown/empty tokens
  *  resolve to "" so optional lines vanish cleanly. */
 function fill(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (m, k: string) => (k in vars ? vars[k] : ""));
+  return template.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => (k in vars ? vars[k] : ""));
 }
 import { QueryFilters, toVectorizeFilter } from "./selfquery";
 import { lexicalPrefilter } from "./lexical";
 import { positionOrder } from "./structural";
-import { QueryUnderstanding } from "./understand";
 import { STAGES, runStages } from "./stages";
 import type { PipelineContext, RetrieveOptions, GlossaryEntry } from "./stages/types";
 // the chunk wire contract lives with its pydantic twin (workers/shared/
@@ -71,10 +70,20 @@ export async function retrieve(
   // regex floor, no union. When understanding is unavailable the query
   // runs unfiltered and unexpanded (vanilla retrieval); meaning is never
   // decided by string matching.
-  const filters: QueryFilters | null =
+  // The declared context's HARD scope outranks the understanding's routing
+  // opinion: a certificate chip that says R 60:2021 keeps its dense filter
+  // even when the question's vocabulary makes the classifier emit
+  // process_intent (certification wording is the chip's subject, not the
+  // question's). Without this, dense runs unfiltered, the certification
+  // corpus floods the pool, and the pool-level seal — which must stay hard —
+  // cuts it to zero (the ctx-entity refusal, diagnosed 2026-09-08).
+  const scope: QueryFilters | null =
     u && !u.process_intent && u.doc_number
       ? { doc_number: u.doc_number, ...(u.edition ? { edition: u.edition } : {}) }
-      : null;
+      : opts.sealScope
+        ? { doc_number: opts.sealScope.doc_number, ...(opts.sealScope.edition ? { edition: opts.sealScope.edition } : {}) }
+        : null;
+  const filters: QueryFilters | null = scope;
   const filter = filters ? toVectorizeFilter(filters) : null;
   const folded = retrievalQuery(query, opts.prev);
   let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || folded;

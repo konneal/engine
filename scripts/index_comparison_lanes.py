@@ -107,7 +107,6 @@ def enrich_chunks(chunks: list[dict], lane: str) -> list[dict]:
 
 def embed_and_upsert(enriched: list[dict], index_name: str, lane: str):
     """Embed via /admin/vectors embed mode, then upsert via Vectorize REST."""
-    import subprocess
 
     total = len(enriched)
     upserted = 0
@@ -146,7 +145,7 @@ def embed_and_upsert(enriched: list[dict], index_name: str, lane: str):
                 headers={"Authorization": f"Bearer {token}", "content-type": "application/json",
                          "User-Agent": "oiml-lane-indexer/1.0"},
             )
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=60):
                 upserted += len(vs)
         except Exception as e:
             print(f"  upsert batch FAIL at {i}: {str(e)[:120]}")

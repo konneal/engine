@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ingest.cf import CF  # noqa: E402
-from ingest.config import ARTIFACTS, INDEX_NAME  # noqa: E402
+from ingest.config import ARTIFACTS  # noqa: E402
 import os  # noqa: E402
 
 YEAR_LANG_RE = re.compile(r"\s*:\s*(19|20)\d{2}\s*(\([A-Z/]+\))?\s*$")

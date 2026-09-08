@@ -263,13 +263,11 @@ def to_doc_record(bundle: MkoBundle, corpus: str = "mko") -> DocRecord:
     # doc_number from the canonical ("OIML R 60-1" → "60"): the
     # Vectorize doc_number filter and the graph lane key on it — without
     # the parse, every MKO chunk is invisible to doc-scoped retrieval
-    m = re.match(r"^[A-Z]+\s+(?:R|D|B|G|E|V)\s*(\d+)", bundle.canonical) or re.match(r"^[A-Z]+\s+([A-Z])\s*(\d+)", bundle.canonical)
     doc_number = ""
     m2 = re.search(r"(?:R|D|B|G|E|V)\s*-?\s*(\d+)", bundle.canonical)
     if m2:
         doc_number = str(int(m2.group(1)))
     # producer-parsed identity wins when present (metanorma-document#52)
-    ids = getattr(bundle.document.ids, "__dict__", {}) if bundle.document else {}
     if getattr(bundle.document.ids, "number", None):
         doc_number = str(bundle.document.ids.number)
     return DocRecord(

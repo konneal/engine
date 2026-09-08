@@ -127,14 +127,13 @@ def main() -> int:
                     else c["metadata"].get("chunk_text") or c.get("text", "")
                     for c in items
                 ]
-                last = None
                 for a in range(attempts):
                     try:
                         vecs = cf.embed(texts)
                         if vecs and len(vecs) == len(items):
                             return list(zip(items, vecs))
-                    except Exception as e:  # noqa: BLE001
-                        last = e
+                    except Exception:  # noqa: BLE001
+                        pass
                     time.sleep(4 * (a + 1))
                 # batch keeps failing → isolate the offender(s) per-item
                 out_ok = []
