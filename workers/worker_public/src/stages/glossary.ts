@@ -13,17 +13,26 @@ import { rerank } from "../ai.ts";
 import { MODELS, THRESHOLDS } from "../config.ts";
 import type { Stage } from "./types.ts";
 
+interface GlossaryCand {
+  term: string;
+  definition: string;
+  docidentifier: string;
+  doc_number: string;
+  score: number;
+}
+
 export const glossary: Stage = {
   name: "glossary",
   failure: "additive",
   when: (c) => !!c.env.GLOSSARY && c.vector.length > 0,
-  run: async (c) => {
-    const g = await c.env.GLOSSARY.query(c.vector, { topK: 5, returnMetadata: "all" });
-    const cands = (g.matches ?? []).filter((m: any) => m.score >= THRESHOLDS.glossaryCosineFloor);
-    if (cands.length) {
+  prefetch: (c) => {
+    c.lane.glossary = (async () => {
+      const g = await c.env.GLOSSARY.query(c.vector, { topK: 5, returnMetadata: "all" });
+      const cands = (g.matches ?? []).filter((m: any) => m.score >= THRESHOLDS.glossaryCosineFloor);
+      if (!cands.length) return [] as GlossaryCand[];
       const texts = cands.map((m: any) => String(m.metadata?.chunk_text ?? ""));
       const rs = await rerank(c.env.AI, MODELS.rerank, c.query, texts);
-      const ranked = cands
+      return cands
         .map((m: any, i: number) => ({
           term: String(m.metadata?.clause_title ?? "").trim(),
           definition: String(m.metadata?.chunk_text ?? "").split(" — ").slice(1).join(" — ").slice(0, 300),
@@ -32,21 +41,24 @@ export const glossary: Stage = {
           score: rs ? rs[i] : m.score,
         }))
         .filter((x: any) => x.term && x.definition);
-      // one entry per DISTINCT CONCEPT, and only candidates the
-      // cross-encoder actually deems relevant (score > 0). Distinctness
-      // is spelling-normalized: "Weigh labeler"/"Weigh labeller" are
-      // one concept in two spellings — without normalization the note's
-      // slots burn on variants while the domain-bridging concept one
-      // rank down ("actual quantity" — the PREPACKAGE domain) never
-      // reaches the adjudicator.
-      const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/labeler\b/g, "labeller").replace(/\s+/g, " ").trim();
-      const byTerm = new Map<string, (typeof ranked)[number]>();
-      for (const r of ranked) if (r.score > 0) {
-        const k = norm(r.term);
-        if (!byTerm.has(k)) byTerm.set(k, r);
-      }
-      c.glossary = [...byTerm.values()].sort((a, b) => b.score - a.score).slice(0, 3);
-      if (c.glossary.length) console.log("glossary link:", c.glossary.map((g2) => g2.term).join(", "));
+    })();
+  },
+  run: async (c) => {
+    const ranked = (await c.lane.glossary!) as GlossaryCand[];
+    // one entry per DISTINCT CONCEPT, and only candidates the
+    // cross-encoder actually deems relevant (score > 0). Distinctness
+    // is spelling-normalized: "Weigh labeler"/"Weigh labeller" are
+    // one concept in two spellings — without normalization the note's
+    // slots burn on variants while the domain-bridging concept one
+    // rank down ("actual quantity" — the PREPACKAGE domain) never
+    // reaches the adjudicator.
+    const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/labeler\b/g, "labeller").replace(/\s+/g, " ").trim();
+    const byTerm = new Map<string, GlossaryCand>();
+    for (const r of ranked) if (r.score > 0) {
+      const k = norm(r.term);
+      if (!byTerm.has(k)) byTerm.set(k, r);
     }
+    c.glossary = [...byTerm.values()].sort((a, b) => b.score - a.score).slice(0, 3);
+    if (c.glossary.length) console.log("glossary link:", c.glossary.map((g2) => g2.term).join(", "));
   },
 };

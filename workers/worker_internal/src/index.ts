@@ -7,7 +7,8 @@
 
 import { sessionFrom } from "../../shared/auth";
 import { embed } from "../../shared/ai";
-import type { ChunkMeta, Hit } from "../../shared/chunk";
+import { toHits } from "../../shared/chunk";
+import type { Hit } from "../../shared/chunk";
 
 export type { ChunkMeta, Hit };
 
@@ -29,15 +30,6 @@ const json = (body: unknown, status = 200) =>
 const err = (status: number, code: string, message: string) =>
   json({ error: { code, message } }, status);
 
-function toHit(m: any): Hit {
-  return {
-    id: m.id,
-    score: m.score,
-    metadata: (m.metadata ?? {}) as ChunkMeta,
-    text: (m.metadata?.chunk_text as string) ?? "",
-  };
-}
-
 /** Query both indexes and RRF-fuse the rankings; internal (ISO/IEC) hits
  *  carry a slight weight so members see them when both corpora match. */
 async function federate(env: Env, query: string, topK = 20): Promise<Hit[]> {
@@ -48,7 +40,14 @@ async function federate(env: Env, query: string, topK = 20): Promise<Hit[]> {
   ]);
   const scores = new Map<string, number>();
   const byId = new Map<string, Hit>();
-  for (const [ranking, weight] of [[(pubRes.matches ?? []).map(toHit), 1.0], [(intRes.matches ?? []).map(toHit), 1.2]] as [Hit[], number][]) {
+  // weighted RRF: the internal corpus outranks the public corpus on
+  // tie (federation emphasis — deliberately NOT the shared unweighted
+  // fuse; this worker's only job is the merged internal-first ranking)
+  const rankings: [Hit[], number][] = [
+    [toHits(pubRes.matches ?? []), 1.0],
+    [toHits(intRes.matches ?? []), 1.2],
+  ];
+  for (const [ranking, weight] of rankings) {
     ranking.forEach((h, i) => {
       const s = weight / (RRF_K + i + 1);
       scores.set(h.id, (scores.get(h.id) ?? 0) + s);

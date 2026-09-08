@@ -8,12 +8,15 @@ export const graphLane: Stage = {
   name: "graph-lane",
   failure: "additive",
   when: (c) => !!c.opts.graphDocNumbers?.length && c.vector.length > 0,
-  run: async (c) => {
-    const g = await c.env.VECTORIZE.query(c.vector, {
+  prefetch: (c) => {
+    c.lane["graph-lane"] = c.env.VECTORIZE.query(c.vector, {
       topK: 15,
       returnMetadata: "all",
       filter: { doc_number: { $in: c.opts.graphDocNumbers } },
     });
+  },
+  run: async (c) => {
+    const g = (await c.lane["graph-lane"]!) as any;
     const seenIds = new Set(c.matches.map((m: any) => m.id));
     let merged = 0;
     for (const m of (g.matches ?? []).slice(0, 10)) {

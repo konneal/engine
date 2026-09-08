@@ -85,6 +85,27 @@ candidate lanes → pool open → pool-level merges → refinement → window as
 - **`window-floor` LAST**: it is the terminal budget cut; anything
   appended after it would escape the evidence-budget principle.
 
+## Prefetch semantics (concurrent lane I/O)
+
+A stage may declare `prefetch(c)`: kick its INDEPENDENT I/O off into
+`c.lane[stage.name]` (a promise bag the stage owns). The runner invokes
+every stage's prefetch — guard-checked — BEFORE running any stage, so
+the independent lanes (hyde, glossary, graph-lane, multi-query,
+sub-query) overlap with each other and with the dense lane instead of
+serializing: ~5 summed round trips become ~1. `run()` awaits its own
+promise and merges.
+
+The invariants:
+
+- **Only pre-pipeline state** — prefetch may read `u`, `vector`, `opts`,
+  never another stage's output. concept-graph deliberately does NOT
+  prefetch (its D1 lookup consumes glossary's results).
+- **Merge order is registry order** — concurrency changes when I/O
+  completes, never when merges apply. Retrieval determinism is
+  untouched (the annealment gate re-verifies this).
+- **Failure semantics unchanged** — a rejected prefetch promise throws
+  at the await inside `run()`, where the stage's failure mode applies.
+
 ## The prelude (not stages, deliberately)
 
 `retrieve()` resolves the query fold, runs the dense embed and the

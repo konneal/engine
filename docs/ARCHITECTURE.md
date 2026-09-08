@@ -2,7 +2,10 @@
 
 The complete serving pipeline, layer by layer. Every technique is
 grounded in 2025/2026 research and running in production at
-**ai.oimlsmart.org**.
+**ai.oimlsmart.org**. The layers below map 1:1 onto the stage registry
+(`workers/worker_public/src/stages/` — per-stage contracts, guards and
+failure modes in `docs/spec-pipeline.md`; the HTTP surface in
+`docs/spec-api.md`).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐

@@ -50,3 +50,40 @@ export async function gradeRetrieval(
     return "good";
   }
 }
+
+export async function scoreJudge(
+  ai: any,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<number | null> {
+  try {
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 15000));
+    const call = (async () => {
+      const res: any = await ai.run(model, {
+        messages: [
+          { role: "system", content: systemPrompt.trimEnd() },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 3072,
+        reasoning_effort: "low",
+      });
+      const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+      // reasoning models can emit {...} fragments before the verdict — the
+      // LAST flat object with a numeric score wins
+      let score: number | null = null;
+      for (const m of (text ?? "").matchAll(/\{[^{}]*\}/g)) {
+        try {
+          const obj = JSON.parse(m[0]);
+          if (typeof obj.score === "number") score = obj.score;
+        } catch {
+          // keep scanning
+        }
+      }
+      return score === null ? null : Math.max(0, Math.min(1, score));
+    })();
+    return await Promise.race([call, timeout]);
+  } catch {
+    return null;
+  }
+}

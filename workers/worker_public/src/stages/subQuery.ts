@@ -4,26 +4,29 @@
 import { embed } from "../ai.ts";
 import { MODELS, THRESHOLDS } from "../config.ts";
 import { toHits, type Stage } from "./types.ts";
+import type { Hit } from "../../../shared/chunk.ts";
 
 export const subQuery: Stage = {
   name: "sub-query",
   when: (c) => c.u?.complexity === "complex" && !!c.u?.sub_queries?.length,
-  run: async (c) => {
+  prefetch: (c) => {
     const { env, u } = c;
-    // sub-questions are independent — parallel rounds, same as variants
-    const subResults = (
-      await Promise.all(
-        u!.sub_queries!.slice(0, 4).map(async (sub) => {
-          try {
-            const sv = await embed(env.AI, MODELS.embed, sub);
-            const sres = await env.VECTORIZE.query(sv, { topK: 15, returnMetadata: "all" });
-            return toHits(sres.matches ?? []);
-          } catch {
-            return [] as never[]; // sub-query failure — primary results stand
-          }
-        }),
-      )
-    ).filter((r) => r.length > 0);
+    // sub-questions are independent — parallel rounds, ahead of the
+    // dense lane (prefetch), same as variants
+    c.lane["sub-query"] = Promise.all(
+      u!.sub_queries!.slice(0, 4).map(async (sub) => {
+        try {
+          const sv = await embed(env.AI, MODELS.embed, sub);
+          const sres = await env.VECTORIZE.query(sv, { topK: 15, returnMetadata: "all" });
+          return toHits(sres.matches ?? []);
+        } catch {
+          return [] as never[]; // sub-query failure — primary results stand
+        }
+      }),
+    );
+  },
+  run: async (c) => {
+    const subResults = ((await c.lane["sub-query"]!) as Hit[][]).filter((r) => r.length > 0);
     // merge sub-results into the candidate pool (union, no RRF — these
     // are complementary perspectives, not alternatives)
     const seenIds = new Set(c.matches.map((m: any) => m.id));

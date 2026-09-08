@@ -89,6 +89,17 @@ export const CHUNK_META_FIELDS = [
   "chunk_text",
 ] as const;
 
+/** Vectorize match list → Hit list (the wire conversion both workers
+ *  perform; one definition, like the type above it). */
+export function toHits(matches: any[]): Hit[] {
+  return matches.map((m) => ({
+    id: m.id,
+    score: m.score,
+    metadata: (m.metadata ?? {}) as ChunkMeta,
+    text: (m.metadata?.chunk_text as string) ?? "",
+  }));
+}
+
 // Compile-time: the manifest and the interface are the same set — both
 // directions. A mismatch fails typecheck here, not at the wire.
 type AssertNever<T extends never> = T;

@@ -11,9 +11,12 @@ export const hyde: Stage = {
   name: "hyde",
   failure: "additive",
   when: (c) => !!c.u?.hypothetical_answer && !c.filter,
+  prefetch: (c) => {
+    c.lane.hyde = embed(c.env.AI, MODELS.embed, c.u!.hypothetical_answer!)
+      .then((hv) => c.env.VECTORIZE.query(hv, { topK: 20, returnMetadata: "all" }));
+  },
   run: async (c) => {
-    const hv = await embed(c.env.AI, MODELS.embed, c.u!.hypothetical_answer!);
-    const hres = await c.env.VECTORIZE.query(hv, { topK: 20, returnMetadata: "all" });
+    const hres = (await c.lane.hyde!) as any;
     const seenIds = new Set(c.matches.map((m: any) => m.id));
     for (const m of (hres.matches ?? []).slice(0, 10)) {
       if (!seenIds.has(m.id)) {

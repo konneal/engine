@@ -213,10 +213,23 @@ def embed(limit: int | None) -> None:
     if model_chunks:
         print(f"  + {len(model_chunks)} model-plane chunks (TODO.ai-platform/05)")
         chunks.extend(model_chunks)
-    todo = [c for c in chunks if c["id"] not in done]
+    # content-aware resume: a chunk id whose TEXT changed re-embeds (the
+    # model plane's ids are content-independent hashes — id-keyed resume
+    # alone would upsert stale vectors under fresh metadata)
+    import hashlib as _hl
+
+    def _th(c):
+        return _hl.sha1(c["text"].encode()).hexdigest()[:16]
+
+    hashes_path = ARTIFACTS / "embed_text_hashes.json"
+    hashes = json.loads(hashes_path.read_text()) if hashes_path.is_file() else {}
+    stale = {c["id"] for c in chunks if hashes.get(c["id"]) not in (None, _th(c))}
+    todo = [c for c in chunks if c["id"] not in done or c["id"] in stale]
     if limit:
         todo = todo[:limit]
-    print(f"embedding {len(todo)} chunks ({len(done)} already done)")
+    hashes.update({c["id"]: _th(c) for c in chunks})
+    hashes_path.write_text(json.dumps(hashes))
+    print(f"embedding {len(todo)} chunks ({len(done) - len(stale & done)} current, {len(stale & done)} text-stale)")
 
     batch = 50
     from concurrent.futures import ThreadPoolExecutor, as_completed

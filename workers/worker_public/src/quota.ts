@@ -1,0 +1,62 @@
+// Quota + telemetry: per-bucket daily counters (KV) and the D1
+// queries/spend ledger writes (TODO.impl/23).
+import { sha256Hex, today } from "./config";
+import type { Env } from "./env";
+
+export async function kvIncr(cache: KVNamespace, key: string): Promise<number> {
+  const cur = Number((await cache.get(key)) ?? "0");
+  const next = cur + 1;
+  await cache.put(key, String(next), { expirationTtl: 90000 });
+  return next;
+}
+
+export function clientIp(req: Request): string {
+  return req.headers.get("cf-connecting-ip") ?? "unknown";
+}
+
+// operator-exempt IPs (env list, KV sys:exempt_ips override for runtime
+// edits) bypass the anon quota — the KV read is cached briefly per isolate
+let exemptCache: { at: number; ips: Set<string> } | null = null;
+export async function isExemptIp(env: Env, ip: string): Promise<boolean> {
+  if (((env.EXEMPT_IPS ?? "") + "").split(",").map((s) => s.trim()).includes(ip)) return true;
+  const now = Date.now();
+  if (!exemptCache || now - exemptCache.at > 60_000) {
+    const kv = (await env.CACHE.get("sys:exempt_ips")) ?? "";
+    exemptCache = { at: now, ips: new Set(kv.split(/[\s,]+/).filter(Boolean)) };
+  }
+  return exemptCache.ips.has(ip);
+}
+
+export async function checkQuota(
+  env: Env,
+  bucket: string,
+  id: string,
+  limit: number,
+): Promise<{ ok: boolean; used: number; limit: number }> {
+  const used = await kvIncr(env.CACHE, `q:${today()}:${bucket}:${await sha256Hex(id)}`);
+  return { ok: used <= limit, used, limit };
+}
+
+export function telemetry(
+  env: Env,
+  ctx: ExecutionContext,
+  tier: string,
+  route: string,
+  model: string | null,
+  ok: boolean,
+  answerChars: number,
+  queryHash: string,
+  lang?: string,
+) {
+  const day = today();
+  ctx.waitUntil(
+    env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO queries (ts, day, tier, route, model, ok, answer_chars, query_hash, lang) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+      ).bind(new Date().toISOString(), day, tier, route, model, ok ? 1 : 0, answerChars, queryHash, lang ?? null),
+      env.DB.prepare(
+        "INSERT INTO spend (day, tier, model, requests) VALUES (?1,?2,?3,1) ON CONFLICT(day, tier, model) DO UPDATE SET requests = requests + 1",
+      ).bind(day, tier, model ?? "none"),
+    ]),
+  );
+}

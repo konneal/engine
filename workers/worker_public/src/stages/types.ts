@@ -59,6 +59,9 @@ export interface PipelineContext {
   finalHits: Hit[]; // the answer window
   glossary: GlossaryEntry[]; // the vocabulary link (glossary stage owns)
   opts: RetrieveOptions;
+  /** prefetch bag: stage-name → that stage's in-flight I/O promise (the
+   *  stage owns its key; see Stage.prefetch) */
+  lane: Record<string, Promise<unknown>>;
 }
 
 export interface Stage {
@@ -69,12 +72,22 @@ export interface Stage {
    *  context as the previous stage left it (the lane's results were not
    *  written). "blocking" (default): the throw propagates to the caller. */
   failure?: "additive" | "blocking";
+  /** Kick this stage's INDEPENDENT I/O off early (the runner invokes
+   *  every stage's prefetch before running any stage). Only for stages
+   *  whose I/O depends on pre-pipeline state (u, vector, opts) — never
+   *  on prior stages' output. The promise lands in c.lane[name]; run()
+   *  awaits it and merges. Merges stay in registry order — concurrency
+   *  changes when I/O completes, never the merge order (determinism). */
+  prefetch?: (c: PipelineContext) => void;
   run: (c: PipelineContext) => Promise<void> | void;
 }
 
 /** Run the registry in order. Additive stages swallow their own throws —
  *  replicating the per-lane try/catch the monolith carried inline. */
 export async function runStages(stages: Stage[], c: PipelineContext): Promise<void> {
+  for (const stage of stages) {
+    if (stage.prefetch && (!stage.when || stage.when(c))) stage.prefetch(c);
+  }
   for (const stage of stages) {
     if (stage.when && !stage.when(c)) continue;
     if (stage.failure === "additive") {

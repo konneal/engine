@@ -52,6 +52,8 @@ export async function embed(ai: AnyAi, model: string, text: string): Promise<num
   throw new Error(`embedding failed for all request shapes (${model})`);
 }
 
+import { LIMITS } from "./config.ts";
+
 export async function rerank(
   ai: AnyAi,
   model: string,
@@ -106,4 +108,21 @@ export async function rerank(
   }
   console.error("rerank failed, using vector order:", String(lastErr));
   return null;
+}
+
+export async function generateOnce(env: any, model: string, messages: any[]): Promise<string | null> {
+  try {
+    const res: any = await env.AI.run(model, {
+      messages,
+      max_tokens: LIMITS.maxOutputTokens,
+      reasoning_effort: "low",
+      temperature: 0.6,
+      top_p: 0.95,
+    });
+    if (typeof res?.response === "string") return res.response;
+    if (typeof res?.choices?.[0]?.message?.content === "string") return res.choices[0].message.content;
+    return null;
+  } catch {
+    return null;
+  }
 }

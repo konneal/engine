@@ -146,7 +146,7 @@ function ctx(env: any, over: Partial<PipelineContext> = {}): PipelineContext {
     env, query: "load cell creep", rq: "load cell creep", folded: "load cell creep",
     u: null, filters: null, filter: null, vector: vec("load cell creep"),
     lexicalHits: [], matches: [], hits: [], finalHits: [], glossary: [],
-    opts: {}, ...over,
+    opts: {}, lane: {}, ...over,
   } as PipelineContext;
 }
 
@@ -219,10 +219,11 @@ test("dense: populates the pool and applies the doc filter", async () => {
 
 test("hyde: merges discounted candidates only when unfiltered", async () => {
   const c = ctx(makeEnv(), { u: { hypothetical_answer: "creep is the drift under constant load" } as any });
+  hyde.prefetch!(c);
   await hyde.run(c);
   assert.ok(c.matches.some((m: any) => m.score <= 0.7), "hyde discount not applied");
   const filtered = ctx(makeEnv(), { u: { hypothetical_answer: "creep" } as any, filter: { doc_number: "60" } });
-  await hyde.run(filtered); // when-guard bypassed by calling run directly: assert no crash
+  assert.equal(hyde.when?.(filtered), false, "filtered queries must skip HyDE");
 });
 
 test("poolOpen: converts matches to Hits with chunk_text", async () => {

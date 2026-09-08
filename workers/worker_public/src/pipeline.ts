@@ -104,7 +104,7 @@ export async function retrieve(
 
   const ctx: PipelineContext = {
     env, query, rq, folded, u, filters, filter, vector, lexicalHits,
-    matches: [], hits: [], finalHits: [], glossary: [], opts,
+    matches: [], hits: [], finalHits: [], glossary: [], opts, lane: {},
   };
   await runStages(STAGES, ctx);
   return {
