@@ -106,6 +106,13 @@ def main() -> int:
     )
     batch = 24  # the REST ai/run lane rejects larger embed payloads (400)
 
+    def already_enriched(group: list[dict]) -> bool:
+        ids = [c["id"] for c in group]
+        r = admin.post("/admin/vectors", json={"mode": "get", "ids": ids})
+        r.raise_for_status()
+        found = {v["id"] for v in r.json().get("vectors") or [] if (v.get("metadata") or {}).get("ctx")}
+        return len(found) == len(ids)
+
     groups = [replayable[i : i + batch] for i in range(0, len(replayable), batch)]
 
     def embed_group(group: list[dict]) -> list[list[float]]:
@@ -153,8 +160,13 @@ def main() -> int:
     from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
 
     done = 0
-    with ThreadPoolExecutor(max_workers=12) as pool:
-        for result in pool.map(upsert_group, zip(groups, pool.map(embed_group, groups), strict=True)):
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        def paired():
+            for g, vecs in zip(groups, pool.map(embed_group, groups), strict=True):
+                yield g, vecs
+                time.sleep(0.5)  # stagger: burst-lockstep hits the embed lane's 429 backoff wall
+
+        for _ in pool.map(upsert_group, paired()):
             done += batch
             if done % 2000 < batch:
                 print(f"  replayed ~{min(done, len(replayable))}/{len(replayable)}", flush=True)
