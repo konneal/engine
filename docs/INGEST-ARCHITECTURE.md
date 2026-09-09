@@ -92,9 +92,11 @@ hand.
 parse            corpora → artifacts/chunks.jsonl (identifiers sanitized,
                  placeholders never win — language markers and :0000/:XXXX
                  fall to the slug-derived identity)
-retrieval-plane  primmel export → artifacts/model_chunks.jsonl (the
-                 model-plane CHUNK source; the projection's model-plane
-                 command feeds D1 nodes only)
+retrieval-plane  primmel export → artifacts/model_retrieval_chunks.jsonl
+                 (retrieval text/facets); the projection derives
+                 artifacts/model_typed_chunks.jsonl (the ONLY unit_id/
+                 block source) — separate files: one shared name had the
+                 two derivations overwriting each other
 embed            content-aware resume: artifacts/embed_text_hashes.json
                  (id → text hash) — changed text re-embeds, untouched ids
                  never do (model chunk ids are content-independent hashes;
@@ -104,12 +106,23 @@ upsert           the internal worker's /admin/sync binding route
                  (rag-internal.<account>.workers.dev — no REST token
                  needed); the CLI's REST path defaults to the production
                  index idx_oiml_public_v2
+enrich-replay    scripts/replay_enrichment.py [--apply] — REQUIRED after
+                 every full upsert: enrichment lives only in the index
+                 (and the KV context cache), so a full upsert overwrites
+                 it with raw text; the replay re-embeds context+text from
+                 the durable record (artifacts/enriched-contexts.jsonl)
+                 via the binding — zero model generation, ≈$0.30
 reconcile        scripts/reconcile_index.py — enumerate the index (wrangler
-                 list-vectors), diff against the canonical chunk set,
-                 delete strays (--apply). Upserts never delete; this closes
-                 the loop.
+                 list-vectors), diff against the canonical chunk set
+                 (parse + retrieval-plane + projection — three
+                 derivations), delete strays (--apply). Upserts never
+                 delete; this closes the loop.
 cache            scripts/invalidate_answer_cache.py (or wrangler kv put
                  sys:corpus_gen) after any corpus surgery
+assets           scripts/fix_figure_assets.py [--apply] — unit assets must
+                 stay vision-readable (black-on-transparent rasters read
+                 as solid black after alpha flattening); detects and
+                 re-uploads white-flattened
 graph            ingest.cli graph (build) + graph --corpus apply (D1,
                  wrangler; absolute --file path)
 gates            scripts/gates.sh — golden ×N + annealment ×M
