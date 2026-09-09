@@ -23,6 +23,7 @@ import { lexicalUnion } from "./lexicalUnion.ts";
 import { federate } from "./federate.ts";
 import { seal } from "./seal.ts";
 import { corpusScope } from "./corpusScope.ts";
+import { editionCover } from "./editionCover.ts";
 import { overviewDemote } from "./overviewDemote.ts";
 import { familyBoost } from "./familyBoost.ts";
 import { rerankStage, lexicalRrf } from "./rerank.ts";
@@ -53,6 +54,7 @@ export const STAGES: Stage[] = [
   rerankStage,
   lexicalRrf,
   corpusScope,
+  editionCover,
   termNudge,
   conceptSteer,
   editionSteer,

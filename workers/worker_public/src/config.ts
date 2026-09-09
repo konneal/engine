@@ -62,6 +62,12 @@ export const THRESHOLDS = {
   /** Federated-ISO discount — the public corpus answers by default;
    *  internal ISO passages compete but don't preempt. */
   federateDiscount: 0.95,
+  /** Edition cover — the score multiplier for current-edition chunks the
+   *  cover stage fetches when a pool holds ONLY stale editions of a
+   *  document. Just under the top: the point is REPRESENTATION (so
+   *  edition steering can demote the stale siblings and diversity keeps
+   *  the current overview), not free ranking. */
+  editionCoverDiscount: 0.9,
   /** Overview-chunk demotion — overview chunks repeat title/doctype
    *  boilerplate and embed strongly for name-like queries, crowding
    *  clause chunks out of the rerank window. */
