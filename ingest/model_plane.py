@@ -31,7 +31,7 @@ from pathlib import Path
 
 from .config import ARTIFACTS
 
-MODEL_CHUNKS_PATH = ARTIFACTS / "model_chunks.jsonl"
+MODEL_CHUNKS_PATH = ARTIFACTS / "model_typed_chunks.jsonl"
 MODEL_NODES_PATH = ARTIFACTS / "model_nodes.jsonl"
 PINS_PATH = Path(__file__).resolve().parent / "model_plane_pins.json"
 

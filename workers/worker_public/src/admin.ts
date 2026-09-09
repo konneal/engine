@@ -202,23 +202,35 @@ export async function handleCaption(env: Env, req: Request): Promise<Response> {
     const buf = await obj.arrayBuffer();
     const ext = m[1].split(".").pop()?.toLowerCase() ?? "png";
     const mime = ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
-    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-    const res: any = await env.AI.run(MODELS.member, {
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: `Describe this figure from ${row.docidentifier}${context ? ` (${context})` : ""} for a reader who cannot see it: what is plotted/shown, the axes or structure, and the normative point it makes. 2-3 plain sentences.` },
-            { type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } },
+    // chunked: spreading the whole byte array blows the V8 stack on large
+    // assets (the 389KB u:figure-1)
+    const bytes = new Uint8Array(buf);
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    const b64 = btoa(binary);
+    let res: any = null;
+    for (let attempt = 0; attempt < 2 && !res; attempt++) {
+      try {
+        res = await env.AI.run(MODELS.member, {
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: `Describe this figure from ${row.docidentifier}${context ? ` (${context})` : ""} for a reader who cannot see it: what is plotted/shown, the axes or structure, and the normative point it makes. 2-3 plain sentences.` },
+                { type: "image_url", image_url: { url: `data:${mime};base64,${b64}` } },
+              ],
+            },
           ],
-        },
-      ],
-      max_tokens: 1024,
-      // GLM-5.3-Flash defaults to reasoning_effort "max" when the parameter
-      // is absent — max-effort reasoning starves a 1024-token budget and
-      // the caption comes back empty (the u:fig-2 straggler)
-      reasoning_effort: "low",
-    });
+          max_tokens: 1024,
+          // GLM-5.3-Flash defaults to reasoning_effort "max" when the parameter
+          // is absent — max-effort reasoning starves a 1024-token budget and
+          // the caption comes back empty (the u:fig-2 straggler)
+          reasoning_effort: "low",
+        });
+      } catch {
+        // transient Workers AI flake (8005) — retry once
+      }
+    }
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
     if (!text?.trim()) return err(502, "generation_failed", "vision model returned no description");
     const desc = text.trim().slice(0, 600);

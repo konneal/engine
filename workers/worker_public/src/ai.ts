@@ -111,18 +111,24 @@ export async function rerank(
 }
 
 export async function generateOnce(env: any, model: string, messages: any[]): Promise<string | null> {
-  try {
-    const res: any = await env.AI.run(model, {
-      messages,
-      max_tokens: LIMITS.maxOutputTokens,
-      reasoning_effort: "low",
-      temperature: 0.6,
-      top_p: 0.95,
-    });
-    if (typeof res?.response === "string") return res.response;
-    if (typeof res?.choices?.[0]?.message?.content === "string") return res.choices[0].message.content;
-    return null;
-  } catch {
-    return null;
+  // one immediate retry: Workers AI intermittently 8005s a call that
+  // succeeds unchanged on the second attempt — a flake must not degrade
+  // the answer (a multimodal primary falling to a text-only fallback
+  // silently blindfolds figure answers)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res: any = await env.AI.run(model, {
+        messages,
+        max_tokens: LIMITS.maxOutputTokens,
+        reasoning_effort: "low",
+        temperature: 0.6,
+        top_p: 0.95,
+      });
+      if (typeof res?.response === "string") return res.response;
+      if (typeof res?.choices?.[0]?.message?.content === "string") return res.choices[0].message.content;
+    } catch (e) {
+      console.error("generate failed:", model, String(e).slice(0, 120));
+    }
   }
+  return null;
 }

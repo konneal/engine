@@ -61,9 +61,15 @@ function embedWarm(env: Env, text: string): Promise<number[] | null> {
 /** GLM-5.3-Flash is natively multimodal: when the used passages contain
  *  figure units with uploaded assets, attach the actual pixels to the
  *  generation call so the model interprets the producer's figure, not
- *  just its stored caption. Additive — failures simply send no images. */
+ *  just its stored caption. Additive — failures simply send no images.
+ *  Two hard-won shape rules (probed live, 2026-09-09): images ride their
+ *  OWN short trailing user message, never the passages message (long
+ *  text + image parts in one message triggers nondeterministic Workers
+ *  AI 8005s that scale with payload size), and only the ONE pinned
+ *  figure attaches (the type-intent pin already chose the answering
+ *  object; a second base64 blob doubles the flake surface for nothing). */
 async function attachFigureImages(env: Env, messages: { role: string; content: string }[], usedHits: Hit[]): Promise<void> {
-  const figures = usedHits.filter((h) => h.metadata.unit_id && h.metadata.block === "figure").slice(0, 2);
+  const figures = usedHits.filter((h) => h.metadata.unit_id && h.metadata.block === "figure").slice(0, 1);
   if (!figures.length) return;
   const parts: unknown[] = [];
   const names: string[] = [];
@@ -87,30 +93,34 @@ async function attachFigureImages(env: Env, messages: { role: string; content: s
     }
   }
   if (!parts.length) return;
-  const last = messages[messages.length - 1];
-  last.content = [
-    { type: "text", text: `${last.content}\n\nThe original images of figure units ${names.join(", ")} are attached; interpret them directly when answering about these figures.` },
-    ...parts,
-  ] as unknown as string;
+  messages.push({
+    role: "user",
+    content: [
+      { type: "text", text: `The original image of figure unit ${names.join(", ")} is attached; interpret it directly when answering about this figure.` },
+      ...parts,
+    ] as unknown as string,
+  });
   console.log("figure images attached:", names.join(", "));
 }
 
 async function generateStream(env: Env, model: string, messages: any[]): Promise<ReadableStream<Uint8Array> | null> {
-  try {
-    const res: any = await env.AI.run(model, {
-      messages,
-      stream: true,
-      max_tokens: LIMITS.maxOutputTokens,
-      reasoning_effort: "low",
-      temperature: 0.6,
-      top_p: 0.95,
-    });
-    if (res && typeof res.getReader === "function") return res as ReadableStream<Uint8Array>;
-    if (res && res.body && typeof res.body.getReader === "function") return res.body;
-    return null;
-  } catch {
-    return null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res: any = await env.AI.run(model, {
+        messages,
+        stream: true,
+        max_tokens: LIMITS.maxOutputTokens,
+        reasoning_effort: "low",
+        temperature: 0.6,
+        top_p: 0.95,
+      });
+      if (res && typeof res.getReader === "function") return res as ReadableStream<Uint8Array>;
+      if (res && res.body && typeof res.body.getReader === "function") return res.body;
+    } catch (e) {
+      console.error("stream failed:", model, String(e).slice(0, 120));
+    }
   }
+  return null;
 }
 
 /** Compact overflow history into a short continuity summary. Null = keep
@@ -812,7 +822,15 @@ async function handleAsk(
 
   let answer = await generateOnce(env, model, messages);
   if (answer === null) {
-    answer = await generateOnce(env, MODELS.fallback, messages);
+    // the fallback is a text-only model: image parts must be flattened
+    // out first or it errors on (or silently ignores) the pixels the
+    // primary was carrying
+    const flat = messages.map((m: any) =>
+      typeof m.content === "string"
+        ? m
+        : { ...m, content: m.content.filter((p: any) => p?.type === "text").map((p: any) => p?.text ?? "").join("\n") },
+    );
+    answer = await generateOnce(env, MODELS.fallback, flat);
   }
   if (answer) answer = canonicalRefusal(answer);
 

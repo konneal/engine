@@ -33,7 +33,7 @@ from pathlib import Path
 
 from .config import ARTIFACTS
 
-MODEL_CHUNKS_PATH = ARTIFACTS / "model_chunks.jsonl"
+MODEL_CHUNKS_PATH = ARTIFACTS / "model_retrieval_chunks.jsonl"
 
 DOCTYPE = {"rec": "r", "doc": "d", "bas": "b", "gui": "g", "exp": "e", "rap": "e"}
 

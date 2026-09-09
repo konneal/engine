@@ -41,6 +41,7 @@ for (const c of laneXIdx >= 0 ? [] : cases) {
   }
 }
 console.log(`\nannealment: ${pass}/${cases.length} pass (${skip} fail/err)`);
+if (skip > 0) process.exitCode = 1;
 for (const [r, v] of Object.entries(byRung)) console.log(`  ${r}: ${v.pass}/${v.total}`);
 
 // ── lane-retrieval matrix mode ─────────────────────────────────────────

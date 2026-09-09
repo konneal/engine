@@ -17,11 +17,19 @@ import type { Stage } from "./types.ts";
  *  heuristic over title + serialized rows; tables, figures and formulas
  *  compete on the same score so a figure question can pin the figure
  *  (which then feeds multimodal generation), while table-value questions
- *  still pin their table on overlap. */
+ *  still pin their table on overlap. When the query NAMES an artifact type
+ *  ("figure", "table", "formula"/"equation"), units of that type get a
+ *  dominating bonus — without it, clause units of the § tie with the
+ *  figure under rerank variance and the multimodal answer flips on luck. */
 function pickTypedChunk(query: string, candidates: Hit[], ranked: Hit[]): Hit | null {
   if (!candidates.length) return null;
   const pool = candidates;
-  const terms = query.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((t) => t.length > 2);
+  const q = query.toLowerCase();
+  const terms = q.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter((t) => t.length > 2);
+  const typeBonus: Record<string, number> = {};
+  if (/\bfig(ure)?s?\b/.test(q)) typeBonus.figure = 1;
+  if (/\btables?\b/.test(q)) typeBonus.table = 1;
+  if (/\b(formulas?|equations?)\b/.test(q)) typeBonus.formula = 1;
   // the top-ranked PROSE passage usually sits in the answer clause: a
   // typed chunk from that same clause is the answering object, not a
   // same-topic example from an annex
@@ -33,7 +41,8 @@ function pickTypedChunk(query: string, candidates: Hit[], ranked: Hit[]): Hit | 
     const hay = `${h.metadata.clause_title ?? ""} ${h.text}`.toLowerCase();
     let score = 0;
     for (const t of terms) if (hay.includes(t)) score++;
-    if (topAnchor && h.metadata.clause_anchor === topAnchor) score += terms.length; // dominates
+    if (typeBonus[h.metadata.block ?? ""]) score += terms.length * 2; // dominates
+    else if (topAnchor && h.metadata.clause_anchor === topAnchor) score += terms.length;
     // blank annex FORMS (empty value cells) are not answer tables
     const cells = h.text.split("|").map((x) => x.trim());
     const filled = cells.filter((x) => x.length > 0).length;

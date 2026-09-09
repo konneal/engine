@@ -29,8 +29,11 @@ BASE = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/vectorize/v2
 
 
 def canonical_ids() -> set[str]:
+    """Three derivations, one index: parse chunks (prose), the retrieval
+    plane (model text/facets), and the projection (typed units — the ONLY
+    source of unit_id/block for the answer contract)."""
     ids: set[str] = set()
-    for name in ("chunks.jsonl", "model_chunks.jsonl"):
+    for name in ("chunks.jsonl", "model_retrieval_chunks.jsonl", "model_typed_chunks.jsonl"):
         p = ARTIFACTS / name
         if not p.is_file():
             sys.exit(f"missing {p} — run the parse/model-plane build first")

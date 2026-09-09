@@ -13,7 +13,7 @@ from .parse import apply_precedence, load_corpus, normalize_identifier
 
 # The model plane (TODO.ai-platform/05): its chunks ride the same
 # embed/upsert lanes as the prose corpus when the derivation has run.
-MODEL_CHUNKS_PATH = ARTIFACTS / "model_chunks.jsonl"
+MODEL_CHUNKS = [ARTIFACTS / "model_retrieval_chunks.jsonl", ARTIFACTS / "model_typed_chunks.jsonl"]
 
 
 def _read_chunks(path: Path) -> list[dict]:
@@ -208,9 +208,11 @@ def embed(limit: int | None) -> None:
         raise SystemExit("run `parse` first")
 
     chunks = [json.loads(l) for l in CHUNKS_PATH.open(encoding="utf-8")]
-    model_chunks = _read_chunks(MODEL_CHUNKS_PATH)
+    model_chunks: list[dict] = []
+    for p in MODEL_CHUNKS:
+        model_chunks.extend(_read_chunks(p))
     if model_chunks:
-        print(f"  + {len(model_chunks)} model-plane chunks (TODO.ai-platform/05)")
+        print(f"  + {len(model_chunks)} model-plane chunks (retrieval plane + typed units)")
         chunks.extend(model_chunks)
     # content-aware resume: a chunk id whose TEXT changed re-embeds (the
     # model plane's ids are content-independent hashes — id-keyed resume
@@ -269,8 +271,9 @@ def upsert() -> None:
     info = cf.vectorize_info()
     print(f"index {info.get('name')}: dims={info.get('dimensions')} vectors={info.get('vectorCount')}")
     chunks = {json.loads(l)["id"]: json.loads(l) for l in CHUNKS_PATH.open(encoding="utf-8")}
-    for mc in _read_chunks(MODEL_CHUNKS_PATH):
-        chunks[mc["id"]] = mc
+    for mp in MODEL_CHUNKS:
+        for mc in _read_chunks(mp):
+            chunks[mc["id"]] = mc
     vectors = []
     with EMBED_PATH.open(encoding="utf-8") as f:
         for line in f:
