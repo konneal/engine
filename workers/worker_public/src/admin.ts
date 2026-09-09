@@ -251,8 +251,15 @@ export async function handleVectors(env: Env, req: Request): Promise<Response> {
     if (mode === "get") {
       const ids = Array.isArray(body?.ids) ? body.ids.filter((x: unknown) => typeof x === "string").slice(0, 100) : [];
       if (!ids.length) return err(400, "invalid_input", "ids: 1-100 required");
-      const vectors = await env.VECTORIZE.getByIds(ids);
-      return json({ vectors: (vectors ?? []).map((v: any) => ({ id: v.id, values: v.values, metadata: v.metadata ?? null })) });
+      // getByIds above ~20 ids returns EMPTY (observed: 16/20 fine, 24+
+      // silently zero) — chunk server-side so the documented 100 actually
+      // works instead of lying to callers
+      const vectors: any[] = [];
+      for (let i = 0; i < ids.length; i += 20) {
+        const got = (await env.VECTORIZE.getByIds(ids.slice(i, i + 20))) ?? [];
+        for (const v of got) vectors.push({ id: v.id, values: v.values, metadata: v.metadata ?? null });
+      }
+      return json({ vectors });
     }
     if (mode === "upsert") {
       const vectors = Array.isArray(body?.vectors)
