@@ -53,6 +53,40 @@ def token_from_env() -> str:
     sys.exit("ADMIN_TOKEN missing from .env")
 
 
+
+def embed_texts(cf, texts: list[str], group: list[dict]) -> list[list[float]]:
+    for attempt in range(5):
+        try:
+            return cf.embed(texts)
+        except Exception:  # noqa: BLE001 — transient ladder first
+            time.sleep(3 * (attempt + 1))
+    # batch persistently rejected: bisect one-by-one so a single bad text
+    # never aborts the replay
+    out: list[list[float]] = []
+    for t in texts:
+        for attempt in range(5):
+            try:
+                out.extend(cf.embed([t]))
+                break
+            except Exception:
+                time.sleep(2 * (attempt + 1))
+        else:
+            raise SystemExit(f"embed failed even alone at {group[0]['id']}: {t[:80]}")
+    return out
+
+
+def upsert_vectors(admin, vectors: list[dict], group: list[dict]) -> None:
+    for attempt in range(5):
+        try:
+            r = admin.post("/admin/vectors", json={"mode": "upsert", "vectors": vectors})
+            r.raise_for_status()
+            return
+        except Exception:  # noqa: BLE001
+            time.sleep(3 * (attempt + 1))
+    raise SystemExit(f"upsert failed at id {group[0]['id']}")
+
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="embed + upsert (default: report only)")
@@ -157,20 +191,31 @@ def main() -> int:
                     raise SystemExit(f"upsert failed at id {group[0]['id']}: {e}")
                 time.sleep(3 * (attempt + 1))
 
-    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
-
+    # SEQUENTIAL by measurement: pool topologies wedge against the embed
+    # lane's backoff (12- and 3-worker runs both froze mid-run); one
+    # group at a time is ~9s and cannot
     done = 0
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        def paired():
-            for g, vecs in zip(groups, pool.map(embed_group, groups), strict=True):
-                yield g, vecs
-                time.sleep(0.5)  # stagger: burst-lockstep hits the embed lane's 429 backoff wall
-
-        for _ in pool.map(upsert_group, paired()):
-            done += batch
-            if done % 2000 < batch:
-                print(f"  replayed ~{min(done, len(replayable))}/{len(replayable)}", flush=True)
-    print(f"replayed {len(replayable)}/{len(replayable)} — enrichment restored (contexts from the durable record)")
+    for group in groups:
+        try:
+            if already_enriched(group):
+                continue
+        except Exception:  # noqa: BLE001 — a failed probe just re-does work
+            pass
+        texts = [f"{contexts[c['id']]}\n\n{c['text']}"[:EMBED_CAP] for c in group]
+        vecs = embed_texts(cf, texts, group)
+        vectors = [
+            {
+                "id": c["id"],
+                "values": v,
+                "metadata": {**c["metadata"], "chunk_text": t, "ctx": "1"},
+            }
+            for c, t, v in zip(group, texts, vecs, strict=True)
+        ]
+        upsert_vectors(admin, vectors, group)
+        done += len(group)
+        if done % 480 < len(group):
+            print(f"  replayed ~{done}/{len(replayable)}", flush=True)
+    print(f"replayed {done}/{len(replayable)} — enrichment restored (contexts from the durable record)")
     return 0
 
 
