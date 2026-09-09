@@ -68,8 +68,17 @@ function embedWarm(env: Env, text: string): Promise<number[] | null> {
  *  AI 8005s that scale with payload size), and only the ONE pinned
  *  figure attaches (the type-intent pin already chose the answering
  *  object; a second base64 blob doubles the flake surface for nothing). */
-async function attachFigureImages(env: Env, messages: { role: string; content: string }[], usedHits: Hit[]): Promise<void> {
-  const figures = usedHits.filter((h) => h.metadata.unit_id && h.metadata.block === "figure").slice(0, 1);
+async function attachFigureImages(env: Env, messages: { role: string; content: string }[], usedHits: Hit[], query: string): Promise<void> {
+  // Attach only when the question WANTS the drawing (names a figure-ish
+  // artifact) or the pinned figure sits in the top prose passage's own
+  // clause (it IS the answering object) — a plain definition question
+  // gains nothing from pixels and pays the multimodal flake surface
+  const figIntent = /\b(fig(ure)?s?|diagram|drawing|graph|chart)\b/i.test(query);
+  const topProseAnchor = usedHits.find((h) => !h.metadata.unit_id)?.metadata.clause_anchor;
+  const figures = usedHits
+    .filter((h) => h.metadata.unit_id && h.metadata.block === "figure")
+    .filter((h) => figIntent || (!!h.metadata.clause_anchor && h.metadata.clause_anchor === topProseAnchor))
+    .slice(0, 1);
   if (!figures.length) return;
   const parts: unknown[] = [];
   const names: string[] = [];
@@ -784,7 +793,7 @@ async function handleAsk(
     summary,
     budget,
   );
-  await attachFigureImages(env, messages, usedHits);
+  await attachFigureImages(env, messages, usedHits, q.query);
   if (userImage) {
     // the user's own image rides on the question message — retrieval stays
     // text-driven; the answer model reads the image as question context
@@ -866,12 +875,21 @@ async function handleAsk(
   if (answer === null) {
     // the fallback is a text-only model: image parts must be flattened
     // out first or it errors on (or silently ignores) the pixels the
-    // primary was carrying
-    const flat = messages.map((m: any) =>
-      typeof m.content === "string"
-        ? m
-        : { ...m, content: m.content.filter((p: any) => p?.type === "text").map((p: any) => p?.text ?? "").join("\n") },
-    );
+    // primary was carrying — and the figure-attach NOTE with them: a
+    // message saying "the image is attached" to a model that cannot see
+    // images gets ANSWERED ("I don't have access to the original
+    // image…") instead of the question (observed in the wild). The
+    // user-image message keeps its text (the question) minus its note.
+    const isFigureAttachMessage = (m: any) =>
+      Array.isArray(m.content) &&
+      m.content.some((part: any) => part?.type === "text" && /^The original image of figure unit /.test(part.text ?? ""));
+    const flat = messages
+      .filter((m: any) => !isFigureAttachMessage(m))
+      .map((m: any) =>
+        typeof m.content === "string"
+          ? m
+          : { ...m, content: m.content.filter((p: any) => p?.type === "text").map((p: any) => (p?.text ?? "").replace(/\n?\(The user attached an image with this question; interpret it directly when answering\.\)/, "")).join("\n") },
+      );
     answer = await generateOnce(env, MODELS.fallback, flat);
   }
   if (answer) answer = canonicalRefusal(answer);
