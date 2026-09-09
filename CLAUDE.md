@@ -138,7 +138,7 @@ reasoning mode, sampling and a budget the reasoning cannot starve.
 
 ## Deploy & ops automation
 
-- `npm run deploy` → `scripts/deploy.sh`: guards (main == origin/main,
+- `npm run deploy` (requires `CLOUDFLARE_ACCOUNT_ID` in the environment) → `scripts/deploy.sh`: guards (main == origin/main,
   clean tree, typecheck, unit), site build, INDEX_VERSION auto-bump,
   90s settle, 3-query smoke. NEVER deploy from a stale/diverged main.
 - Wire-stage ops without REST tokens: embed+upsert via `/admin/enrich`
@@ -148,7 +148,7 @@ reasoning mode, sampling and a budget the reasoning cannot starve.
   caches (exact `a:` + semantic `sc:` in KV) are namespaced by
   INDEX_VERSION + a corpus-generation stamp (`sys:corpus_gen`). After a
   live deletion or re-index, bump it:
-  `RAG_PUBLIC_KV=0f65d12cc77c41b5b91086de1c04f6da .venv/bin/python scripts/invalidate_answer_cache.py`
+  `RAG_PUBLIC_KV=1 .venv/bin/python scripts/invalidate_answer_cache.py` (the CACHE namespace id resolves from the worker's wrangler.toml)
   (old-generation entries miss and TTL out; ~60s KV edge propagation).
 - Eval: golden ×3 with witness-span containment (tests/retrieval.mjs);
   `node scripts/variance.mjs` (determinism), `node scripts/feedback-triage.mjs`

@@ -36,7 +36,7 @@ s = p.read_text()
 s = re.sub(r'INDEX_VERSION = "[^"]*"', 'INDEX_VERSION = "public-v2.62-tables"', s)
 p.write_text(s)
 PY
-(cd workers/worker_public && CLOUDFLARE_ACCOUNT_ID=06cad8ae9a017c856ab496c6bca9a9d8 npx wrangler deploy) >> "$LOG" 2>&1
+(cd workers/worker_public && npx wrangler deploy) >> "$LOG" 2>&1
 echo "[deploy] v2.62-tables $(date)" >> "$LOG"
 sleep 90
 

@@ -30,6 +30,12 @@ export interface RetrieveOptions {
    *  with a filter they union in as discounted filter-miss cover. */
   optimisticHits?: Hit[];
   optimisticVec?: number[] | null;
+  /** Dataset scope (the sidebar toggles): the set of CORPUS values the
+   *  request allows. Present only when NARROWER than the default (all
+   *  permitted datasets) — a null scope means no filtering. The ask path
+   *  intersects the requested ids with session permissions before
+   *  building this set. */
+  datasetScope?: Set<string> | null;
 }
 
 export interface GlossaryEntry {

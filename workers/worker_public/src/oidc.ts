@@ -40,6 +40,22 @@ interface CachedMetadata {
 const metadataCache = new Map<string, CachedMetadata>();
 const METADATA_TTL_MS = 60 * 60 * 1000;
 
+/** UserInfo (the OP declares the endpoint): the ID token carries the
+ *  profile contract (name/email + policy families) — `picture` rides
+ *  userinfo. Returns {} on any failure (the picture is a nicety, never
+ *  a gate); the CALLER must check `sub` matches the ID token's. */
+export async function fetchUserinfo(meta: OidcMetadata, accessToken: string): Promise<Record<string, unknown>> {
+  if (!meta.userinfo_endpoint) return {};
+  try {
+    const res = await fetch(meta.userinfo_endpoint, { headers: { authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return {};
+    const claims: unknown = await res.json();
+    return claims && typeof claims === "object" ? (claims as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function discoverIssuer(issuer: string): Promise<OidcMetadata> {
   const cached = metadataCache.get(issuer);
   if (cached && Date.now() - cached.fetchedAt < METADATA_TTL_MS) return cached.metadata;

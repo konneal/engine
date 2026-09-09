@@ -131,7 +131,7 @@ def run(dry: bool = False) -> int:
                 if line.startswith("export API_TOKEN="):
                     api_token = line.split("=", 1)[1].strip()
                     break
-    account = env.get("CLOUDFLARE_ACCOUNT_ID", "06cad8ae9a017c856ab496c6bca9a9d8")
+    account = env["CLOUDFLARE_ACCOUNT_ID"]
     h = {"authorization": f"Bearer {token}", "user-agent": "oiml-glossary/1.0"}
     from concurrent.futures import ThreadPoolExecutor
 

@@ -123,10 +123,15 @@ export function roleModel(env: any, role: keyof typeof MODELS): string {
  *  when passages from this corpus are present — corpus behavior travels
  *  with the dataset, not with pipeline code. */
 export interface Dataset {
-  id: string; // equals the chunk metadata `corpus` value
+  id: string;
   label: string;
   description: string;
+  /** member-session gated (federated via the internal service binding) */
   session?: boolean;
+  /** the estate permission (a role code set in id.oimlsmart.org) the
+   *  session must carry for a session-gated dataset — membership alone
+   *  is not the bar */
+  permission?: string;
   note?: string;
 }
 
@@ -147,17 +152,35 @@ export const DATASETS: Dataset[] = [
     label: "ISO/IEC Conformity Assessment",
     description: "ISO/IEC 17xxx standards — federated with OIML results for members",
     session: true,
+    permission: "ai-preview",
     note: "Some passages come from the internal ISO/IEC corpus (labeled ISO/IEC …) — use them alongside the OIML passages and cite them the same way.",
   },
 ];
+
+/** The estate permission gate: a session-gated dataset requires BOTH
+ *  membership and the named permission (a role code the account carries
+ *  in id.oimlsmart.org). Enforcement is server-side — the UI's lock is
+ *  cosmetic; /api/ask federation and the scope intersect here too. */
+export function hasPermission(session: unknown, code: string): boolean {
+  const roles = (session as { roles?: unknown } | null)?.roles;
+  return Array.isArray(roles) && roles.map(String).includes(code);
+}
+
+export function datasetAllowed(d: Dataset, session: unknown): boolean {
+  if (!d.session) return true;
+  if (!session) return false;
+  return hasPermission(session, d.permission ?? "ai-preview");
+}
 
 export function datasetsFor(session: unknown): unknown[] {
   return DATASETS.map((d) => ({
     id: d.id,
     label: d.label,
     description: d.description,
-    enabled: !d.session || !!session,
-    ...(d.session ? { requires: "an OIML SMART account", authenticated: !!session } : {}),
+    enabled: datasetAllowed(d, session),
+    ...(d.session
+      ? { requires: `the ${d.permission ?? "ai-preview"} permission (id.oimlsmart.org)`, authenticated: !!session }
+      : {}),
   }));
 }
 

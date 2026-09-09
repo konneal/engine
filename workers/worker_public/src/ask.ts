@@ -3,7 +3,7 @@
 // echo — everything between "request validated" and "response written".
 // index.ts routes here; this module owns the answer contract.
 
-import { LIMITS, MODELS, num, sha256Hex, roleModel } from "./config";
+import { LIMITS, MODELS, num, sha256Hex, roleModel, DATASETS, datasetAllowed } from "./config";
 import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, REFUSAL_ANSWER, Hit } from "./pipeline";
 import { sessionFrom } from "./auth";
 import { retrieveInternal } from "./internal_gateway";
@@ -25,7 +25,7 @@ import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested, semanticCac
 import type { Env } from "./env";
 export type { Env };
 import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
-import { clientIp, isExemptIp, checkQuota, telemetry } from "./quota";
+import { clientIp, checkQuota, telemetry } from "./quota";
 import { graphExpand, editionNote } from "./graph";
 
 /** User-uploaded image for multimodal questions: a data URL
@@ -214,17 +214,17 @@ async function handleAsk(
 
   const member = tier === "member" ? await sessionFrom(req, env as any) : null;
 
-  const exempt = tier === "anon" ? await isExemptIp(env, clientIp(req)) : false;
+
   const limit =
     tier === "key" ? key!.day_limit : tier === "member" || member ? num(env as any, "MEMBER_DAY_ASK", 300) : num(env as any, "ANON_DAY_ASK", 20);
   const bucketId = tier === "key" ? `key:${key!.id}` : member ? `sub:${member.sub}` : clientIp(req);
   const quota = await checkQuota(env, "ask", bucketId, limit);
-  if (!quota.ok && !exempt) {
+  if (!quota.ok) {
     return err(429, "quota_exceeded", `Daily question limit reached (${quota.limit}). Try again tomorrow.`);
   }
 
   const hardCap = num(env as any, "ANON_DAY_HARD_CAP", 5000);
-  if (tier === "anon" && !exempt && quota.used > hardCap) {
+  if (tier === "anon" && quota.used > hardCap) {
     return err(503, "generation_disabled", "Generation is temporarily paused; search remains available.");
   }
   if ((await env.CACHE.get("sys:generation")) === "off") {
@@ -239,7 +239,31 @@ async function handleAsk(
     cookie: req.headers.get("cookie") ?? "",
     authorization: req.headers.get("authorization") ?? "",
   };
-  const federate = member && service
+  // Dataset scope (the sidebar toggles): the request names the datasets
+  // to search; the server intersects with session permissions — the UI's
+  // lock is cosmetic, this is the gate. A scope equal to everything the
+  // session may see passes null (no filtering, zero overhead).
+  const allIds = DATASETS.map((d) => d.id);
+  const requested = Array.isArray(body?.datasets)
+    ? (body.datasets as unknown[]).filter((x): x is string => typeof x === "string" && allIds.includes(x))
+    : null;
+  if (requested !== null && requested.length === 0) {
+    return err(400, "invalid_input", "datasets: at least one dataset must stay enabled");
+  }
+  const permittedIds = allIds.filter((id) => {
+    const d = DATASETS.find((x) => x.id === id)!;
+    return d.session ? datasetAllowed(d, member) : true;
+  });
+  const scopeIds = requested ?? permittedIds;
+  const narrowed = scopeIds.length < permittedIds.length;
+  const corpora = new Set<string>();
+  for (const id of scopeIds) {
+    if (id === "oiml") for (const v of ["oiml", "dirty", "clean", "synthetic"]) corpora.add(v);
+    else if (id === "iso") corpora.add("iso-internal");
+    else corpora.add(id);
+  }
+  const isoOn = scopeIds.includes("iso");
+  const federate = member && service && isoOn
     ? (q2: string) => retrieveInternal(service, fedAuth, q2)
     : undefined;
 
@@ -332,7 +356,7 @@ async function handleAsk(
         if (wantsStream) {
           return sseResponse([{ type: "citations", citations: sc0.citations ?? [], context_applied: cctx0 }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true, context_applied: cctx0 }], corsHeaders(req));
         }
-        return json({ ...sc0, similar: true, context_applied: cctx0, ...(exempt ? {} : { quota }) });
+        return json({ ...sc0, similar: true, context_applied: cctx0, quota, });
       }
     }
   }
@@ -475,7 +499,7 @@ async function handleAsk(
         if (wantsStream) {
           return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: cctx }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, context_applied: cctx }], corsHeaders(req));
         }
-        return json({ ...sc, similar: true, context_applied: cctx, ...(exempt ? {} : { quota }) });
+        return json({ ...sc, similar: true, context_applied: cctx, quota, });
       }
     }
   }
@@ -501,7 +525,7 @@ async function handleAsk(
         const sse = new ReadableStream({
           async start(controller) {
             const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-            send({ type: "citations", citations: [], context_applied: NO_CONTEXT, ...(exempt ? {} : { quota }) });
+            send({ type: "citations", citations: [], context_applied: NO_CONTEXT, quota, });
             let full = "";
             try {
               for await (const tok of sseTokens(stream)) {
@@ -528,7 +552,7 @@ async function handleAsk(
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
     telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
-    return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: NO_CONTEXT, ...(exempt ? {} : { quota }) });
+    return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: NO_CONTEXT, quota, });
   }
 
   // ── The draft act (TODO.ai-platform/04) — the assistant PREPARES, the
@@ -574,14 +598,14 @@ async function handleAsk(
     if (wantsStream) {
       return sseResponse(
         [
-          { type: "citations", citations, context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), ...(exempt ? {} : { quota }) },
+          { type: "citations", citations, context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, },
           { type: "token", v: verdict.answer },
           { type: "done", model, query_hash: queryHash, context_applied: draftCtxApplied },
         ],
         corsHeaders(req),
       );
     }
-    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), ...(exempt ? {} : { quota }) });
+    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, });
   }
 
   // (declared before the retrieval try: the account block, the refusal
@@ -687,7 +711,8 @@ async function handleAsk(
     // QUESTION keeps the soft steer by design (the widen covers sparse
     // publications there).
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
-      sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec });
+      sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec,
+      datasetScope: narrowed ? corpora : null });
     console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
     // they consume the same candidate list (grade is coarse: good/weak;
@@ -708,7 +733,7 @@ async function handleAsk(
     console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null });
       const grade2 = await gradeRetrieval(env.AI, MODELS.grader, q.query, second.hits.map((h: Hit) => h.text));
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better
     }
@@ -722,7 +747,7 @@ async function handleAsk(
     const answer = REFUSAL_ANSWER;
     const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
     telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang);
-    return json({ ...out, ...(exempt ? {} : { quota }) });
+    return json({ ...out, quota, });
   }
 
   const processNote = understanding?.process_intent
@@ -790,7 +815,7 @@ async function handleAsk(
       const sse = new ReadableStream({
         async start(controller) {
           const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(exempt ? {} : { quota }) });
+          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), quota, });
           let full = "";
           try {
             for await (const tok of sseTokens(stream)) {
@@ -921,6 +946,7 @@ async function handleAsk(
         prev,
         understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` } as any,
         sealScope: declaredScoped ? docScope : null,
+        datasetScope: narrowed ? corpora : null,
       });
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
@@ -1007,7 +1033,7 @@ async function handleAsk(
     clause_anchor: h.metadata.clause_anchor,
     text: h.text.slice(0, 1200),
   }));
-  return json({ ...out, context: contextOut, ...(exempt ? {} : { quota }), ...corsHeaders(req) });
+  return json({ ...out, context: contextOut, quota, ...corsHeaders(req) });
 }
 
 function sseResponse(events: unknown[], cors: Record<string, string>): Response {

@@ -14,6 +14,7 @@ Edge kinds:
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -226,7 +227,7 @@ def apply() -> int:
         print("no graph.sql — run `graph` first")
         return 1
     env = {"PATH": "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin",
-           "CLOUDFLARE_ACCOUNT_ID": "06cad8ae9a017c856ab496c6bca9a9d8"}
+           "CLOUDFLARE_ACCOUNT_ID": os.environ["CLOUDFLARE_ACCOUNT_ID"]}
     r = subprocess.run(
         # the file path must be ABSOLUTE: wrangler resolves it against its
         # own cwd (the worker dir), not the repo root

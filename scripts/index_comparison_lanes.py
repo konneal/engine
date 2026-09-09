@@ -138,7 +138,7 @@ def embed_and_upsert(enriched: list[dict], index_name: str, lane: str):
                     if line.startswith("export API_TOKEN="):
                         token = line.split("=", 1)[1].strip()
                         break
-            account = "06cad8ae9a017c856ab496c6bca9a9d8"
+            account = os.environ["CLOUDFLARE_ACCOUNT_ID"]
             req = urllib.request.Request(
                 f"https://api.cloudflare.com/client/v4/accounts/{account}/vectorize/v2/indexes/{index_name}/upsert",
                 data=json.dumps({"vectors": vs}).encode(),

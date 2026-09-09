@@ -15,7 +15,7 @@ SELECT f.query_hash, f.ts, q.route, q.model, q.tier, q.ok, q.answer_chars
 
 const raw = execSync(
   `npx wrangler d1 execute rag-public --remote --command "${sql.replace(/\n\s*/g, " ")}" -c workers/worker_public/wrangler.toml --json`,
-  { env: { ...process.env, CLOUDFLARE_ACCOUNT_ID: process.env.CLOUDFLARE_ACCOUNT_ID ?? "06cad8ae9a017c856ab496c6bca9a9d8" } },
+  { env: { ...process.env } },
 ).toString();
 const rows = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] ?? "[]")[0]?.results ?? [];
 

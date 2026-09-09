@@ -29,7 +29,7 @@
 // stripping, like anchors/refusal/verdict.
 
 /** KV key carrying the corpus-generation stamp (the house sys:
- *  convention, cf. sys:generation / sys:exempt_ips). Absent = "0". */
+ *  convention, cf. sys:generation). Absent = "0". */
 export const CORPUS_GEN_KEY = "sys:corpus_gen";
 
 /** Read the corpus-generation stamp; a KV failure fails open to "0"

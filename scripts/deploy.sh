@@ -7,7 +7,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-export CLOUDFLARE_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-06cad8ae9a017c856ab496c6bca9a9d8}"
+# the account id is an environment fact, never a repo default
+: "${CLOUDFLARE_ACCOUNT_ID:?deploy:guard: CLOUDFLARE_ACCOUNT_ID must be set in the environment}"
+export CLOUDFLARE_ACCOUNT_ID
 
 # ── guards (stale-deploy near-miss, TODO.remaining/12) ──
 BRANCH=$(git branch --show-current)

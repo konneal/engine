@@ -3,7 +3,7 @@
 Run: .venv/bin/python -m pytest tests/python -q
 
 The invariants under test are the ops guardrails:
-  - the script refuses to run without the explicit namespace-id guard
+  - the script refuses to run without the explicit confirm flag
     (the estate's one-shot pattern, cf. scripts/delete_orphans.py);
   - --dry-run reads but never writes;
   - a bump writes a fresh UTC stamp to sys:corpus_gen.
@@ -45,14 +45,14 @@ def test_refuses_without_the_namespace_guard(monkeypatch: pytest.MonkeyPatch) ->
         iac.main()
 
 
-def test_refuses_a_wrong_namespace_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAG_PUBLIC_KV", "00000000000000000000000000000000")
+def test_refuses_a_wrong_confirm_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAG_PUBLIC_KV", "0")
     with pytest.raises(SystemExit, match="refusing to run"):
         iac.main()
 
 
 def test_dry_run_reads_but_never_writes(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    monkeypatch.setenv("RAG_PUBLIC_KV", iac.PRODUCTION_KV)
+    monkeypatch.setenv("RAG_PUBLIC_KV", "1")
     fake = FakeCF({iac.GENERATION_KEY: "20260904T120000Z"})
     monkeypatch.setattr(iac, "CF", lambda: fake)
     monkeypatch.setattr(sys, "argv", ["invalidate_answer_cache.py", "--dry-run"])
@@ -62,7 +62,7 @@ def test_dry_run_reads_but_never_writes(monkeypatch: pytest.MonkeyPatch, capsys:
 
 
 def test_bump_writes_a_fresh_generation(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RAG_PUBLIC_KV", iac.PRODUCTION_KV)
+    monkeypatch.setenv("RAG_PUBLIC_KV", "1")
     fake = FakeCF()
     monkeypatch.setattr(iac, "CF", lambda: fake)
     monkeypatch.setattr(sys, "argv", ["invalidate_answer_cache.py"])

@@ -14,19 +14,6 @@ export function clientIp(req: Request): string {
   return req.headers.get("cf-connecting-ip") ?? "unknown";
 }
 
-// operator-exempt IPs (env list, KV sys:exempt_ips override for runtime
-// edits) bypass the anon quota — the KV read is cached briefly per isolate
-let exemptCache: { at: number; ips: Set<string> } | null = null;
-export async function isExemptIp(env: Env, ip: string): Promise<boolean> {
-  if (((env.EXEMPT_IPS ?? "") + "").split(",").map((s) => s.trim()).includes(ip)) return true;
-  const now = Date.now();
-  if (!exemptCache || now - exemptCache.at > 60_000) {
-    const kv = (await env.CACHE.get("sys:exempt_ips")) ?? "";
-    exemptCache = { at: now, ips: new Set(kv.split(/[\s,]+/).filter(Boolean)) };
-  }
-  return exemptCache.ips.has(ip);
-}
-
 export async function checkQuota(
   env: Env,
   bucket: string,

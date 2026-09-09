@@ -14,7 +14,7 @@ if ! npx wrangler whoami >/dev/null 2>&1; then
 fi
 
 # All resources live on the OIML SMART account (owns the oimlsmart.org zone).
-ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-06cad8ae9a017c856ab496c6bca9a9d8}"
+ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:?bootstrap: CLOUDFLARE_ACCOUNT_ID must be set in the environment}"
 export CLOUDFLARE_ACCOUNT_ID="$ACCOUNT_ID"
 echo "account: $ACCOUNT_ID"
 echo "CLOUDFLARE_ACCOUNT_ID=$ACCOUNT_ID" > .env

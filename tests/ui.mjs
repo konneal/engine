@@ -131,7 +131,16 @@ check("app frame present", (await sidebar.count()) === 1 && (await chat.count())
 check("composer present", (await input.count()) === 1);
 check("greeting with API-driven suggestions", (await page.locator(".suggestion").count()) === 4);
 check("datasets panel renders API rows", (await sidebar.locator(".dataset-row").count()) === 2);
-check("ISO dataset shown as locked", (await sidebar.locator(".dataset-row .ds-dot.off").count()) === 1);
+check("ISO dataset shown as locked", (await sidebar.locator(".dataset-row .ds-dot.locked").count()) === 1);
+
+// — dataset toggles —
+const oimlRow = sidebar.locator(".dataset-row", { hasText: "OIML Publications" });
+await oimlRow.click();
+await page.waitForTimeout(80);
+check("dataset toggles off (dot + strike)", (await oimlRow.locator(".ds-dot.off").count()) === 1 && /line-through/.test((await oimlRow.locator("span.truncate").first().getAttribute("class")) ?? ""));
+await oimlRow.click();
+await page.waitForTimeout(80);
+check("dataset toggles back on", (await oimlRow.locator(".ds-dot.on").count()) === 1);
 
 // — ask flow —
 await input.fill("What is R 60?");

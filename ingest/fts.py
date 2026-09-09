@@ -238,7 +238,7 @@ def build_changed_rows() -> tuple[list[str], int, int]:
 def _run_sql(path: Path, attempts: int = 3) -> None:
     wrangler_dir = Path(__file__).resolve().parents[1] / "workers" / "worker_public"
     env = os.environ.copy()
-    env["CLOUDFLARE_ACCOUNT_ID"] = env.get("CLOUDFLARE_ACCOUNT_ID") or "06cad8ae9a017c856ab496c6bca9a9d8"
+    env["CLOUDFLARE_ACCOUNT_ID"] = env["CLOUDFLARE_ACCOUNT_ID"]
     cmd = [
         "npx", "wrangler", "d1", "execute", "rag-public",
         "--remote", "--file", str(path),
@@ -284,7 +284,7 @@ def apply(limit: int | None = None, resume: bool = False, incremental: bool = Fa
 def _count_rows() -> int:
     wrangler_dir = Path(__file__).resolve().parents[1] / "workers" / "worker_public"
     env = os.environ.copy()
-    env["CLOUDFLARE_ACCOUNT_ID"] = env.get("CLOUDFLARE_ACCOUNT_ID") or "06cad8ae9a017c856ab496c6bca9a9d8"
+    env["CLOUDFLARE_ACCOUNT_ID"] = env["CLOUDFLARE_ACCOUNT_ID"]
     r = subprocess.run(
         ["npx", "wrangler", "d1", "execute", "rag-public", "--remote",
          "--command", "SELECT COUNT(*) n FROM chunks", "-c", "wrangler.toml", "--json"],

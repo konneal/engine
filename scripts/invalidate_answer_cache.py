@@ -14,7 +14,8 @@ ingest/corpus-exclusions.yaml gains an entry or an ingest/re-index lands.
 KV reads are edge-cached: allow ~60s for the bump to reach every PoP.
 
 Usage:
-    RAG_PUBLIC_KV=0f65d12cc77c41b5b91086de1c04f6da .venv/bin/python scripts/invalidate_answer_cache.py [--dry-run]
+    RAG_PUBLIC_KV=1 .venv/bin/python scripts/invalidate_answer_cache.py [--dry-run]
+    (the CACHE namespace id is resolved from workers/worker_public/wrangler.toml)
 """
 
 from __future__ import annotations
@@ -29,8 +30,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ingest.cf import CF  # noqa: E402
 
 GENERATION_KEY = "sys:corpus_gen"
-# the rag-public CACHE namespace (workers/worker_public/wrangler.toml)
-PRODUCTION_KV = "0f65d12cc77c41b5b91086de1c04f6da"
+
+
+def _kv_namespace() -> str:
+    """The rag-public CACHE namespace id, resolved from the worker's own
+    wrangler.toml — the id is an environment/config fact, never a repo
+    literal duplicated here."""
+    import re
+
+    toml = (Path(__file__).resolve().parents[1] / "workers" / "worker_public" / "wrangler.toml").read_text()
+    m = re.search(r'\[\[kv_namespaces\]\]\s*binding = "CACHE"\s*id = "([0-9a-f]{32})"', toml)
+    if not m:
+        sys.exit("cannot resolve the CACHE namespace id from workers/worker_public/wrangler.toml")
+    return m.group(1)
+
+
+PRODUCTION_KV = _kv_namespace()
 
 
 def new_generation(now: datetime | None = None) -> str:
@@ -38,8 +53,8 @@ def new_generation(now: datetime | None = None) -> str:
 
 
 def main() -> None:
-    if os.environ.get("RAG_PUBLIC_KV") != PRODUCTION_KV:
-        sys.exit(f"refusing to run: set RAG_PUBLIC_KV={PRODUCTION_KV} (the rag-public CACHE namespace id)")
+    if os.environ.get("RAG_PUBLIC_KV") != "1":
+        sys.exit("refusing to run: confirm with RAG_PUBLIC_KV=1 (this bumps the production answer-cache generation)")
     dry = "--dry-run" in sys.argv
 
     cf = CF()

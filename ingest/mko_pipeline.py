@@ -33,7 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / "artifacts"
 BUNDLES = Path("/tmp/mko-bundles")
 MN_DOCUMENT = Path.home() / "src/mn/metanorma-document"
-ACCOUNT = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "06cad8ae9a017c856ab496c6bca9a9d8")
+ACCOUNT = os.environ["CLOUDFLARE_ACCOUNT_ID"]
 ENRICH_ROUNDS = 8
 
 

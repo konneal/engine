@@ -10,6 +10,7 @@ import {
   generatePkce,
   randomToken,
   validateIdToken,
+  fetchUserinfo,
   OidcError,
 } from "./oidc";
 import { clearSessionCookie, mintSessionCookie, mintSessionToken, rawSessionToken, readSession, sessionCookieFromToken, SessionClaims } from "./session";
@@ -142,11 +143,19 @@ export async function handleCallback(env: any, req: Request): Promise<Response> 
       jwksUri: meta.jwks_uri,
     });
     const roles = Array.isArray(claims.roles) ? claims.roles.map(String) : [];
+    // `picture` is a userinfo claim on this OP (the ID token carries the
+    // profile contract only) — fall back to userinfo, sub-checked, when
+    // the token happens to omit it
+    let picture = typeof claims.picture === "string" ? claims.picture : undefined;
+    if (!picture && typeof token.access_token === "string") {
+      const ui = await fetchUserinfo(meta, token.access_token);
+      if (ui.sub === claims.sub && typeof ui.picture === "string" && ui.picture) picture = ui.picture;
+    }
     const sessionClaims = {
       sub: claims.sub,
       name: typeof claims.name === "string" ? claims.name : undefined,
       email: typeof claims.email === "string" ? claims.email : undefined,
-      picture: typeof claims.picture === "string" ? claims.picture : undefined,
+      picture,
       roles,
     };
     // Mint ONCE — the cookie and the bubble's Bearer carry the same

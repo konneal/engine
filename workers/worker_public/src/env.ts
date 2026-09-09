@@ -22,7 +22,6 @@ export interface Env {
   ADMIN_TOKEN?: string;
   MEMBER_DAY_ASK?: string;
   ENRICH_MODEL?: string;
-  EXEMPT_IPS?: string;
   OIDC_ISSUER?: string;
   OIDC_CLIENT_ID?: string;
   OIDC_CLIENT_SECRET?: string;
