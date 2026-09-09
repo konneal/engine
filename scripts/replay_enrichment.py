@@ -91,6 +91,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--apply", action="store_true", help="embed + upsert (default: report only)")
     ap.add_argument("--source", action="append", type=Path, help="chunk jsonl to replay (repeatable)")
+    ap.add_argument("--reverse", action="store_true", help="walk groups last-to-first (run a second instance from the other end; the resume probe keeps them disjoint)")
     args = ap.parse_args()
 
     contexts: dict[str, str] = {}
@@ -148,6 +149,8 @@ def main() -> int:
         return len(found) == len(ids)
 
     groups = [replayable[i : i + batch] for i in range(0, len(replayable), batch)]
+    if args.reverse:
+        groups.reverse()
 
     def embed_group(group: list[dict]) -> list[list[float]]:
         # /admin/enrich embeds the composite sliced to 6000 chars — mirror
