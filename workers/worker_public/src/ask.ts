@@ -384,6 +384,23 @@ async function handleAsk(
   let declaredScoped = false;
   if (!declaredCtx) {
     ctxApplied = NO_CONTEXT;
+    // chip-less but the question TEXT names a publication: the same
+    // deterministic naming the chip path uses must scope retrieval here
+    // too — leaving it to the understanding model's extraction made
+    // "What is OIML D 29?" a coin flip (nodoc → unscoped pool loses D 29
+    // to R 29 and D-family neighbors; doc#29 → scoped pool answers). The
+    // text is the user's own words; the LLM understanding augments but
+    // never gates an explicit naming.
+    const bare = understanding?.process_intent ? null : namedDocumentIn(q.query);
+    if (bare && understanding?.doc_number !== bare.doc_number) {
+      understanding = {
+        ...(understanding ?? syntheticUnderstanding(bare)),
+        docidentifier: bare.label,
+        doc_number: bare.doc_number,
+        edition: bare.edition ?? understanding?.edition ?? null,
+      };
+      console.log("question names", bare.label, "— scoping retrieval from the text");
+    }
   } else if (declaredCtx.kind === "account") {
     // Provisional echo (TODO.ai-platform/03): the live read's outcome
     // refines it after the conversational branch — a conversational turn
