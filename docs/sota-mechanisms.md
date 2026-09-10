@@ -166,7 +166,7 @@ service with witness-span containment grading; the annealment battery
 (18 rung-tagged probes) measures capability per representation; EIR
 (cited/retrieved) watches window precision; leakage probes gate every
 promotion; the deploy pipeline guards branch, tests, version bump and
-smoke. Current: golden 37–38/38 (97–100%), annealment 18/18 (mode).
+smoke. Current: golden 37–38/38 (97–100%), annealment 17–18/18 (mode 18/18 — the residuals are two single-case variances: the L5 cross-standard probe's retrieval and the L1 validity date's phrasing).
 
 ## The vector adapter (one door)
 
