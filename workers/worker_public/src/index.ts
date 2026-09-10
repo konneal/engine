@@ -4,6 +4,7 @@ import type { Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleMemories } from "./memories";
+import { handleProjects, handleProjectFiles } from "./projects";
 import { handleShareConversation, handleGetShared } from "./share";
 import { understandQuery } from "./understand";
 import { embed } from "./ai";
@@ -52,6 +53,18 @@ async function memoriesRoute(c: RouteContext): Promise<Response> {
   const session = await sessionFrom(c.req, c.env as any);
   if (!session) return withCors(err(401, "unauthorized", "Sign in to use memory files"), corsHeaders(c.req));
   return withCors(await handleMemories(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+}
+
+async function projectsRoute(c: RouteContext): Promise<Response> {
+  const session = await sessionFrom(c.req, c.env as any);
+  if (!session) return withCors(err(401, "unauthorized", "Sign in to use projects"), corsHeaders(c.req));
+  return withCors(await handleProjects(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+}
+
+async function projectFilesRoute(c: RouteContext): Promise<Response> {
+  const session = await sessionFrom(c.req, c.env as any);
+  if (!session) return withCors(err(401, "unauthorized", "Sign in to use projects"), corsHeaders(c.req));
+  return withCors(await handleProjectFiles(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 
 async function conversationsRoute(c: RouteContext): Promise<Response> {
@@ -359,6 +372,9 @@ export const ROUTES: Route[] = [
   { method: "POST", pattern: "/auth/logout", handler: (c) => handleLogout(c.env as any, c.req) },
   { method: "*", pattern: "/api/conversations", handler: conversationsRoute },
   { method: "*", pattern: "/api/memories", handler: memoriesRoute },
+  { method: "*", pattern: "/api/projects", handler: projectsRoute },
+  { method: "*", pattern: "/api/projects/:id/files", handler: projectFilesRoute },
+  { method: "DELETE", pattern: "/api/project-files/:id", handler: projectFilesRoute },
   { method: "*", pattern: "/api/memories/:id", handler: memoriesRoute },
   { method: "*", pattern: "/api/conversations/:id", handler: conversationsRoute },
   { method: "POST", pattern: "/api/conversations/:id/messages", handler: appendMessageRoute },

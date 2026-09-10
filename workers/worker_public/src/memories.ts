@@ -49,15 +49,20 @@ export async function handleMemories(env: any, sub: string, req: Request, route:
 }
 
 /** The ask path's memory injection: fetch the SELECTED, OWNED files and
- *  render them as one bounded note. Returns [note, idsActuallyUsed] —
- *  unknown or foreign ids silently drop (a stale client selection is
- *  never an error, and never another user's memory). */
+ *  render them as one bounded note. Ids may be personal (m:…) or the
+ *  user's project files (pf:…) — ownership resolves both ways, and a
+ *  foreign id silently drops (a stale selection is never an error, and
+ *  never another user's memory). Returns [note, idsActuallyUsed]. */
 export async function memoryNote(env: any, sub: string, ids: string[]): Promise<[string | null, string[]]> {
-  const wanted = [...new Set(ids.filter((x) => typeof x === "string" && ID_RE.test(x)))].slice(0, 4);
+  const wanted = [...new Set(ids.filter((x) => typeof x === "string" && (ID_RE.test(x) || /^pf:[a-f0-9]{16}$/.test(x))))].slice(0, 4);
   if (!wanted.length) return [null, []];
-  const rows = (await env.DB.prepare(
-    `SELECT id, name, content FROM memories WHERE sub = ?1 AND id IN (${wanted.map((_, i) => `?${i + 2}`).join(",")})`,
-  ).bind(sub, ...wanted).all()).results ?? [];
+  const ph = wanted.map((_, i) => `?${i + 2}`).join(",");
+  const rows = [
+    ...((await env.DB.prepare(`SELECT id, name, content FROM memories WHERE sub = ?1 AND id IN (${ph})`).bind(sub, ...wanted).all()).results ?? []),
+    ...((await env.DB.prepare(
+      `SELECT f.id, f.name, f.content FROM project_files f JOIN projects p ON p.id = f.project_id WHERE p.sub = ?1 AND f.id IN (${ph})`,
+    ).bind(sub, ...wanted).all()).results ?? []),
+  ];
   if (!rows.length) return [null, []];
   let budget = 4_000;
   const parts: string[] = [];

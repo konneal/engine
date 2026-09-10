@@ -49,12 +49,28 @@ CREATE TABLE IF NOT EXISTS memories (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_memories_sub ON memories(sub, updated_at);
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,             -- p:<hex16>
+  sub TEXT NOT NULL,               -- owner (session sub)
+  name TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS project_files (
+  id TEXT PRIMARY KEY,             -- pf:<hex16>
+  project_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_project_files_project ON project_files(project_id, updated_at);
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   sub TEXT NOT NULL,
   title TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  project_id TEXT             -- the project this conversation belongs to (NULL = none)
 );
 CREATE INDEX IF NOT EXISTS idx_conversations_sub ON conversations(sub, updated_at DESC);
 

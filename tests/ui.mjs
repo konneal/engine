@@ -94,9 +94,15 @@ await page.route("**/api/**", (route) => {
         { type: "citations", citations: CITES(), quota: { used: 3, limit: 20 } },
         { type: "token", v: "The limits are given in [[u:table-1]] — classes A to D." },
         { type: "done", model: "@cf/zai-org/glm-5.3-flash", query_hash: "b".repeat(64),
-          blocks: [{ unit_id: "u:table-1", type: "table", docidentifier: "OIML R 60-1", edition: "2",
-                     payload: { caption: "n_LC limits", columns: [{ label: "Class" }, { label: "n_LC min" }],
-                                rows: ["A | 50 000", "B | 5 000", "C | 500", "D | 100"] } }] },
+          blocks: [
+            { unit_id: "u:table-1", type: "table", docidentifier: "OIML R 60-1", edition: "2",
+              payload: { caption: "n_LC limits", columns: [{ label: "Class" }, { label: "n_LC min" }],
+                         rows: ["A | 50 000", "B | 5 000", "C | 500", "D | 100"] } },
+            { unit_id: "u:form-1", type: "formula", docidentifier: "OIML R 60-1", edition: "2",
+              payload: { asciimath: "s = sqrt( sum_(i=1)^N (x_i-x)^2/(N-1) )",
+                         mathml: '<math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mi>s</mi><mo>=</mo><msqrt><mrow><mfrac><mrow><munderover><mo>&#x2211;</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>N</mi></munderover><msup><mrow><mo>(</mo><msub><mi>x</mi><mi>i</mi></msub><mo>-</mo><mi>x</mi><mo>)</mo></mrow><mn>2</mn></msup></mrow><mrow><mi>N</mi><mo>-</mo><mn>1</mn></mrow></mfrac></mrow></msqrt></mrow></math>',
+                         description: "experimental standard deviation" } },
+          ] },
       ];
     } else if (/^xss/i.test(q)) {
       events = [{ type: "citations", citations: [], quota: { used: 2, limit: 20 } }, { type: "token", v: XSS_PAYLOAD }, { type: "done", query_hash: "c".repeat(64) }];
@@ -245,6 +251,7 @@ await page.waitForSelector(".unit-table", { timeout: 10000 });
 check("typed table block rendered", (await page.locator(".unit-table tbody tr").count()) === 4);
 check("table payload cells exact", (await page.locator(".unit-table").textContent()).includes("50 000"));
 check("block badge + source shown", (await page.locator(".block-head .src-badge").first().textContent()) === "TABLE");
+check("formula block renders MathML", (await page.locator(".block .formula-math math").count()) >= 1);
 check("ref token rendered in prose", (await chat.textContent()).includes("[[u:table-1]]"));
 
 check("no uncaught page errors", errors.length === 0, errors[0] ?? "");
