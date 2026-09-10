@@ -19,11 +19,23 @@ const laneXIdx = args.indexOf("--lane-x");
 const byRung = {};
 for (const c of laneXIdx >= 0 ? [] : cases) {
   try {
-    const res = await fetch(`${BASE}/v1/ask`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json", "user-agent": "oiml-eval" },
-      body: JSON.stringify({ query: c.query, fresh: true }),
-    });
+    // one retry on TRANSPORT failure (fetch TypeError): the battery
+    // measures serving quality, not the local network — a dead socket
+    // counted as a case failure flipped run 2 of the 2026-09-10 gate
+    let res;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await fetch(`${BASE}/v1/ask`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json", "user-agent": "oiml-eval" },
+          body: JSON.stringify({ query: c.query, fresh: true }),
+        });
+        break;
+      } catch (e) {
+        if (attempt === 0 && e instanceof TypeError) { await new Promise((r) => setTimeout(r, 2000)); continue; }
+        throw e;
+      }
+    }
     const d = await res.json();
     const answer = d.answer ?? "";
     const cites = (d.citations ?? []).map((x) => `${x.docidentifier ?? ""} §${x.clause_anchor ?? ""} ${x.snippet ?? ""}`).join(" | ");
