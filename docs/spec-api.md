@@ -32,9 +32,9 @@ beyond the inventory: [API.md](API.md).
 | `/api/conversations/:id/messages` | POST | session (owner) | `appendMessageRoute` → `handleAppendMessage` | Append a message turn. |
 | `/api/conversations/:id/share` | POST | session (owner) | `shareRoute` → `handleShareConversation` | Publish a conversation to an unlisted share slug. (Was shadowed by the compound conversations branch pre-route-table — the pattern inventory made the collision visible and fixed it.) |
 | `/api/shared/:slug` | GET | none | `getSharedRoute` → `handleGetShared` | Read a shared conversation. |
-| `/api/datasets` | GET | none (session enriches) | `datasetsRoute` | The corpus catalog + starter questions (the UI's empty state — content from the API, never hardcoded in the client). |
+| `/api/datasets` | GET | none (session enriches) | `datasetsRoute` | The corpus catalog + starter questions (the UI's empty state — content from the API, never hardcoded in the client). Session-gated datasets carry `requires` (the estate permission, e.g. `the ai-preview permission (id.oimlsmart.org)`) and `enabled` reflects the permission, not just login. |
 | `/health` | GET | none | `healthRoute` | Liveness + deployed `index_version` (the deploy-drift guard reads this). |
-| `/api/ask`, `/v1/ask` | POST | tier | `askRoute` → `handleAsk` | The answer contract: streamed or JSON answer, citations, typed blocks, context echo. Quotas per tier. |
+| `/api/ask`, `/v1/ask` | POST | tier | `askRoute` → `handleAsk` | The answer contract: streamed or JSON answer, citations, typed blocks, context echo. Quotas per tier. Optional `datasets: [id…]` narrows the corpora searched (server-intersected with session permissions; an explicitly-empty list is a 400). |
 | `/api/absence`, `/v1/absence` | POST | tier | `absenceRoute` | Provable absence: exhaustive enumeration over a standard's model plane; `{ verdict: absent \| present, enumerated, matches }`. |
 | `/api/verify`, `/v1/verify` | POST | tier | `verifyRoute` | Self-verification battery over a supplied (query, answer): quote anchors, unit references, citations present + judged faithfulness. |
 | `/api/lane`, `/v1/lane` | POST | tier | `laneRoute` | Direct retrieval against a comparison index (dense + lexical fused), bypassing the full pipeline — for the annealment matrix and the /compare demo. |

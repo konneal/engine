@@ -78,7 +78,11 @@ Expected: D strong, C partial (alignment, no diffs), A/B near-zero.
 **L7 PERCEPTION** (P7). a) caption/asset b) pixel-only content (labels
 readable only from the drawing) c) user-image grounding (nameplate
 photo). Witness: pixel-only label / classification. Expected: C strong,
-D via figure references, A/B zero. **The visible demo separator.**
+D via figure references, A/B zero. **The visible demo separator — and
+live in production:** the pinned figure's pixels ride the generation
+call (asset readability + message shape are measured invariants; see
+the mechanism reference #12), so pixel-only labels are read from the
+drawing itself, not disclaimed against the caption.
 
 **L8 COMPUTATION** (P9+P8). a) pure calculation (conversion factor f
 from inputs) b) **constraint/conformance verdict with the violation

@@ -92,6 +92,12 @@ Claims beyond profile+email arrive ONLY when your client's policy
 allows them. The same user signing into two services can therefore
 carry different claim sets — by design.
 
+**`picture` rides userinfo, not the ID token** — the ID token carries
+the profile contract (name/email + policy families); the avatar URL
+arrives at the userinfo endpoint (declared in discovery). Relying
+parties that want the photo fetch userinfo with the access token,
+sub-checked against the ID token's `sub`.
+
 ## 5. The sign-in flow (authorization code + PKCE)
 
 1. Discover: `GET {issuer}/.well-known/openid-configuration`; the

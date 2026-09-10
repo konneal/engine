@@ -110,6 +110,17 @@ for them; the registry surfaces these gaps rather than guessing. Both
 numbers are the worklist for upstream bibliographic corrections — the
 kind that serving surfaces only because it keeps score.
 
+**Identifiers are identity, not display.** A cross-referenced audit of
+the dirty corpus found documents whose machine-readable identifier was
+a placeholder ("OIML D 0:0000", "OIML D X") or polluted with language
+markers — around 200 records — making them unreachable by
+doc-scoped retrieval. Identifiers are now derived from slug identity
+with placeholders never winning, and the index is reconciled against
+the canonical chunk set: the first census measured 49,553 live vectors
+against 31,512 canonical — 18,041 strays from every prior re-chunking,
+deleted in place (upserts never delete). A retrieval service that never
+enumerates its own index serves ghosts.
+
 **Tables are where the normative values live.** Maximum permissible
 errors, accuracy-class limits, verification interval bounds — the values
 practitioners ask for — are tabular. Flattening tables into prose loses
@@ -255,10 +266,19 @@ image pixels; equations are carried in their authoring-native formats
 Figures also flow the other way: when the retrieved passages contain
 figure units, their actual images are attached to the answer model's
 input, so descriptions and reasoning come from the drawing itself — the
-model reads labels that exist only in the pixels. Users can likewise
-attach a photograph (an instrument nameplate, a scale dial, a schematic)
-to their question; the text still drives retrieval, and the image gives
-the model the visual context, under the same citation contract.
+model reads labels that exist only in the pixels (the pixel-label
+probe — "what are the labeled example cases in the R 60-2 design-shapes
+figure?" — is answered A, B and C from the drawing, stable across
+repeated runs). Two measured invariants keep that true: assets must be
+readable by vision pipelines (vector-sourced rasters that draw black on
+transparent alpha flatten to a solid black rectangle inside a vision
+model, whatever a browser shows — a corpus sweep detects and repairs
+them), and images ride their own message in the generation call (long
+passage text and image parts in one message triggers provider errors
+that scale with payload). Users can likewise attach a photograph (an
+instrument nameplate, a scale dial, a schematic) to their question; the
+text still drives retrieval, and the image gives the model the visual
+context, under the same citation contract.
 
 ## 7. Models, cost, and sovereignty
 
@@ -320,9 +340,16 @@ The service's answers are evaluated on three axes, continuously:
 - **User feedback** (thumbs up/down on every answer, logged to the same
   evaluation loop)
 
-Every change ships through the same gate: the suites run in CI and the
-service's cache versions flush on every retrieval change so no answer is
-served from a superseded index. The gate rejects as often as it accepts.
+Every change ships through the same gate — literally one command:
+golden suite ×3 and the capability battery ×6 against the live service,
+where any failed run fails the command. The suites also run in CI and
+the service's cache versions flush on every retrieval change so no
+answer is served from a superseded index. A humility note from the
+measurement machinery itself: the capability battery's runner once
+omitted to set a non-zero exit code on failure, so a failing battery
+reported green through the gate — the same class of silent failure the
+cache-version discipline exists to prevent. Exit codes are part of the
+measurement contract now. The gate rejects as often as it accepts.
 A candidate change that unioned additional retrieval candidates into a
 rewritten query's pool — a plausible-looking "more evidence" improvement
 — dropped recall@5 from 94.3% to 89.7%: topically close but wrong

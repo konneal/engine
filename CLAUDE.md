@@ -133,6 +133,18 @@ reasoning mode, sampling and a budget the reasoning cannot starve.
   default on the golden probe, tighter determinism).
 - `roleModel(env, role)` reads `<ROLE>_MODEL` wrangler vars — live A/B
   without code changes; always gate a swap with golden ×3.
+- Multimodal through the binding (glm-5.3-flash): image parts ride their
+  OWN short trailing user message — long passage text + image parts in
+  ONE message triggers nondeterministic 8005s that scale with payload
+  (probed 2026-09-09); attach only figures the question WANTS (intent or
+  the answering clause — a plain definition question gains nothing from
+  pixels); strip image parts AND the attach note before handing messages
+  to a text-only fallback (a text model answers the note otherwise —
+  observed live); the response's `model` field names the primary
+  regardless of which model actually generated.
+- Workers AI admin getBys: Vectorize getByIds returns EMPTY above ~20
+  ids (silent, 200 OK) — the admin route chunks by 20; any direct
+  batching must too.
 - Catalog watchlist (grep `wrangler ai models list`): qwen3.8-flash-next,
   hosted hy4 — neither available as of 2026-09-01.
 

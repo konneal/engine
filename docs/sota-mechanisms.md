@@ -43,10 +43,17 @@ as parallel lanes; a hypothetical answer serves as an extra search key
 (HyDE). *Below:* dense-only retrieval misses exact jargon ("n_LC");
 lexical-only misses paraphrase.
 
-### 3. Contextual enrichment (99.4% of chunks)
+### 3. Contextual enrichment (98.7% of non-synthetic chunks)
 Every chunk carries a model-written preamble stating where it sits in
 its document — written once at index time, its quality persists into
-every future retrieval. *Below:* bare chunks retrieve on local wording.
+every future retrieval. The preamble lives in the INDEX (plus a 30-day
+KV context cache), never in the build artifacts — a full index restore
+must replay it from the durable record (`scripts/replay_enrichment.py`,
+binding-embed, zero regeneration). Measured the hard way: a restore that
+skipped the replay dropped enrichment to 0% and identifier queries
+failed first ("what is OIML D 29?" — the preambles carry the
+identifier-rich context that ranks them). *Below:* bare chunks retrieve
+on local wording.
 
 ### 4. Structural retrieval over the clause tree
 The corpus IS a tree (clause anchors chain parent→child). A hit's score
@@ -73,10 +80,22 @@ that is a vocabulary problem, not a structure problem.
 ### 7. Reranking, edition steering, typed pin
 A cross-encoder orders candidates (a stronger model re-orders hard
 queries); family-relative steering demotes superseded editions while
-keeping them citable when only they carry content; typed objects
-(tables/formulas/figures) are pinned a window slot so the answer
-contract can reference them. *Below:* similarity-only ranking answers
-from stale editions and never surfaces a typed object.
+keeping them citable when only they carry content — family is the
+doctype+number, and the demotion is full-strength under either signal:
+the successor edition of the SAME identifier is in the pool, or the
+chunk's own status says superseded/unknown against the family's newest
+(the corpus carries the supersession the registry's missing successor
+links do not; in-force documents are exempt so a newer part-2 never
+demotes a current part-1). A document NAMED in the question scopes
+retrieval deterministically — read from the question text, never left
+to the understanding model's per-call mood ("What is OIML D 29?" was a
+coin flip before). Typed objects (tables/formulas/figures) are pinned a
+window slot so the answer contract can reference them — and a query
+that NAMES the artifact type ("figure", "table", "equation") dominates
+unit selection, so the pin lands the object the question is about
+(feeding multimodal generation for figures). *Below:* similarity-only
+ranking answers from stale editions, guesses at doc scope, and never
+surfaces a typed object.
 
 ### 8. The answer contract (claims are checkable)
 Inline citations on every claim; normative values quoted verbatim from
@@ -109,14 +128,45 @@ containment, object-reference resolution, citation presence
 (deterministic) plus a judged faithfulness score (labeled as judged).
 *Below:* trust me.
 
-### 12. The measurement gates
+### 12. Multimodal figure interpretation
+A pinned figure unit's pixels ride the generation call (R2 asset →
+base64 image part), so the model interprets the producer's drawing, not
+just its stored caption. Two measured invariants: assets must be
+vision-readable — vector-sourced rasters carrying black strokes on
+transparent alpha flatten to a solid black rectangle inside vision
+pipelines (browsers hid the defect by compositing on white;
+`scripts/fix_figure_assets.py` detects and re-uploads white-flattened) —
+and images ride their own short trailing user message, because long
+passage text + image parts in ONE message triggers nondeterministic
+provider 8005s that scale with payload. A third rule guards the blast
+radius: pixels attach only when the question WANTS a drawing (names a
+figure-ish artifact, or the pinned figure sits in the answering
+clause) — and when the multimodal call flakes down to a text-only
+fallback, the attach note drops with the pixels (a text model answers
+the note, not the question — observed in the wild). *Below:* caption-
+only answers that disclaim "the passage does not list" what the drawing
+plainly shows.
+
+### 13. Dataset scope and permission gating
+Three databases (OIML Publications · OIML SMART Models · ISO/IEC
+Conformity Assessment) are selectable per question: the sidebar toggles
+persist a scope, every ask carries it, and the server intersects it
+with what the SESSION may see — the ISO/IEC corpus requires the estate
+permission `ai-preview` (a role code set in id.oimlsmart.org);
+membership alone is not the bar, and the UI's lock is cosmetic. A
+corpus-scope stage runs last of the pool-assembly stages (after the
+lexical union refills the pool post-rerank) so disabling a database
+actually disables it at the hit level. *Below:* one monolithic corpus
+the user cannot narrow, gated (or not) on login alone.
+
+### 14. The measurement gates
 The golden suite (38 cases: doc-level, definitions, table values,
 refusals, filters, verdicts, auth, French) runs ×3 against the live
 service with witness-span containment grading; the annealment battery
 (18 rung-tagged probes) measures capability per representation; EIR
 (cited/retrieved) watches window precision; leakage probes gate every
 promotion; the deploy pipeline guards branch, tests, version bump and
-smoke. Current: golden 38/38 (100%), annealment 18/18 (mode).
+smoke. Current: golden 37–38/38 (97–100%), annealment 18/18 (mode).
 
 ## The vector adapter (one door)
 
@@ -125,3 +175,10 @@ Every chunk crosses one boundary into any index: a pydantic wire schema
 index accepts only the corpora that belong to it. The wire schema
 mirrors the serving contract; new producers register corpora in one
 place, never ad hoc.
+
+Index equality with the canonical chunk set is an OPERATIONS loop, not
+a hope: reconciliation enumerates the index and deletes strays (upserts
+never delete — measured 49,553 live vs 31,512 canonical before the
+first run); the enrichment replay restores the contexts a full upsert
+overwrites; the asset sweep keeps unit images vision-readable. Each
+step is a script in `scripts/`, run between surgery and gate.

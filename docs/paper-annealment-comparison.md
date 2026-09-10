@@ -149,7 +149,7 @@ pipeline capability).
 | MKO | L4 | typed units carry cross-references (L4 2/2) but the anchoring/nomenclature basics need situating context the lane lacks |
 | Primmel | L9 | the model carries P1–P10 — its misses (L2b VIML provenance, L5 targets) are corpus-isolation artifacts, not representation limits |
 | Composed | L9 | the full-matrix winner: model objects + prose vocabulary + figures; only the isolated L5 fails it |
-| Production | L2 | 17/18 — fails only the colloquial→term bridge ("drifting"→"durability"), a glossary-binding gap the FABLE-era pipeline does not yet close (the term-alias ask, primmel/spec#18) |
+| Production | — | 18/18 — the colloquial→term bridge ("drifting"→"durability") closed by the serving stack's vocabulary-binding lane (glossary candidates + answer-model adjudication); the composed lane's content, plus the pipeline on top |
 
 ## 4. What this means for standards publishing
 
@@ -168,11 +168,15 @@ The measurement confirms the annealment hypothesis **with nuance**:
    precision rungs (L3).** This is the trade-off the composed lane
    reveals: more evidence is not always better ranking.
 
-4. **The nomenclature gap (L2) is universal.** All lanes fail the
-   colloquial→term bridge ("drifting" → "durability") — this is a
-   serving-pipeline capability (the understanding model + glossary
-   lane), not a representation effect. The producer-side fix (unit-level
-   vocabulary registers, metanorma-document#53 item 3) would close it.
+4. **The nomenclature gap (L2) was universal — the serving stack closes
+   it.** All retrieval lanes fail the colloquial→term bridge ("drifting"
+   → "durability") because it is a serving-pipeline capability, not a
+   representation effect: the production glossary lane (8.8k concept
+   entries, dense+rerank candidates, answer-model adjudication) now
+   answers the term-alias probe that every lane missed. The
+   producer-side fix (unit-level vocabulary registers,
+   metanorma-document#53 item 3) would move the capability into the
+   corpus itself.
 
 ## 5. Independent replication: FABLE/BEAR
 
@@ -216,19 +220,37 @@ data, never generated prose), hypothetical values evaluate the same way,
 absence over a standard's model plane returns an enumeration certificate
 rather than a refusal, and any answer is checkable against the corpus
 (verbatim-quote containment, object-reference resolution, judged
-faithfulness). These capabilities exist because the corpus is a model;
-no text representation can follow them at any scale — the frontier the
-ladder points at, now live.
+faithfulness). The same typed-unit plane feeds multimodal answers: a
+pinned figure's pixels ride the generation call, so pixel-only content
+(labels readable only from the drawing — L7b) is read from the producer's
+asset instead of disclaimed against its caption. These capabilities
+exist because the corpus is a model; no text representation can follow
+them at any scale — the frontier the ladder points at, now live.
+
+The measurement itself now runs as one command (golden ×3 + annealment
+×6, any failed run fails the gate), and the corpus behind it is kept
+canonical by operations the gate assumes: index reconciliation (the
+first census measured 49,553 live vectors against 31,512 canonical —
+18,041 strays from every prior re-chunking, deleted), enrichment
+replay after full restores (contextual preambles live in the index, not
+the artifacts), and asset readability sweeps (a vector-sourced figure
+raster that flattens to solid black in a vision pipeline is a corpus
+defect, whatever a browser shows).
 
 ## 7. Next steps
 
-- Index the remaining lanes (A plain, B adoc, E ablation) to complete
-  the 6×10 matrix
-- Run through the full serving pipeline (not just raw retrieval) for
-  end-to-end capability comparison
-- Measure cost-per-correct-answer across lanes
+The 6×18 matrix is complete and the full serving pipeline now answers
+18/18 on the probe battery — the two original follow-ups are done. What
+remains:
+
+- Cost-per-correct-answer across lanes (the quality measurements are
+  done; the spend columns are not)
 - The composed lane's trade-off motivates adaptive retrieval: route
   queries to the MKO or Primmel half based on query understanding
+- Producer-side vocabulary registers (metanorma-document#53) would move
+  the L2 bridge from pipeline capability into corpus capability —
+  closing the gap for every consumer of the corpus, not only this
+  service
 
 ---
 
