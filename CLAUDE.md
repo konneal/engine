@@ -148,7 +148,22 @@ reasoning mode, sampling and a budget the reasoning cannot starve.
   ids (silent, 200 OK) — the admin route chunks by 20; any direct
   batching must too.
 - Catalog watchlist (grep `wrangler ai models list`): qwen3.8-flash-next,
-  hosted hy4 — neither available as of 2026-09-01.
+  hosted hy4 — neither available as of 2026-09-01. deepseek-v4.1-flash
+  (tech report 2026-09-10: 552B MoE, 8B prefill/16B decode active, 1M
+  ctx, KV 890 B/token, native multimodal, agentic scores leapfrog
+  v4-flash) — not on the catalog as of 2026-09-10; when it lands, the
+  swap candidate is the doc-as-context/research lane, NOT the answer
+  model (glm-5.3-flash stays); gate any swap with golden ×3 +
+  annealment ×6; its flagged weak spots (sparse retrieval over long
+  contexts, SWA state reconstruction at cache-resumption boundaries)
+  are exactly our prefix-cache paths, so variance/cached probes must
+  cover them before promotion.
+- Reasoning-effort frontier (DeepSeek-V4.1-Flash report, Fig. 9): effort
+  60–80 recovers most of max accuracy at under half the token cost; the
+  last step to 100 costs 1.6–1.8× trajectory length for marginal gain.
+  Serving path pins low (latency); one-time quality-first lanes
+  (enrichment, gate judging, golden drafting) are where higher effort
+  pays — A/B it measured, never assume.
 
 ## Deploy & ops automation
 
