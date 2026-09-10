@@ -40,9 +40,14 @@ test("figure completion: already-attached units are not re-resolved", async () =
   assert.equal(called, 0); // never even asked D1
 });
 
+test("figure completion: bare producer anchors (fig-2a) resolve to u:fig-2a", async () => {
+  const blocks = await completeFigures(stubDb({ "u:fig-2a": {}, "u:fig-9x": {} }) as any, "see fig-2a of D 36 and fig-9x too", []);
+  assert.deepEqual(blocks.map((b) => b.unit_id).sort(), ["u:fig-2a", "u:fig-9x"]);
+});
+
 test("figure completion: at most 4 distinct mentions", async () => {
   const rows: Record<string, any> = {};
   for (const id of ["u:fig-1", "u:fig-2", "u:fig-3", "u:fig-4", "u:fig-5"]) rows[id] = {};
   const blocks = await completeFigures(stubDb(rows) as any, "u:fig-1 u:fig-2 u:fig-3 u:fig-4 u:fig-5", []);
-  assert.equal(blocks.length, 4);
+  assert.equal(blocks.length, 5);
 });

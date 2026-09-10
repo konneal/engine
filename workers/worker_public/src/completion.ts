@@ -58,7 +58,13 @@ export async function completeFigures(
   answer: string,
   alreadyAttached: ResolvedBlock[],
 ): Promise<ResolvedBlock[]> {
-  const mentioned = [...new Set((answer.match(/u:fig[\w-]*/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, "")))].slice(0, 4);
+  // the model names figures BOTH ways: unit ids (u:fig-3) and bare
+  // producer anchors (fig-2a of D 36) — collect both forms; bare
+  // anchors get the unit prefix and D1 resolution drops every candidate
+  // that is not a real unit (a bare mention can never fabricate a block)
+  const unitForm = (answer.match(/u:fig[\w.-]*/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, ""));
+  const bareForm = (answer.match(/\bfig-[\w.-]+\b/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, ""));
+  const mentioned = [...new Set([...unitForm, ...bareForm.map((x) => (x.startsWith("u:") ? x : "u:" + x))])].slice(0, 6);
   const have = new Set(alreadyAttached.map((b) => b.unit_id));
   const missing = mentioned.filter((id) => !have.has(id));
   if (!missing.length) return [];
