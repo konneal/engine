@@ -62,6 +62,12 @@ export const THRESHOLDS = {
   /** Federated-ISO discount — the public corpus answers by default;
    *  internal ISO passages compete but don't preempt. */
   federateDiscount: 0.95,
+  /** Standard-reference nudge (L5): when the question asks about an
+   *  invoked ISO/IEC standard, chunks that CARRY such a citation (their
+   *  text contains an ISO/IEC identifier) get a spread-scaled boost —
+   *  the citing clause is the answer, and generic family prose otherwise
+   *  fills the window (measured: l5a-iso-humidity flips ~1/6 runs). */
+  stdRefNudgeSpread: 0.35,
   /** Edition cover — the score multiplier for current-edition chunks the
    *  cover stage fetches when a pool holds ONLY stale editions of a
    *  document. Just under the top: the point is REPRESENTATION (so

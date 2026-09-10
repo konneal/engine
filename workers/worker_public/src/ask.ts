@@ -1032,6 +1032,26 @@ async function handleAsk(
     }
   }
   if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
+
+  // figure completion (#172): the model names figure units in PROSE
+  // ("About the attached figure (u:fig-3, …)") as often as in tokens —
+  // and token refs whose unit wasn't in the used passages drop in
+  // contractV2. Either way the answer SHOWS no figure while the payload
+  // and its asset exist. Extract every u:fig mention from the final
+  // text, tokenized or not, and attach what D1 can resolve (the UI
+  // renders payload.uri images); already-attached units are skipped.
+  {
+    const mentioned = [...new Set((answer.match(/u:fig[\w-]*/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, "")))].slice(0, 4);
+    const have = new Set([...c2ns.blocks, ...completionBlocks].map((b: any) => b.unit_id));
+    const missing = mentioned.filter((id) => !have.has(id));
+    if (missing.length) {
+      const figBlocks = await resolveBlocks(env.DB, missing);
+      if (figBlocks.length) {
+        completionBlocks.push(...figBlocks);
+        console.log("figure completion:", figBlocks.map((b) => b.unit_id).join(", "), "attached from D1");
+      }
+    }
+  }
   const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
