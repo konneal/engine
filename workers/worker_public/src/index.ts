@@ -3,6 +3,7 @@ import { retrieve } from "./pipeline";
 import type { Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
 import { handleAppendMessage, handleConversations } from "./conversations";
+import { handleMemories } from "./memories";
 import { handleShareConversation, handleGetShared } from "./share";
 import { understandQuery } from "./understand";
 import { embed } from "./ai";
@@ -45,6 +46,12 @@ async function serveIndexPage(c: RouteContext): Promise<Response> {
     });
   }
   return err(404, "not_found", "Page not found");
+}
+
+async function memoriesRoute(c: RouteContext): Promise<Response> {
+  const session = await sessionFrom(c.req, c.env as any);
+  if (!session) return withCors(err(401, "unauthorized", "Sign in to use memory files"), corsHeaders(c.req));
+  return withCors(await handleMemories(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 
 async function conversationsRoute(c: RouteContext): Promise<Response> {
@@ -351,6 +358,8 @@ export const ROUTES: Route[] = [
   { method: "GET", pattern: "/auth/logout", handler: (c) => handleLogout(c.env as any, c.req) },
   { method: "POST", pattern: "/auth/logout", handler: (c) => handleLogout(c.env as any, c.req) },
   { method: "*", pattern: "/api/conversations", handler: conversationsRoute },
+  { method: "*", pattern: "/api/memories", handler: memoriesRoute },
+  { method: "*", pattern: "/api/memories/:id", handler: memoriesRoute },
   { method: "*", pattern: "/api/conversations/:id", handler: conversationsRoute },
   { method: "POST", pattern: "/api/conversations/:id/messages", handler: appendMessageRoute },
   { method: "POST", pattern: "/api/conversations/:id/share", handler: shareRoute },

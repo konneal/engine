@@ -20,6 +20,7 @@ import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveReco
 import { bindModelNode, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { detectDraftIntent, prepareDraft } from "./drafts";
+import { memoryNote } from "./memories";
 import { rawSessionToken } from "./session";
 import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested, semanticCacheKey } from "./answercache";
 import type { Env } from "./env";
@@ -42,8 +43,8 @@ function userImageDataUrl(body: any): string | null {
   return img;
 }
 
-async function cacheGet(env: Env, gen: string, ns: string, query: string, lang?: string) {
-  const key = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(query, lang)));
+async function cacheGet(env: Env, gen: string, ns: string, query: string, lang?: string, salt?: string | null) {
+  const key = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(query, lang, salt)));
   const hit = await env.CACHE.get(key, "json");
   return hit ? { key, value: hit as any } : null;
 }
@@ -271,6 +272,19 @@ async function handleAsk(
     else if (id === "iso") corpora.add("iso-internal");
     else corpora.add(id);
   }
+  // Personalized memory files (#171): member-scoped, selected per ask;
+  // the note rides buildMessages as a trusted-user-facts preamble. The
+  // selection ALSO salts the answer cache (a memory-flavored answer must
+  // never serve a memory-less ask) together with the dataset scope.
+  const memoryIds = member && Array.isArray(body?.memories)
+    ? (body.memories as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 4)
+    : [];
+  const [memNote, memoryUsed] = member && memoryIds.length ? await memoryNote(env, member.sub, memoryIds) : [null, []];
+  const requestSalt =
+    (narrowed || memoryUsed.length)
+      ? JSON.stringify({ ...(narrowed ? { d: [...corpora].sort() } : {}), ...(memoryUsed.length ? { m: [...memoryUsed].sort() } : {}) })
+      : null;
+
   const isoOn = scopeIds.includes("iso");
   const federate = member && service && isoOn
     ? (q2: string) => retrieveInternal(service, fedAuth, q2)
@@ -307,7 +321,7 @@ async function handleAsk(
   // answer caches; corpus surgery bumps it (scripts/invalidate_answer_
   // cache.py) and old-generation entries miss (oimlsmart/rag#72)
   const gen = await corpusGen(env.CACHE);
-  const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang);
+  const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, requestSalt);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
@@ -357,7 +371,7 @@ async function handleAsk(
   if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && !fresh) {
     const wv0 = (await warmEmbed) ?? null;
     if (wv0) {
-      const sc0 = await semanticCacheGet(env, gen, wv0);
+      const sc0 = await semanticCacheGet(env, gen, wv0, requestSalt);
       if (sc0) {
         console.log("semantic cache hit (pre-understanding)");
         telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang);
@@ -500,7 +514,7 @@ async function handleAsk(
   if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !userImage && !fresh) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
-      const sc = await semanticCacheGet(env, gen, warmVec);
+      const sc = await semanticCacheGet(env, gen, warmVec, requestSalt);
       if (sc) {
         console.log("semantic cache hit");
         telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang);
@@ -789,7 +803,7 @@ async function handleAsk(
     hits,
     q.lang,
     keptHistory,
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, machineNote].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
@@ -852,9 +866,9 @@ async function handleAsk(
           }
           if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(REFUSAL_ANSWER)) {
             const wv = (await warmEmbed) ?? null;
-            if (wv) semanticCachePut(env, ctx, gen, wv, { answer: canonical, citations: cites, model, query_hash: queryHash });
+            if (wv) semanticCachePut(env, ctx, gen, wv, requestSalt, { answer: canonical, citations: cites, model, query_hash: queryHash });
             ctx.waitUntil(
-              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
+              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, requestSalt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
           }
           controller.close();
@@ -1056,10 +1070,10 @@ async function handleAsk(
   const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
-    if (warmVec) semanticCachePut(env, ctx, gen, warmVec, out);
+    if (warmVec) semanticCachePut(env, ctx, gen, warmVec, requestSalt, out);
   }
   if (cacheable) {
-    const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang)));
+    const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, requestSalt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }
   telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
@@ -1115,13 +1129,13 @@ function cosine(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
 }
 
-function scSignature(v: number[]): string {
-  return v.slice(0, 16).map((x) => x.toFixed(2)).join(",");
+function scSignature(v: number[], salt?: string | null): string {
+  return v.slice(0, 16).map((x) => x.toFixed(2)).join(",") + (salt ? `|s:${salt.length}:${salt.slice(0, 64)}` : "");
 }
 
-async function semanticCacheGet(env: Env, gen: string, vec: number[]): Promise<{ answer: string; citations: unknown[]; model: string; query_hash: string; context_applied?: unknown } | null> {
+async function semanticCacheGet(env: Env, gen: string, vec: number[], salt?: string | null): Promise<{ answer: string; citations: unknown[]; model: string; query_hash: string; context_applied?: unknown } | null> {
   try {
-    const raw = await env.CACHE.get(semanticCacheKey(env.INDEX_VERSION, gen, scSignature(vec)), "json") as any;
+    const raw = await env.CACHE.get(semanticCacheKey(env.INDEX_VERSION, gen, scSignature(vec, salt)), "json") as any;
     if (!raw?.v || !Array.isArray(raw.v) || raw.v.length !== vec.length) return null;
     if (cosine(raw.v, vec) < 0.97) return null;
     return raw;
@@ -1130,10 +1144,10 @@ async function semanticCacheGet(env: Env, gen: string, vec: number[]): Promise<{
   }
 }
 
-function semanticCachePut(env: Env, ctx: ExecutionContext, gen: string, vec: number[], payload: { answer: string; citations: unknown[]; model: string; query_hash: string }): void {
+function semanticCachePut(env: Env, ctx: ExecutionContext, gen: string, vec: number[], salt: string | null | undefined, payload: { answer: string; citations: unknown[]; model: string; query_hash: string }): void {
   const v = vec.map((x) => Number(x.toFixed(3)));
   ctx.waitUntil(
-    env.CACHE.put(semanticCacheKey(env.INDEX_VERSION, gen, scSignature(vec)), JSON.stringify({ v, ...payload }), { expirationTtl: LIMITS.cacheTtlSec }),
+    env.CACHE.put(semanticCacheKey(env.INDEX_VERSION, gen, scSignature(vec, salt)), JSON.stringify({ v, ...payload }), { expirationTtl: LIMITS.cacheTtlSec }),
   );
 }
 

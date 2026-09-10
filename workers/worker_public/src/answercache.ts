@@ -52,8 +52,14 @@ export function freshRequested(body: any): boolean {
 /** The exact cache's hash input: the query lowercased and whitespace-
  *  folded, plus the output-language pin (a pinned language gets its own
  *  entry). Hashed with sha256Hex (./config) at the call site. */
-export function cacheKeyMaterial(query: string, lang?: string): string {
-  return `${query.toLowerCase().replace(/\s+/g, " ").trim()}|${lang ?? ""}`;
+/** `salt`: per-request context that materially changes the answer — the
+ *  dataset scope selection and the memory-file selection. Requests that
+ *  differ ONLY in salt share the query text, so an unsalted key would
+ *  serve a scoped (or memory-flavored) answer to a plain ask. Null/empty
+ *  = the default scope (no salt segment — keys stay byte-identical to
+ *  the pre-salt era). */
+export function cacheKeyMaterial(query: string, lang?: string, salt?: string | null): string {
+  return `${query.toLowerCase().replace(/\s+/g, " ").trim()}|${lang ?? ""}${salt ? "|" + salt : ""}`;
 }
 
 export function exactCacheKey(indexVersion: string, gen: string, ns: string, queryHash: string): string {

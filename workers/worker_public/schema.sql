@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS feedback (
 
 -- Conversations for signed-in members (TODO.impl/15). Anonymous history
 -- is device-local by design; the server stores member conversations only.
+CREATE TABLE IF NOT EXISTS memories (
+  id TEXT PRIMARY KEY,             -- m:<hex16>
+  sub TEXT NOT NULL,               -- owner (session sub)
+  name TEXT NOT NULL,              -- "Lab context"
+  content TEXT NOT NULL,           -- the CONTEXT.md body (<= 8k chars)
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memories_sub ON memories(sub, updated_at);
 CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   sub TEXT NOT NULL,
