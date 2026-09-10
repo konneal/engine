@@ -39,6 +39,7 @@ DEFAULT_SOURCES = [
     ARTIFACTS / "chunks.jsonl",
     ARTIFACTS / "model_retrieval_chunks.jsonl",
     ARTIFACTS / "model_typed_chunks.jsonl",
+    ARTIFACTS / "mko_chunks.jsonl",
 ]
 # /admin/enrich's own composite formula and caps — the replay must be
 # byte-identical to what a cache-hit enrich run would have upserted

@@ -13,7 +13,12 @@ from .parse import apply_precedence, load_corpus, normalize_identifier
 
 # The model plane (TODO.ai-platform/05): its chunks ride the same
 # embed/upsert lanes as the prose corpus when the derivation has run.
-MODEL_CHUNKS = [ARTIFACTS / "model_retrieval_chunks.jsonl", ARTIFACTS / "model_typed_chunks.jsonl"]
+# mko_chunks.jsonl rides the same union: the clean corpus's typed UNIT
+# chunks (tables/formulas/figures/clauses) — omitted from this set once,
+# the wave-4 reconciliation then deleted them all as strays and formula
+# questions had nothing to retrieve (2026-09-10). Canonical = everything
+# that serves.
+MODEL_CHUNKS = [ARTIFACTS / "model_retrieval_chunks.jsonl", ARTIFACTS / "model_typed_chunks.jsonl", ARTIFACTS / "mko_chunks.jsonl"]
 
 
 def _read_chunks(path: Path) -> list[dict]:
