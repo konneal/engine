@@ -3,7 +3,7 @@
 // echo — everything between "request validated" and "response written".
 // index.ts routes here; this module owns the answer contract.
 
-import { LIMITS, MODELS, num, sha256Hex, roleModel, DATASETS, datasetAllowed } from "./config";
+import { LIMITS, MODELS, num, sha256Hex, roleModel } from "./config";
 import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, REFUSAL_ANSWER, Hit } from "./pipeline";
 import { sessionFrom } from "./auth";
 import { retrieveInternal } from "./internal_gateway";
@@ -14,13 +14,15 @@ import { embed, generateOnce } from "./ai";
 import { reflect } from "./reflect";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
 import { canonicalRefusal } from "./refusal";
-import { contractV2, tableRetyped, resolveBlocks } from "./refs";
+import { contractV2, tableRetyped } from "./refs";
+import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
 import { bindModelNode, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { memoryNote } from "./memories";
+import { resolveRequestScope, requestSalt } from "./requestScope";
 import { rawSessionToken } from "./session";
 import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested, semanticCacheKey } from "./answercache";
 import type { Env } from "./env";
@@ -249,43 +251,17 @@ async function handleAsk(
     cookie: req.headers.get("cookie") ?? "",
     authorization: req.headers.get("authorization") ?? "",
   };
-  // Dataset scope (the sidebar toggles): the request names the datasets
-  // to search; the server intersects with session permissions — the UI's
-  // lock is cosmetic, this is the gate. A scope equal to everything the
-  // session may see passes null (no filtering, zero overhead).
-  const allIds = DATASETS.map((d) => d.id);
-  const requested = Array.isArray(body?.datasets)
-    ? (body.datasets as unknown[]).filter((x): x is string => typeof x === "string" && allIds.includes(x))
-    : null;
-  if (requested !== null && requested.length === 0) {
-    return err(400, "invalid_input", "datasets: at least one dataset must stay enabled");
-  }
-  const permittedIds = allIds.filter((id) => {
-    const d = DATASETS.find((x) => x.id === id)!;
-    return d.session ? datasetAllowed(d, member) : true;
-  });
-  const scopeIds = requested ?? permittedIds;
-  const narrowed = scopeIds.length < permittedIds.length;
-  const corpora = new Set<string>();
-  for (const id of scopeIds) {
-    if (id === "oiml") for (const v of ["oiml", "dirty", "clean", "synthetic"]) corpora.add(v);
-    else if (id === "iso") corpora.add("iso-internal");
-    else corpora.add(id);
-  }
+  // Dataset scope + memory selection (MECE: the derivation lives in
+  // ./requestScope; this path only wires it). A request that explicitly
+  // disables every dataset is a user error.
+  const scope = resolveRequestScope(body, member);
+  if ("error" in scope) return err(400, "invalid_input", "datasets: at least one dataset must stay enabled");
+  const { corpora, narrowed, isoOn } = scope;
   // Personalized memory files (#171): member-scoped, selected per ask;
-  // the note rides buildMessages as a trusted-user-facts preamble. The
-  // selection ALSO salts the answer cache (a memory-flavored answer must
-  // never serve a memory-less ask) together with the dataset scope.
-  const memoryIds = member && Array.isArray(body?.memories)
-    ? (body.memories as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 4)
-    : [];
-  const [memNote, memoryUsed] = member && memoryIds.length ? await memoryNote(env, member.sub, memoryIds) : [null, []];
-  const requestSalt =
-    (narrowed || memoryUsed.length)
-      ? JSON.stringify({ ...(narrowed ? { d: [...corpora].sort() } : {}), ...(memoryUsed.length ? { m: [...memoryUsed].sort() } : {}) })
-      : null;
-
-  const isoOn = scopeIds.includes("iso");
+  // the note rides buildMessages as a trusted-user-facts preamble, and
+  // the selections SALT the answer cache (requestScope.requestSalt).
+  const [memNote, memoryUsed] = member && scope.memoryIds.length ? await memoryNote(env, member.sub, scope.memoryIds) : [null, []];
+  const requestSaltStr = requestSalt(scope, memoryUsed);
   const federate = member && service && isoOn
     ? (q2: string) => retrieveInternal(service, fedAuth, q2)
     : undefined;
@@ -321,7 +297,7 @@ async function handleAsk(
   // answer caches; corpus surgery bumps it (scripts/invalidate_answer_
   // cache.py) and old-generation entries miss (oimlsmart/rag#72)
   const gen = await corpusGen(env.CACHE);
-  const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, requestSalt);
+  const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, requestSaltStr);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
@@ -371,7 +347,7 @@ async function handleAsk(
   if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && !fresh) {
     const wv0 = (await warmEmbed) ?? null;
     if (wv0) {
-      const sc0 = await semanticCacheGet(env, gen, wv0, requestSalt);
+      const sc0 = await semanticCacheGet(env, gen, wv0, requestSaltStr);
       if (sc0) {
         console.log("semantic cache hit (pre-understanding)");
         telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang);
@@ -514,7 +490,7 @@ async function handleAsk(
   if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !userImage && !fresh) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
-      const sc = await semanticCacheGet(env, gen, warmVec, requestSalt);
+      const sc = await semanticCacheGet(env, gen, warmVec, requestSaltStr);
       if (sc) {
         console.log("semantic cache hit");
         telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang);
@@ -866,9 +842,9 @@ async function handleAsk(
           }
           if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(REFUSAL_ANSWER)) {
             const wv = (await warmEmbed) ?? null;
-            if (wv) semanticCachePut(env, ctx, gen, wv, requestSalt, { answer: canonical, citations: cites, model, query_hash: queryHash });
+            if (wv) semanticCachePut(env, ctx, gen, wv, requestSaltStr, { answer: canonical, citations: cites, model, query_hash: queryHash });
             ctx.waitUntil(
-              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, requestSalt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
+              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, requestSaltStr))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
           }
           controller.close();
@@ -1014,66 +990,23 @@ async function handleAsk(
   // wrote [[u:…]] in the retry (completion check saw it, skipped the
   // fallback) but contractV2 then dropped the reference because the unit
   // wasn't in the used passages — leaving no block and no token.
-  let completionBlocks: Awaited<ReturnType<typeof resolveBlocks>> = [];
+  let completionBlocks: Awaited<ReturnType<typeof completeTables>> = [];
   if (!answer.includes(REFUSAL_ANSWER) && !c2ns.blocks.some((b: any) => b.type === "table")) {
-    try {
-      const answerNums = new Set((answer.match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, "")));
-      if (answerNums.size >= 1) {
-        // match by docidentifier (the chunks and unit_payloads use
-        // different doc_id schemes — 'dirty:r60-1-2006-eng' vs
-        // 'mko:oiml-r-60-1' — but both carry the publication name)
-        const fams = [...new Set(used.map((h: Hit) => h.metadata.docidentifier).filter(Boolean))].slice(0, 3);
-        for (const fam of fams) {
-          const base = String(fam).replace(/\s*\([A-Z]\)\s*$/, "").split(":")[0].trim();
-          const rows = await env.DB.prepare(
-            "SELECT unit_id, payload FROM unit_payloads WHERE type = 'table' AND docidentifier LIKE ?1 LIMIT 8",
-          ).bind(`%${base}%`).all<{ unit_id: string; payload: string }>();
-          for (const r of rows.results ?? []) {
-            const tableNums = new Set((String(r.payload).match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, "")));
-            let hits = 0;
-            for (const n of answerNums) if (tableNums.has(n)) hits++;
-            if (hits >= 1) {
-              completionBlocks = await resolveBlocks(env.DB, [r.unit_id]);
-              console.log("contract D1 completion: table", r.unit_id, "in", base, "—", hits, "matching values");
-              break;
-            }
-          }
-          if (completionBlocks.length) break;
-        }
-      }
-    } catch {
-      // additive; primary results stand
-    }
+    completionBlocks = await completeTables(env.DB, answer, used);
+    if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
   }
-  if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
 
-  // figure completion (#172): the model names figure units in PROSE
-  // ("About the attached figure (u:fig-3, …)") as often as in tokens —
-  // and token refs whose unit wasn't in the used passages drop in
-  // contractV2. Either way the answer SHOWS no figure while the payload
-  // and its asset exist. Extract every u:fig mention from the final
-  // text, tokenized or not, and attach what D1 can resolve (the UI
-  // renders payload.uri images); already-attached units are skipped.
-  {
-    const mentioned = [...new Set((answer.match(/u:fig[\w-]*/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, "")))].slice(0, 4);
-    const have = new Set([...c2ns.blocks, ...completionBlocks].map((b: any) => b.unit_id));
-    const missing = mentioned.filter((id) => !have.has(id));
-    if (missing.length) {
-      const figBlocks = await resolveBlocks(env.DB, missing);
-      if (figBlocks.length) {
-        completionBlocks.push(...figBlocks);
-        console.log("figure completion:", figBlocks.map((b) => b.unit_id).join(", "), "attached from D1");
-      }
-    }
-  }
+  // figure completion (#172) — see ./completion for the rationale
+  completionBlocks.push(...(await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks])));
+
   const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
-    if (warmVec) semanticCachePut(env, ctx, gen, warmVec, requestSalt, out);
+    if (warmVec) semanticCachePut(env, ctx, gen, warmVec, requestSaltStr, out);
   }
   if (cacheable) {
-    const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, requestSalt)));
+    const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, requestSaltStr)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }
   telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
