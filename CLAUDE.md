@@ -135,6 +135,9 @@ reasoning mode, sampling and a budget the reasoning cannot starve.
   default on the golden probe, tighter determinism).
 - `roleModel(env, role)` reads `<ROLE>_MODEL` wrangler vars — live A/B
   without code changes; always gate a swap with golden ×3.
+  `answerEffort(env)` is the same lever for answer-lane reasoning
+  effort (`ANSWER_EFFORT`, default low; invalid values fall back to
+  low, never error).
 - Multimodal through the binding (glm-5.3-flash): image parts ride their
   OWN short trailing user message — long passage text + image parts in
   ONE message triggers nondeterministic 8005s that scale with payload

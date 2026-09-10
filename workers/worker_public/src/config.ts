@@ -128,6 +128,18 @@ export function roleModel(env: any, role: keyof typeof MODELS): string {
   return typeof ov === "string" && ov.startsWith("@cf/") ? ov : MODELS[role];
 }
 
+const EFFORTS = new Set(["low", "medium", "high", "max"]);
+
+/** Per-deployment effort override for the answer lane (ANSWER_EFFORT).
+ *  The effort–accuracy curve is front-loaded (DeepSeek-V4.1-Flash report,
+ *  Fig. 9): serving pins "low" for latency, and any move up must be
+ *  measured on the golden set — this lever makes that measurable live,
+ *  same pattern as roleModel. Absent/invalid = "low". */
+export function answerEffort(env: any): string {
+  const v = env?.ANSWER_EFFORT;
+  return typeof v === "string" && EFFORTS.has(v) ? v : "low";
+}
+
 /** The corpus catalog — single source for /api/datasets, the assistant's
  *  self-description, and per-corpus model guidance. `session: true`
  *  datasets are enabled for signed-in members (federated via the internal

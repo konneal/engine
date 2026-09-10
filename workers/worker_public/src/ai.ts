@@ -52,7 +52,7 @@ export async function embed(ai: AnyAi, model: string, text: string): Promise<num
   throw new Error(`embedding failed for all request shapes (${model})`);
 }
 
-import { LIMITS } from "./config.ts";
+import { LIMITS, answerEffort } from "./config.ts";
 
 export async function rerank(
   ai: AnyAi,
@@ -120,7 +120,7 @@ export async function generateOnce(env: any, model: string, messages: any[]): Pr
       const res: any = await env.AI.run(model, {
         messages,
         max_tokens: LIMITS.maxOutputTokens,
-        reasoning_effort: "low",
+        reasoning_effort: answerEffort(env),
         temperature: 0.6,
         top_p: 0.95,
       });
