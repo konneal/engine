@@ -26,16 +26,21 @@ while [ $# -gt 0 ]; do
 done
 
 FAIL=0
+# run logs are EVIDENCE — they must outlive reboots (a /tmp wipe
+# destroyed a completed full gate on 2026-09-10); artifacts/ is
+# gitignored but durable
+RUNLOGS="$(cd "$(dirname "$0")/.." && pwd)/artifacts/gate-runs"
+mkdir -p "$RUNLOGS"
 run_and_check() {
   local label="$1" n="$2"; shift 2
   local pass=0
   for i in $(seq 1 "$n"); do
-    if "$@" > /tmp/gates-$label-$i.log 2>&1; then
+    if "$@" > "$RUNLOGS/$label-$i.log" 2>&1; then
       echo "  ✓ $label run $i/$n"
       pass=$((pass + 1))
     else
       echo "  ✗ $label run $i/$n"
-      tail -5 "/tmp/gates-$label-$i.log" | sed 's/^/      /'
+      tail -5 "$RUNLOGS/$label-$i.log" | sed 's/^/      /'
       FAIL=1
     fi
   done
