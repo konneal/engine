@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OIML SMART AI: a grounded question-answering service over legal-metrology publications — system description and measured evaluation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #faf6ee; --paper-soft: #ffffff; --paper-raised: #f5ede0; --paper-deep: #e8dec8;
+    --ink: #0a1628; --ink-soft: #3a4a63; --ink-muted: #6b7a92;
+    --rule: #ddd2bd; --rule-soft: #ebe3d2;
+    --accent: #004996; --accent-hover: #003a78; --accent-soft: rgba(0, 73, 150, 0.08);
+    --teal: #024873; --amber: #d97706;
+    --navy: #0a1628; --navy-2: #13233d; --navy-3: #18294a; --sky: #89b4ef;
+    --grid: rgba(10, 22, 40, 0.05);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    background: var(--paper);
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 32px 32px; color: var(--ink); line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 2rem; }
+  header.hero { background: linear-gradient(160deg, #060e1c 0%, #0a1628 55%, #13233d 100%); color: #f5efe4; padding: 5rem 0 4rem; border-bottom: 3px solid var(--accent); }
+  .hero .eyebrow { font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; letter-spacing: 0.18em; text-transform: uppercase; color: var(--sky); margin-bottom: 1.25rem; }
+  .hero h1 { font-family: 'Fraunces', serif; font-size: 2.6rem; font-weight: 500; line-height: 1.14; letter-spacing: -0.015em; margin-bottom: 1.1rem; }
+  .hero .lede { font-size: 1.15rem; color: #c2cad8; max-width: 46rem; font-weight: 300; }
+  .hero .lede strong { color: #f5efe4; font-weight: 500; }
+  main { padding: 3.5rem 0 4rem; }
+  section { margin-bottom: 4rem; }
+  h2 { font-family: 'Fraunces', serif; font-size: 1.8rem; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 1.3rem; color: var(--ink); padding-top: 1rem; }
+  h2 .no { font-family: 'IBM Plex Mono', monospace; font-size: 0.82rem; color: var(--accent); letter-spacing: 0.14em; text-transform: uppercase; display: block; margin-bottom: 0.5rem; font-weight: 500; }
+  h3 { font-family: 'Fraunces', serif; font-size: 1.22rem; font-weight: 600; margin: 2rem 0 0.7rem; color: var(--ink); }
+  p { margin-bottom: 1.1rem; color: var(--ink-soft); }
+  p strong, li strong { color: var(--ink); font-weight: 600; }
+  ul, ol { margin: 0 0 1.2rem 1.4rem; color: var(--ink-soft); }
+  li { margin-bottom: 0.45rem; }
+  .abstract { background: var(--paper-soft); border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 8px; padding: 1.4rem 1.6rem; margin-bottom: 2.2rem; }
+  .abstract .no { font-family: 'IBM Plex Mono', monospace; font-size: 0.75rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.6rem; }
+  .abstract p { margin-bottom: 0.8rem; } .abstract p:last-child { margin-bottom: 0; }
+  pre { background: var(--paper-raised); border: 1px solid var(--rule); border-radius: 8px; padding: 1rem 1.2rem; overflow-x: auto; margin: 1.4rem 0; }
+  code, .mono { font-family: 'IBM Plex Mono', monospace; font-size: 0.88em; color: var(--ink); }
+  p code, li code { background: var(--paper-raised); padding: 0 4px; border-radius: 3px; }
+  table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: 0.92rem; }
+  th { text-align: left; font-weight: 600; color: var(--ink); border-bottom: 2px solid var(--rule); padding: 0.5rem 0.75rem 0.5rem 0; }
+  td { border-bottom: 1px solid var(--rule-soft); padding: 0.6rem 0.75rem 0.6rem 0; color: var(--ink-soft); vertical-align: top; }
+  td:first-child { font-weight: 600; color: var(--ink); }
+  .callout { background: var(--paper-soft); border: 1px solid var(--rule); border-left: 3px solid var(--accent); border-radius: 8px; padding: 1.1rem 1.4rem; margin: 1.6rem 0; }
+  .callout.amber { border-left-color: var(--amber); background: #fffdf6; }
+  .callout p:last-child { margin-bottom: 0; }
+  .figure { background: var(--paper-soft); border: 1px solid var(--rule); border-radius: 10px; padding: 1.6rem; margin: 2rem 0; }
+  .figure svg { width: 100%; height: auto; display: block; }
+  .figure figcaption { font-family: 'IBM Plex Mono', monospace; font-size: 0.74rem; letter-spacing: 0.06em; color: var(--ink-muted); margin-top: 1rem; border-top: 1px solid var(--rule-soft); padding-top: 0.7rem; }
+  footer { border-top: 1px solid var(--rule); padding: 2.5rem 0 3rem; color: var(--ink-muted); font-size: 0.85rem; }
+  @media print {
+    body { background: #fff; }
+    header.hero { color: #0a1628; background: #fff; border-bottom: 2px solid #004996; }
+    .hero .lede { color: #3a4a63; } .hero .lede strong { color: #0a1628; } .hero .eyebrow { color: #004996; }
+  }
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">OIML SMART PROGRAM · SYSTEM DESCRIPTION AND MEASURED EVALUATION · 2026-09</div>
+    <h1>OIML SMART AI: a grounded question-answering service over legal-metrology publications</h1>
+    <p class="lede">A system of techniques for answering from normative corpora — approximately <strong>900 publications and 9.3 million words in ten languages</strong> — with clause-exact citations, typed normative objects, and <strong>computed conformance verdicts</strong>. The layers, data kinds and measurements transfer to any cloud or self-hosted platform; a public reference deployment demonstrates the methods in production.</p>
+  </div>
+</header>
+<main class="wrap">
+
+<section id="intro">
+  <div class="abstract">
+    <div class="no">Abstract</div>
+    <p>Legal-metrology knowledge is locked in documents: a practitioner's question ("what is the minimum number of verification intervals for a class B load cell?") is answered by a cell of a table in a specific edition of a specific publication, and neither keyword search nor a language model's memory can be trusted to produce it. We describe OIML SMART AI, a production question-answering service over the OIML publication corpus that treats corpus structure as the decisive variable: a measured comparison across six representations of identical content shows answer capability rising from 2/18 probes (plain text) to 13/18 (executable machine models), and the full serving stack adds a further three rungs to 17–18/18. The system enforces an answer contract — clause-exact citations, verbatim normative values, tables and figures rendered as producer-owned typed objects, conformance answered by executing machine-checkable constraints — with deterministic post-generation checks. We report the layered architecture and its platform-portable techniques, the input data kinds and enrichment pipeline that feed it, the answer contract, corpus-integrity operations learned from production incidents, and the economics of a reference deployment on open-weight models.</p>
+  </div>
+  <h2><span class="no">§ 1 · Introduction</span>Documents do not answer questions</h2>
+  <p>The OIML publishes the Recommendations, Documents and Basic publications that define legal metrology worldwide. Finding the clause that governs a question has historically required already knowing the document. A conventional keyword search fails unless the question echoes the document's wording; a conventional large language model answers fluently from parametric memory, which for normative content is worse than failing — <strong>an ungrounded answer about a maximum permissible error is indistinguishable from a grounded one until an instrument fails verification</strong>.</p>
+  <p>Legal metrology adds constraints that generic retrieval systems do not carry:</p>
+  <ul>
+    <li><strong>Editions supersede.</strong> OIML R 60:2021 is three parts; the 2017 consolidated edition is superseded but topically near-identical. A system that mixes editions silently answers from law that no longer applies.</li>
+    <li><strong>Values are normative and tabular.</strong> Class limits, MPE tiers and verification bounds live in tables; flattening them into prose destroys the row×column geometry that makes a cell answerable, and paraphrasing "5 000" as "about five thousand" is a defect, not a style choice.</li>
+    <li><strong>Some answers are computations.</strong> "Is a proposed D_max of 26 000 v acceptable for E_max 30 000 v?" is decided by a constraint the document defines and never prints as an answer.</li>
+    <li><strong>Provenance is the product.</strong> An answer without the exact publication, edition and clause is unusable in a regulatory context.</li>
+  </ul>
+  <p>This paper describes the system built against those constraints: its knowledge representation thesis (§2), layered architecture (§3), the input data kinds and enrichment pipeline that feed it (§4), the answer contract (§5) and execution semantics (§6), measurement methodology and results (§7), corpus-integrity operations (§8), and deployment modes with economics (§9).</p>
+</section>
+
+<section id="staircase">
+  <h2><span class="no">§ 2 · Knowledge representation</span>The annealment staircase</h2>
+  <p>The system's central, measured finding: <strong>the representation of a corpus determines the ceiling of what questions it can answer</strong> — not incrementally but structurally. A representation either carries a primitive (typed tables, vocabulary registers, machine-checkable constraints) or it does not; questions requiring that primitive are answerable or not. We index the same corpus — the OIML R 60 family — under six representations of increasing structural <em>annealment</em> and measure each with 18 witness-graded capability probes spanning a ten-rung ladder from LOCATE (find the clause) to INSTANCE &amp; PROCESS (ordered test sequences with contamination semantics):</p>
+  <table>
+    <thead><tr><th>Representation</th><th>Carries</th><th>Probes answered</th></tr></thead>
+    <tbody>
+      <tr><td>A — plain text</td><td>words</td><td><span class="mono">2/18</span></td></tr>
+      <tr><td>B — AsciiDoc markup</td><td>words + markup</td><td><span class="mono">3/18</span></td></tr>
+      <tr><td>C — typed units (MKO)</td><td>tables/formulas/figures as objects; cross-references as links</td><td><span class="mono">6/18</span></td></tr>
+      <tr><td>D — executable model (Primmel)</td><td>constraints, calculations, sequences, terms (P1–P10)</td><td><span class="mono">13/18</span></td></tr>
+      <tr><td>E — ablation (D without typing)</td><td>the causal control</td><td><span class="mono">12/18</span></td></tr>
+      <tr><td>F — composed (C + D)</td><td>document + model</td><td><span class="mono">14/18</span></td></tr>
+      <tr><td><strong>Full serving stack</strong></td><td>any representation + the mechanisms of §3</td><td><strong><span class="mono">17–18/18</span></strong></td></tr>
+    </tbody>
+  </table>
+  <p>Three results deserve emphasis. First, the machine-model lane is <strong>alone able to answer rungs L8–L9</strong> (computation and process semantics) — no document representation contains constraint or sequence objects at all. Second, the serving stack is worth <strong>+3 rungs over the best single representation with identical content</strong>: representation determines what is retrievable; the pipeline determines whether it is used. Third, the universal failure mode across all lanes — the colloquial-to-defined-term bridge ("my output keeps drifting" → <em>durability</em>, VIML 5.15) — is closed not by representation but by a serving-side vocabulary binding, a finding with direct consequences for standards producers: unit-level vocabulary registers would move that capability into the corpus itself.</p>
+  <div class="callout">
+    <p><strong>The thesis in one line.</strong> Anneal knowledge into structure a machine can traverse, and the questions a corpus can answer expand structurally — from lookup, through geometry, to computation.</p>
+  </div>
+</section>
+
+<section id="architecture">
+  <h2><span class="no">§ 3 · Architecture</span>A stage-registry pipeline on edge infrastructure</h2>
+  <p>The architecture is defined by its layers, not by any platform. Retrieval is composed as an ordered registry of stages; adding a mechanism is a new stage module, never a modification of existing ones (open/closed as an engineering constraint, versioned in the pipeline specification). The layers depend on four managed capabilities — a vector index, a key-value cache, a relational store, an object store — plus any runtime that can execute the registry; every major cloud offers them, and a self-hosted Kubernetes deployment is equally valid. The reference deployment described throughout is one instantiation (edge functions + managed vector/KV/SQL/object services, open-weight models served on-platform); §9 discusses deployment modes.</p>
+  <p>Two indexes are maintained, structurally isolated: the public OIML corpus and a members' ISO/IEC corpus. Isolation is architectural — no binding, credential or route from the public tier reaches the internal index — so an audience permission is enforced by construction, not by filtering (§6's leakage probes therefore test implementation bugs, not policy).</p>
+  <h3>3.1 Query understanding and deterministic scope</h3>
+  <p>One small model reads every question for language, named publication, edition, process intent, decomposition and hypothetical-answer variants — meaning, never string matching. Where the question <em>names a publication in its own text</em>, scope is applied deterministically by parsing the question, not by trusting the model's per-call extraction (measured: leaving it to the model made "What is OIML D 29?" a coin flip between a correct scoped retrieval and a refusal citing the wrong family).</p>
+  <h3>3.2 Hybrid retrieval with structural ranking</h3>
+  <p>Dense vectors search alongside a full-corpus BM25 scan, RRF-fused, with a terminology graph lane, hypothetical-answer keys, and multi-phrasing lanes running concurrently. Every chunk carries a model-written contextual preamble stating where it sits in its document (98.7% coverage, written once at index time — its quality persists into every future retrieval). The corpus <em>is</em> a tree: a hit's score blends its ancestors' and descendants'; evidence is presented in document reading order; same-chain near-duplicates collapse. Superseded editions demote family-relative — full-strength under either signal: the successor edition is present in the pool, or the chunk's own status says superseded — while remaining citable when only they carry content. A registry-driven cover stage guarantees the <em>active</em> edition can enter a pool that drew only stale editions (the measured failure: "which R 60 edition applies this year?" answered 2017 under unlucky rerank draws).</p>
+  <h3>3.3 Vocabulary binding</h3>
+  <p>Everyday words rarely match defined terms. A glossary of 8.8k concepts links the question to candidate terms (dense candidates + cross-encoder rerank); the answer model adjudicates and leads with the corpus's own term, quoting its defining publication — with the time-scale discriminator that separates creep (minutes under load) from durability (months of service).</p>
+  <h3>3.4 Dataset scope and estate permissions</h3>
+  <p>Three databases — OIML Publications, OIML SMART Models, ISO/IEC Conformity Assessment — are selectable per question; the server intersects the requested scope with session permissions (the ISO/IEC corpus requires the <code class="mono">ai-preview</code> estate permission; membership alone is not the bar). A corpus-scope stage filters the assembled candidate pool after every refill path, so disabling a database disables it at the hit level.</p>
+</section>
+
+<section id="data">
+  <h2><span class="no">§ 4 · Data kinds and enrichment</span>What enters the system, and what it becomes</h2>
+  <p>The pipeline is fed by producers, not files: each input kind has a owner and a derivation, and every stage of enrichment is recorded and replayable.</p>
+  <table>
+    <thead><tr><th>Input kind</th><th>Origin</th><th>What the system derives</th></tr></thead>
+    <tbody>
+      <tr><td>Authored Metanorma sources</td><td>hand-curated publications (XML + sections + clause tree)</td><td>clause-anchored chunks along authored boundaries; typed units (tables, formulas, figures with assets); cross-reference edges</td></tr>
+      <tr><td>OCR-derived publications</td><td>~880 scanned documents re-authored to Metanorma</td><td>same chunk + anchor discipline, with a quality tier marking provenance; shells (failed OCR) flagged, never served as content</td></tr>
+      <tr><td>Bibliography records</td><td>~5 700 structured citations with supersession edges</td><td>the edition registry: current/superseded derived from successor links (never trusting a disagreeing status field); the citation graph</td></tr>
+      <tr><td>Terminology datasets</td><td>glossaries of ~8 800 concepts with defining publications</td><td>the vocabulary lane: everyday-word to defined-term bridging with model adjudication</td></tr>
+      <tr><td>Recommendation models</td><td>machine-checkable packages (requirements, constraints, test sequences)</td><td>the model plane: typed model chunks for retrieval AND the node store the execution engine of §6 evaluates</td></tr>
+    </tbody>
+  </table>
+  <p>Enrichment is an explicit, replayable stage: every chunk gains a model-written <strong>contextual preamble</strong> situating it in its document (where it sits, what it governs) — written once at index time, embedded with the text, so its quality persists into every future retrieval; the preambles live in the index with a durable record beside it, because full restores overwrite them and must replay (§8). Chunk identity is content-addressed and every derivation writes its own artifact — three derivations sharing one file path once silently overwrote each other, a class of bug the artifact discipline now prevents. All chunk writes cross a single typed gateway (a schema-checked adapter with target gating): lane corpora structurally cannot enter a production index, and a hand-rolled metadata dictionary cannot bypass validation.</p>
+</section>
+
+<section id="contract">
+  <h2><span class="no">§ 5 · The answer contract</span>Claims are checkable</h2>
+  <p>Every answer passes a contract that generation cannot waive:</p>
+  <ul>
+    <li><strong>Citations</strong> name the publication, edition and clause on every claim.</li>
+    <li><strong>Normative values are verbatim</strong> — mechanically verified as quote-containment in the served passages, with one corrected regeneration when a check fails.</li>
+    <li><strong>Typed objects never pass through the model.</strong> Tables, formulas and figures are referenced symbolically (<span class="mono">[[u:…]]</span>) and resolved server-side to the producer's payload; the model emits a reference, the interface renders the exact object. A model cannot corrupt a table it never transcribes.</li>
+    <li><strong>Figures are read, not paraphrased.</strong> A pinned figure's pixels ride the generation call, so labels that exist only in the drawing (L7's pixel-only probes) are read from the drawing; assets are verified readable by vision pipelines (a vector-sourced raster drawing black on transparent alpha flattens to a solid black rectangle in a vision model — a defect class browsers hide by compositing on white).</li>
+  </ul>
+  <p>Provable absence completes the contract: "does R 60 constrain packaging?" enumerates the standard's entire model plane and returns a certificate — <em>absent, N nodes enumerated, 0 matches, scope named</em> — never a bare refusal. Any answer is independently checkable through a verification endpoint (quote containment, object-reference resolution, judged faithfulness labeled as judged).</p>
+</section>
+
+<section id="execution">
+  <h2><span class="no">§ 6 · Execution semantics</span>Conformance by computation</h2>
+  <p>When a question names a machine-checkable object, the service executes it. The question's values bind to the rule's own parameters; a deterministic evaluator runs the check (OCL boolean expressions over the model plane, threshold limits); the verdict — <strong>pass</strong>, or <strong>the standard's own violation wording with the arithmetic shown</strong>, or <strong>void naming the missing parameters</strong> — is attached as data the answer model must present faithfully. Counterfactuals are free: hypothetical values are just values, and table lookups run inverted ("which accuracy class for n_LC = 3 000?"). Ground truth for these rungs is computed offline from the same model — no judge in the measurement loop. This is the capability no text representation can follow at any scale, and the direction the ladder points: the corpus as a model, queried by execution.</p>
+</section>
+
+<section id="measurement">
+  <h2><span class="no">§ 7 · Measurement</span>One command, honest exit codes</h2>
+  <p>Every change ships through the same gate: a 38-case golden suite ×3 (witness-span containment grading: doc-level, definitions, table values, refusals, filters, French and German, leakage probes, verdicts) and the 18-probe capability battery ×6, any failed run failing the command. Run logs are evidence — stored durably, never in ephemeral directories. Current standing from the definitive post-restore run: <strong>golden 37–38/38 per run (97–100%)</strong>; capability battery <strong>mode 18/18</strong> with two known single-probe variances (a cross-standard retrieval probe; a normative-date phrasing wobble) — reported as ranges, never peaks. Leakage probes gate every promotion: questions answerable only from the internal ISO/IEC corpus must return "no information" from the public tier, and do — the architecture cannot leak (separate indexes, no binding from the public worker), so the probes test implementation bugs.</p>
+</section>
+
+<section id="operations">
+  <h2><span class="no">§ 8 · Corpus integrity as operations</h2></span>
+  <p>A retrieval service that never audits its own index serves ghosts. Production incidents hardened the system into an explicit operations loop, each step a durable script:</p>
+  <ul>
+    <li><strong>Reconciliation.</strong> Vector upserts never delete; the first census found 49 553 live vectors against 31 512 canonical — 18 041 strays from every prior re-chunking — deleted in place, with the canonical set defined as three derivations (parse, retrieval-plane export, typed-unit projection) that must never overwrite one another's artifacts.</li>
+    <li><strong>Enrichment replay.</strong> Contextual preambles live only in the index; a full restore overwrites them with raw text (measured: 0% enriched after one restore, identifier queries failing first). The durable record the enrichment driver writes enables a zero-generation replay of 29 646 chunks.</li>
+    <li><strong>Asset readability sweeps.</strong> The black-alpha defect class of §4, detected and repaired in place with original backups.</li>
+    <li><strong>Cache generation.</strong> Answer caches are namespaced by deploy version and a corpus-generation stamp; corpus surgery bumps the stamp and stale entries miss. Request-scoped context (database selection, personalized memory files) salts the cache keys — a memory-flavored answer can never serve a memory-less ask.</li>
+  </ul>
+</section>
+
+<section id="economics">
+  <h2><span class="no">§ 9 · Deployment modes and economics</span>Open weights at the edge</h2>
+  <h3>9.1 Portable by construction</h3>
+  <p>Deployment is an implementation detail of the reference service, not a property of the techniques. The layers require only the four managed capabilities of §3 and a model endpoint; adopters have run the same registry over self-hosted vector databases and containerized inference. What transfers intact: the stage registry and its thresholds, the chunk wire contract, the adapter gateway, the enrichment/replay loop, the measurement gate, and the answer contract — the entire reasoning of the system is platform-neutral code and data.</p>
+  <h3>9.2 The reference instantiation</h3>
+  <p>One deployment — edge functions, managed vector/KV/SQL/object stores, open-weight models served on-platform — demonstrates the economics: a ~320B-parameter natively multimodal answering model at ≈<strong>$0.0012 per answer</strong>; an anonymous tier on a 3B-active MoE at ≈$0.0003; a ~$0.15 embedding pass for the whole corpus; no proprietary model APIs and no data leaving the estate. One-time quality work (enrichment, graph build, golden-set drafting) runs on the best available model regardless of price — bounded by corpus size, its quality persists into every future answer.</p>
+  <p>Members additionally hold personalized memory files (per-account context documents, selected per question like databases) and per-conversation database scoping.</p>
+</section>
+
+<section id="conclusion">
+  <h2><span class="no">§ 10 · Conclusion</span>What the staircase enables</h2>
+  <p>For the metrology community: the corpus becomes queryable in the ways practitioners actually ask — colloquially, across editions, into tables, and against configurations the documents define but never print. A regulator drafts against the current edition with the delta to its predecessor a clause-lookup away; a laboratory checks a configuration by execution instead of reading; a committee asks impact questions over the requirement–test–formula graph. For standards publishers, the staircase is the lesson this system was built to measure: structure added to the corpus is capability added to every consumer of it — and the highest rungs (verdicts, proven absence, self-verification) exist only when the publication itself is a model.</p>
+  <div class="callout">
+    <p><strong>Artifacts.</strong> Live service: <span class="mono">ai.oimlsmart.org</span> · mechanism reference and ladder elaboration: the project documentation set (<span class="mono">docs/sota-mechanisms.md</span>, <span class="mono">docs/knowledge-annealment.md</span>) · measured comparison study: <span class="mono">docs/paper-annealment-comparison.md</span> · capability panel: <span class="mono">ai.oimlsmart.org/annealment</span>.</p>
+  </div>
+</section>
+
+</main>
+<footer>
+  <div class="wrap">OIML SMART AI · system description and measured evaluation · September 2026 · drafted for the OIML SMART programme</div>
+</footer>
+</body>
+</html>
