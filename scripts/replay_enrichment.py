@@ -152,48 +152,6 @@ def main() -> int:
     if args.reverse:
         groups.reverse()
 
-    def embed_group(group: list[dict]) -> list[list[float]]:
-        # /admin/enrich embeds the composite sliced to 6000 chars — mirror
-        texts = [f"{contexts[c['id']]}\n\n{c['text']}"[:EMBED_CAP] for c in group]
-        for attempt in range(5):
-            try:
-                return cf.embed(texts)
-            except Exception:  # noqa: BLE001 — transient ladder first
-                time.sleep(3 * (attempt + 1))
-        # batch persistently rejected: bisect — embed one-by-one so one
-        # bad text never aborts the replay
-        out: list[list[float]] = []
-        for t in texts:
-            for attempt in range(5):
-                try:
-                    out.extend(cf.embed([t]))
-                    break
-                except Exception:
-                    time.sleep(2 * (attempt + 1))
-            else:
-                raise SystemExit(f"embed failed even alone: {t[:80]}")
-        return out
-
-    def upsert_group(args: tuple[list[dict], list[list[float]]]) -> None:
-        group, vecs = args
-        vectors = [
-            {
-                "id": c["id"],
-                "values": v,
-                "metadata": {**c["metadata"], "chunk_text": t, "ctx": "1"},
-            }
-            for c, t, v in zip(group, [f"{contexts[c['id']]}\n\n{c['text']}" for c in group], vecs, strict=True)
-        ]
-        for attempt in range(5):
-            try:
-                r = admin.post("/admin/vectors", json={"mode": "upsert", "vectors": vectors})
-                r.raise_for_status()
-                return
-            except Exception as e:  # noqa: BLE001
-                if attempt == 4:
-                    raise SystemExit(f"upsert failed at id {group[0]['id']}: {e}")
-                time.sleep(3 * (attempt + 1))
-
     # SEQUENTIAL by measurement: pool topologies wedge against the embed
     # lane's backoff (12- and 3-worker runs both froze mid-run); one
     # group at a time is ~9s and cannot

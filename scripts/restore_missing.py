@@ -71,14 +71,12 @@ def present_ids(token: str, ids: list[str]) -> set[str]:
     return found
 
 
-def upsert_rest(rest_base: str, vectors: list[dict]) -> None:
-    from ingest.cf import CF  # noqa: PLC0415 — auth is only needed when writing
-
+def upsert_rest(cf: "CF", rest_base: str, vectors: list[dict]) -> None:
     backoff = 10.0
     last: Exception | None = None
     for attempt in range(8):
         try:
-            CF()._post(f"{rest_base}/upsert", {"vectors": vectors})  # own retry ladder inside
+            cf._post(f"{rest_base}/upsert", {"vectors": vectors})  # own retry ladder inside
             if attempt:
                 print(f"    ok after {attempt + 1} attempts", flush=True)
             return
@@ -117,8 +115,9 @@ def main() -> int:
         print(f"WARNING {len(no_emb)} chunks have no embedding (skipped; run embed): {no_emb[:3]}")
     todo = [i for i in chunks if i in emb]
 
-    from ingest.cf import ACCOUNT_ID  # noqa: PLC0415
+    from ingest.cf import CF, ACCOUNT_ID  # noqa: PLC0415
 
+    cf = CF()
     rest_base = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}"
 
     ids = list(todo)
@@ -138,7 +137,7 @@ def main() -> int:
             for c in (chunks[i] for i in group)
         ]
         try:
-            upsert_rest(rest_base, vectors)
+            upsert_rest(cf, rest_base, vectors)
         except SystemExit as e:
             print(f"  SKIP batch at {group[0]}: {e}", flush=True)
             skipped += len(group)
