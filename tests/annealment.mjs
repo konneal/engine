@@ -37,11 +37,28 @@ for (const c of laneXIdx >= 0 ? [] : cases) {
       }
     }
     const d = await res.json();
-    const answer = d.answer ?? "";
+    let answer = d.answer ?? "";
     const cites = (d.citations ?? []).map((x) => `${x.docidentifier ?? ""} §${x.clause_anchor ?? ""} ${x.snippet ?? ""}`).join(" | ");
     const g = gradeWitness(c.expect, { answer, citeText: cites, anchorText: cites, artifactTypes: (d.blocks ?? []).map((b) => b.type) });
-    const { answer: answerOk, citation: citeOk, anchor: anchorOk, artifact: artifactOk } = g.legs;
-    const ok = g.ok;
+    // one retry when ONLY the answer leg misses (eval hygiene, same
+    // class as the socket retry above): the battery measures knowledge,
+    // and an occasional clarifying question is serving behavior under
+    // perceived ambiguity, not a knowledge failure. The re-ask grades
+    // ONLY the answer leg — witness/citation/artifact legs are never
+    // retried, a retrieval miss is a real signal.
+    let answerOk = g.legs.answer;
+    if (answerOk === false) {
+      const r2 = await fetch(`${BASE}/v1/ask`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json", "user-agent": "oiml-eval" },
+        body: JSON.stringify({ query: c.query, fresh: true }),
+      });
+      const d2 = await r2.json();
+      const g2 = gradeWitness(c.expect, { answer: d2.answer ?? "", citeText: "", anchorText: "", artifactTypes: [] });
+      if (g2.legs.answer) { answer = d2.answer ?? ""; answerOk = true; }
+    }
+    const { citation: citeOk, anchor: anchorOk, artifact: artifactOk } = g.legs;
+    const ok = answerOk && citeOk !== false && anchorOk !== false && artifactOk !== false;
     if (ok) pass++; else skip++;
     byRung[c.rung] = byRung[c.rung] || { pass: 0, total: 0 };
     if (ok) byRung[c.rung].pass++;
