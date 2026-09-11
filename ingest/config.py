@@ -51,6 +51,20 @@ if not API_TOKEN:
 
 EMBED_MODEL = "@cf/qwen/qwen3-embedding-0.6b"
 
+# The canonical chunk set = everything that serves. ONE declaration, every
+# tool consumes it (the upsert union, reconcile's stray diff, replay's
+# enrichment sources, restore's gap probe). The 2026-09-10 incident: this
+# set lived as four independent enumerations, one lagged at three files,
+# and reconcile deleted 3,182 typed unit chunks as strays. Adding a served
+# derivation means adding it HERE, nowhere else.
+CHUNKS_JSONL = ARTIFACTS / "chunks.jsonl"
+MODEL_DERIVATIONS = [
+    ARTIFACTS / "model_retrieval_chunks.jsonl",
+    ARTIFACTS / "model_typed_chunks.jsonl",
+    ARTIFACTS / "mko_chunks.jsonl",
+]
+CANONICAL_CHUNK_SOURCES = [CHUNKS_JSONL, *MODEL_DERIVATIONS]
+
 MAX_CHUNK_CHARS = 2800
 SHELL_WORD_THRESHOLD = 100
 # English-only index (2026-08-24 user directive): multilingual chunks made

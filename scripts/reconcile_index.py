@@ -22,20 +22,17 @@ from pathlib import Path
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ingest.config import ACCOUNT_ID, INDEX_NAME  # noqa: E402
+from ingest.config import ACCOUNT_ID, INDEX_NAME, CANONICAL_CHUNK_SOURCES  # noqa: E402
 
 ARTIFACTS = Path(__file__).resolve().parents[1] / "artifacts"
 BASE = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}"
 
 
 def canonical_ids() -> set[str]:
-    """Four derivations, one index: parse chunks (prose), the retrieval
-    plane, the projection nodes, and the MKO unit chunks (typed
-    tables/formulas/figures — the unit_id/block source for the answer
-    contract)."""
+    """The id set of every file in the canonical declaration (config.py —
+    everything that serves; strays are deleted against exactly this)."""
     ids: set[str] = set()
-    for name in ("chunks.jsonl", "model_retrieval_chunks.jsonl", "model_typed_chunks.jsonl", "mko_chunks.jsonl"):
-        p = ARTIFACTS / name
+    for p in CANONICAL_CHUNK_SOURCES:
         if not p.is_file():
             sys.exit(f"missing {p} — run the parse/model-plane build first")
         with p.open(encoding="utf-8") as fh:

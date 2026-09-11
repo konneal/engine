@@ -31,16 +31,14 @@ from pathlib import Path
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ingest.config import ARTIFACTS  # noqa: E402
+from ingest.config import ARTIFACTS, CANONICAL_CHUNK_SOURCES  # noqa: E402
+from ingest.vector_adapter import wire_meta  # noqa: E402
 
 BASE = os.environ.get("BASE_URL", "https://ai.oimlsmart.org")
 RECORDS = ARTIFACTS / "enriched-contexts.jsonl"
-DEFAULT_SOURCES = [
-    ARTIFACTS / "chunks.jsonl",
-    ARTIFACTS / "model_retrieval_chunks.jsonl",
-    ARTIFACTS / "model_typed_chunks.jsonl",
-    ARTIFACTS / "mko_chunks.jsonl",
-]
+# the canonical set declared once (config.py) — replay covers everything
+# that serves, so no enriched chunk can survive a restore un-replayed
+DEFAULT_SOURCES = CANONICAL_CHUNK_SOURCES
 # /admin/enrich's own composite formula and caps — the replay must be
 # byte-identical to what a cache-hit enrich run would have upserted
 EMBED_CAP = 6000
@@ -93,6 +91,7 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true", help="embed + upsert (default: report only)")
     ap.add_argument("--source", action="append", type=Path, help="chunk jsonl to replay (repeatable)")
     ap.add_argument("--reverse", action="store_true", help="walk groups last-to-first (run a second instance from the other end; the resume probe keeps them disjoint)")
+    ap.add_argument("--pace", type=float, default=0.0, help="sleep (s) after each upserted group — ride the rolling Vectorize upsert quota")
     args = ap.parse_args()
 
     contexts: dict[str, str] = {}
@@ -211,12 +210,14 @@ def main() -> int:
             {
                 "id": c["id"],
                 "values": v,
-                "metadata": {**c["metadata"], "chunk_text": t, "ctx": "1"},
+                "metadata": wire_meta({**c["metadata"], "chunk_text": t, "ctx": "1"}),
             }
             for c, t, v in zip(group, texts, vecs, strict=True)
         ]
         upsert_vectors(admin, vectors, group)
         done += len(group)
+        if args.pace:
+            time.sleep(args.pace)
         if done % 480 < len(group):
             print(f"  replayed ~{done}/{len(replayable)}", flush=True)
     print(f"replayed {done}/{len(replayable)} — enrichment restored (contexts from the durable record)")

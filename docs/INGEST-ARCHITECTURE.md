@@ -106,17 +106,27 @@ upsert           the internal worker's /admin/sync binding route
                  (rag-internal.<account>.workers.dev — no REST token
                  needed); the CLI's REST path defaults to the production
                  index idx_oiml_public_v2
-enrich-replay    scripts/replay_enrichment.py [--apply] — REQUIRED after
-                 every full upsert: enrichment lives only in the index
-                 (and the KV context cache), so a full upsert overwrites
-                 it with raw text; the replay re-embeds context+text from
-                 the durable record (artifacts/enriched-contexts.jsonl)
-                 via the binding — zero model generation, ≈$0.30
+restore          scripts/restore_missing.py [sources...] [--batch N --pace S] —
+                 reconcile's twin: reconcile deletes strays, restore fills
+                 gaps (presence probe, then upsert only missing ids; paced
+                 under the rolling Vectorize upsert quota — sustained
+                 25-50-vector batches clamp after ~1k vectors; 10 × 25s
+                 sustains; skips hard-failed batches, rerun to pick them
+                 up)
+enrich-replay    scripts/replay_enrichment.py [--apply --pace S] — REQUIRED
+                 after every full upsert OR raw restore: enrichment lives
+                 only in the index (and the KV context cache), so both
+                 overwrite it with raw text; the replay re-embeds
+                 context+text from the durable record
+                 (artifacts/enriched-contexts.jsonl) via the binding —
+                 zero model generation, ≈$0.30
 reconcile        scripts/reconcile_index.py — enumerate the index (wrangler
                  list-vectors), diff against the canonical chunk set
-                 (parse + retrieval-plane + projection — three
-                 derivations), delete strays (--apply). Upserts never
-                 delete; this closes the loop.
+                 declared ONCE in ingest/config.py
+                 (CANONICAL_CHUNK_SOURCES — four derivations: prose parse,
+                 retrieval plane, projection, MKO typed units), delete
+                 strays (--apply). Upserts never delete; this closes the
+                 loop.
 cache            scripts/invalidate_answer_cache.py (or wrangler kv put
                  sys:corpus_gen) after any corpus surgery
 assets           scripts/fix_figure_assets.py [--apply] — unit assets must

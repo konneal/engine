@@ -3,10 +3,12 @@
 
 Companion to reconcile_index.py: reconcile deletes strays, this restores
 gaps. Probes the live index (mode:get, presence = id appears), then
-upserts only the missing ids from chunk jsonl + embeddings, with an
-exponential backoff that can ride out Vectorize rate-limit windows the
-short retry ladder cannot (the 2026-09-10 restore lost 42 batches to a
-sustained throttle; short retries kept failing).
+upserts only the missing ids from chunk jsonl + embeddings. WRITES RIDE
+THE REST LANE, not the worker binding: the binding 502s sustained bulk
+upserts after ~1.1k vectors (2026-09-10/11 — reads never failed, writes
+clamped; the REST mutation endpoint took the identical payload fine), the
+same read-via-worker/write-via-REST split reconcile and the embed lane
+already use.
 
 Usage:
     .venv/bin/python scripts/restore_missing.py [sources...] [--batch N]
@@ -25,15 +27,11 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ingest.config import ARTIFACTS  # noqa: E402
+from ingest.config import ARTIFACTS, CANONICAL_CHUNK_SOURCES, INDEX_NAME  # noqa: E402
+from ingest.vector_adapter import wire_meta  # noqa: E402
 
 BASE = "https://ai.oimlsmart.org"
-DEFAULT_SOURCES = [
-    ARTIFACTS / "chunks.jsonl",
-    ARTIFACTS / "model_retrieval_chunks.jsonl",
-    ARTIFACTS / "model_typed_chunks.jsonl",
-    ARTIFACTS / "mko_chunks.jsonl",
-]
+DEFAULT_SOURCES = CANONICAL_CHUNK_SOURCES
 
 
 def token_from_env() -> str:
@@ -73,26 +71,31 @@ def present_ids(token: str, ids: list[str]) -> set[str]:
     return found
 
 
-def upsert(token: str, vectors: list[dict]) -> None:
-    backoff = 15.0
+def upsert_rest(rest_base: str, vectors: list[dict]) -> None:
+    from ingest.cf import CF  # noqa: PLC0415 — auth is only needed when writing
+
+    backoff = 10.0
+    last: Exception | None = None
     for attempt in range(8):
         try:
-            post(token, {"mode": "upsert", "vectors": vectors})
+            CF()._post(f"{rest_base}/upsert", {"vectors": vectors})  # own retry ladder inside
+            if attempt:
+                print(f"    ok after {attempt + 1} attempts", flush=True)
             return
-        except urllib.error.HTTPError as e:
-            if e.code < 500 and e.code != 429:
-                raise SystemExit(f"upsert rejected ({e.code}) — check payload")
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            last = e
+        detail = getattr(getattr(last, "response", None), "text", "")[:300]
+        print(f"    attempt {attempt + 1} failed at {vectors[0]['id']}: {type(last).__name__} {str(last)[:160]} body={detail}", flush=True)
         time.sleep(backoff)
-        backoff = min(backoff * 2, 300)  # ride out sustained throttle windows
-    raise SystemExit(f"upsert failed after 8 attempts at id {vectors[0]['id']}")
+        backoff = min(backoff * 2, 120)
+    raise SystemExit(f"REST upsert failed after 8 attempts at id {vectors[0]['id']}: {last!r}")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("sources", nargs="*", type=Path, help="chunk jsonl files (default: canonical four)")
     ap.add_argument("--batch", type=int, default=25)
+    ap.add_argument("--pace", type=float, default=0.0, help="sleep (s) after each successful batch — ride a rolling vectors/min quota")
     args = ap.parse_args()
     sources = args.sources or DEFAULT_SOURCES
 
@@ -114,6 +117,10 @@ def main() -> int:
         print(f"WARNING {len(no_emb)} chunks have no embedding (skipped; run embed): {no_emb[:3]}")
     todo = [i for i in chunks if i in emb]
 
+    from ingest.cf import ACCOUNT_ID  # noqa: PLC0415
+
+    rest_base = f"https://api.cloudflare.com/client/v4/accounts/{ACCOUNT_ID}/vectorize/v2/indexes/{INDEX_NAME}"
+
     ids = list(todo)
     print(f"canonical: {len(chunks)} · probing presence...", flush=True)
     found = present_ids(token, ids)
@@ -123,17 +130,25 @@ def main() -> int:
         return 0
 
     done = 0
+    skipped = 0
     for i in range(0, len(missing), args.batch):
         group = missing[i : i + args.batch]
         vectors = [
-            {"id": c["id"], "values": emb[c["id"]], "metadata": chunks[c["id"]]["metadata"]}
+            {"id": c["id"], "values": emb[c["id"]], "metadata": wire_meta(chunks[c["id"]]["metadata"])}
             for c in (chunks[i] for i in group)
         ]
-        upsert(token, vectors)
+        try:
+            upsert_rest(rest_base, vectors)
+        except SystemExit as e:
+            print(f"  SKIP batch at {group[0]}: {e}", flush=True)
+            skipped += len(group)
+            continue
         done += len(group)
+        if args.pace:
+            time.sleep(args.pace)
         if done % 250 < args.batch:
             print(f"  restored {done}/{len(missing)}", flush=True)
-    print(f"RESTORED {done} missing vectors", flush=True)
+    print(f"RESTORED {done}/{len(missing)} · skipped {skipped} (rerun to pick them up)", flush=True)
     return 0
 
 

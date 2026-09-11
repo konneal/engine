@@ -168,6 +168,26 @@ class VectorChunk(BaseModel):
         return {"id": self.id, "values": vector, "metadata": meta}
 
 
+def wire_meta(md: dict) -> dict:
+    """The declared projection from a producer's (rich) metadata dict to
+    the Vectorize-legal wire metadata: scalar values or string arrays
+    only (Vectorize law — API error 40017 otherwise). Rich producer
+    payloads (e.g. metadata.table's columns/rows objects) are DERIVATION
+    records, never wire state — serving reads rich payloads from D1
+    unit_payloads. The 2026-09-10/11 restore incident: raw-jsonl
+    consumers shipped the rich records and Vectorize rejected whole
+    batches (40017 via REST, opaque 502 via the binding) — misread as
+    throttling for a day. Every consumer of a chunk jsonl's metadata on
+    the way to an index goes through HERE."""
+    return {
+        k: v
+        for k, v in md.items()
+        if isinstance(v, (str, int, float, bool))
+        or v is None
+        or (isinstance(v, list) and v and all(isinstance(x, str) for x in v))
+    }
+
+
 def normalize_chunk(raw: dict, *, target: Target) -> VectorChunk:
     """Adapt a projector's dict to a VectorChunk for a TARGET.
 
@@ -179,7 +199,7 @@ def normalize_chunk(raw: dict, *, target: Target) -> VectorChunk:
         md["corpus"] = "oiml"
         md["tier"] = "curated"
         md["producer"] = md.get("producer", "mko")
-    md = {k: v for k, v in md.items() if isinstance(v, (str, int, float, bool)) or v is None}
+    md = wire_meta(md)
     chunk = VectorChunk(id=raw["id"], text=raw.get("text", ""), metadata=ChunkMetaModel(**md))
     # fail fast on the incident class: a chunk foreign to its target
     # must not even ADAPT, let alone reach a wire call

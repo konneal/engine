@@ -7,18 +7,14 @@ import sys
 from pathlib import Path
 
 from .chunk import Chunk, chunk_doc, doc_content_hash
-from .config import ARTIFACTS
+from .config import ARTIFACTS, CANONICAL_CHUNK_SOURCES, CHUNKS_JSONL, MODEL_DERIVATIONS
+from .vector_adapter import wire_meta
 from .models import ManifestEntry
 from .parse import apply_precedence, load_corpus, normalize_identifier
 
-# The model plane (TODO.ai-platform/05): its chunks ride the same
-# embed/upsert lanes as the prose corpus when the derivation has run.
-# mko_chunks.jsonl rides the same union: the clean corpus's typed UNIT
-# chunks (tables/formulas/figures/clauses) — omitted from this set once,
-# the wave-4 reconciliation then deleted them all as strays and formula
-# questions had nothing to retrieve (2026-09-10). Canonical = everything
-# that serves.
-MODEL_CHUNKS = [ARTIFACTS / "model_retrieval_chunks.jsonl", ARTIFACTS / "model_typed_chunks.jsonl", ARTIFACTS / "mko_chunks.jsonl"]
+# The upsert union IS the canonical set (config.py declares it once — the
+# model-plane derivations ride the same embed/upsert lanes as the prose
+# parse output).
 
 
 def _read_chunks(path: Path) -> list[dict]:
@@ -28,7 +24,7 @@ def _read_chunks(path: Path) -> list[dict]:
 from .enrich import run as run_enrich
 from .graph import build as graph_build, apply as graph_apply
 
-CHUNKS_PATH = ARTIFACTS / "chunks.jsonl"
+CHUNKS_PATH = CHUNKS_JSONL
 MANIFEST_PATH = ARTIFACTS / "manifest.json"
 EMBED_PATH = ARTIFACTS / "embeddings.jsonl"
 
@@ -214,7 +210,7 @@ def embed(limit: int | None) -> None:
 
     chunks = [json.loads(l) for l in CHUNKS_PATH.open(encoding="utf-8")]
     model_chunks: list[dict] = []
-    for p in MODEL_CHUNKS:
+    for p in MODEL_DERIVATIONS:
         model_chunks.extend(_read_chunks(p))
     if model_chunks:
         print(f"  + {len(model_chunks)} model-plane chunks (retrieval plane + typed units)")
@@ -275,17 +271,17 @@ def upsert() -> None:
     cf = CF()
     info = cf.vectorize_info()
     print(f"index {info.get('name')}: dims={info.get('dimensions')} vectors={info.get('vectorCount')}")
-    chunks = {json.loads(l)["id"]: json.loads(l) for l in CHUNKS_PATH.open(encoding="utf-8")}
-    for mp in MODEL_CHUNKS:
-        for mc in _read_chunks(mp):
-            chunks[mc["id"]] = mc
+    chunks: dict[str, dict] = {}
+    for src in CANONICAL_CHUNK_SOURCES:
+        for c in _read_chunks(src):
+            chunks[c["id"]] = c
     vectors = []
     with EMBED_PATH.open(encoding="utf-8") as f:
         for line in f:
             rec = json.loads(line)
             c = chunks.get(rec["id"])
             if c:
-                vectors.append({"id": rec["id"], "values": rec["values"], "metadata": c["metadata"]})
+                vectors.append({"id": rec["id"], "values": rec["values"], "metadata": wire_meta(c["metadata"])})
     state = ARTIFACTS / f"upsert_state_{INDEX_NAME}.txt"
     if state.exists():
         print(f"resuming from {state.read_text().strip()}")
