@@ -133,7 +133,7 @@
     "expect": {
       "citation_any": "R ?60",
       "answer_any": [
-        "factor|tier|limit"
+        "factor|tier|limit|p_?LC|0\\.5 v|1\\.0 v|1\\.5 v"
       ]
     },
     "lanes": [
