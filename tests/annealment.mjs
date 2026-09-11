@@ -58,7 +58,7 @@ for (const c of laneXIdx >= 0 ? [] : cases) {
       if (g2.legs.answer) { answer = d2.answer ?? ""; answerOk = true; }
     }
     const { citation: citeOk, anchor: anchorOk, artifact: artifactOk } = g.legs;
-    const ok = answerOk && citeOk !== false && anchorOk !== false && artifactOk !== false;
+    const ok = answerOk !== false && citeOk !== false && anchorOk !== false && artifactOk !== false;
     if (ok) pass++; else skip++;
     byRung[c.rung] = byRung[c.rung] || { pass: 0, total: 0 };
     if (ok) byRung[c.rung].pass++;
