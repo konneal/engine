@@ -51,7 +51,14 @@ beyond the inventory: [API.md](API.md).
 | `/v1/admin/keys` | POST | ADMIN_TOKEN | `handleCreateKey` | Issue an API key (`oiml_<hex>`, shown once). |
 | `/v1/admin/keys` | GET | ADMIN_TOKEN | `handleListKeys` | List keys (no secrets). |
 | `/v1/admin/stats` | GET | ADMIN_TOKEN | `adminStatsRoute` | 7-day telemetry: queries/day/tier, spend by model, feedback, error rate; prunes >90d rows. |
+| `/docs/:slug.html`, `/docs/:slug.anchors.json` | GET | public | `docsRoute` | Rendered publication documents (metanorma-mirror layer 1) served from R2 under `docs/`, immutable cache; the anchors map (clause number → heading anchor id) powers citation deep links. Public OIML content only. |
+| `/admin/enrich` | POST | ADMIN_TOKEN | `handleEnrich` | modes: default (context+embed+upsert in place), `context` (generate only, KV-cached), `ab` (generate at an explicit effort with NO side effects — the experiment lane; accepts an admin-gated prompt override for judged comparisons). |
 | anything else | any | — | — | `404 not_found`. |
+
+## Request semantics worth naming
+
+- **`effort` on ask** (`/api/ask`, `/v1/ask`): `"low"` (default, 1 quota unit) or `"medium"` (member lane, raises reasoning effort AND the output budget — `effortBudget()`; 2 quota units). Effort changes the answer, so it salts both answer caches alongside the datasets/memory selections (`requestEffort`/`answerEffort` in config.ts).
+- **`max_iterations` on research**: 1–3, clamped server-side.
 
 ## Dispatch semantics
 

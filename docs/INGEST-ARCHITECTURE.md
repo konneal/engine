@@ -133,6 +133,10 @@ assets           scripts/fix_figure_assets.py [--apply] — unit assets must
                  stay vision-readable (black-on-transparent rasters read
                  as solid black after alpha flattening); detects and
                  re-uploads white-flattened
+documents        scripts/upload_documents.py [--apply] — the rendered
+                 publications for citation deep links (R2 docs/<slug>.html
+                 + clause-anchor maps, served at /docs/*); rerun when the
+                 clean corpus's renderings change
 graph            ingest.cli graph (build) + graph --corpus apply (D1,
                  wrangler; absolute --file path)
 gates            scripts/gates.sh — golden ×N + annealment ×M

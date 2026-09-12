@@ -33,6 +33,7 @@ This repo is the orchestrator: ingestion → enrichment → indexing → serving
   - Index reconciliation (TODO.impl/40): `.venv/bin/python scripts/reconcile_index.py [--apply]` — enumerate the production index, diff against the canonical chunk set, delete strays (upserts never delete).
   - Enrichment replay (2026-09-09): `.venv/bin/python scripts/replay_enrichment.py [--apply]` — REQUIRED after every full index upsert: enrichment lives only in the index/KV, a full upsert overwrites it with raw text (the 2026-09-09 regression: 0% enriched, d29-guide65 failing); the replay re-embeds context+text from the durable record via the binding (zero generation).
   - Unit-asset readability (2026-09-09): `.venv/bin/python scripts/fix_figure_assets.py [--apply]` — figure assets under `/assets/u:*` must be VISION-readable (vector-sourced rasters carry black strokes on transparent alpha; vision endpoints flatten onto black and see nothing). Scans `unit_payloads` URIs, detects black-alpha, re-uploads white-flattened (originals to `artifacts/asset-backups/`).
+- Rendered documents (metanorma-mirror, 2026-09-12): `.venv/bin/python scripts/upload_documents.py [--apply]` — uploads the clean corpus's own Metanorma HTML renderings to R2 `docs/<slug>.html` + clause-anchor maps `.anchors.json` (35/36 docs; slug = docidentifier slug — the site's `docSlug()` MUST match). Served at `/docs/*` (immutable); citation deep links + the in-context pane ride it. Public OIML only.
 - Whitepaper (#175): `node scripts/whitepaper_pdf.mjs` builds the academic whitepaper (docs/whitepaper-oiml-smart-ai.html, cim-2027 house style) to screen+print HTML and the PDF served at `/whitepaper.pdf` — rerun after editing the HTML source.
 - Personalized memory files (#171): D1 `memories` (member-scoped, ≤10 × 8k), `/api/memories` CRUD, ask-path `memories: [id…]` injection as one bounded note; the selection (with the dataset scope) salts the answer cache (`cacheKeyMaterial`/`scSignature` — never add request-scoped context without salting).
 - Secrets: `npx wrangler secret put ADMIN_TOKEN -c workers/worker_public/wrangler.toml` — guards `POST /v1/admin/keys` (API key creation)
@@ -164,9 +165,13 @@ reasoning mode, sampling and a budget the reasoning cannot starve.
 - Reasoning-effort frontier (DeepSeek-V4.1-Flash report, Fig. 9): effort
   60–80 recovers most of max accuracy at under half the token cost; the
   last step to 100 costs 1.6–1.8× trajectory length for marginal gain.
-  Serving path pins low (latency); one-time quality-first lanes
-  (enrichment, gate judging, golden drafting) are where higher effort
-  pays — A/B it measured, never assume.
+  Serving path pins low (latency) — and on glm-5.3-flash, elevated
+  effort WITHOUT a raised output budget starves the answer (measured:
+  5/38 golden at medium with the flat budget vs 36–38/38 with the
+  doubled budget — `effortBudget()` couples them). One-time quality-first
+  lanes: the enrichment A/B (97 chunks, blind judging by v4-pro through
+  the binding lane) settled HIGH effort — 58% vs 25% low at equal
+  length; enrichment generates at high. A/B measured, never assume.
 
 ## Deploy & ops automation
 
