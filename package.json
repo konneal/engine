@@ -22,5 +22,9 @@
   "devDependencies": {
     "jsdom": "^29.1.1",
     "playwright": "^1.62.1"
+  },
+  "dependencies": {
+    "@astrojs/markdown-satteri": "^0.4.1",
+    "@astrojs/mdx": "^4.3.14"
   }
 }
