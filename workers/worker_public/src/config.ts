@@ -140,6 +140,16 @@ export function answerEffort(env: any): string {
   return typeof v === "string" && EFFORTS.has(v) ? v : "low";
 }
 
+/** Per-request effort for the answer lane (the user-facing depth toggle).
+ *  The vocabulary is validated; elevated efforts (medium+) are a member
+ *  lane — same cost rule as research — and degrade to the deployment
+ *  lever for anonymous or silent requests. */
+export function requestEffort(env: any, session: unknown, requested: unknown): string {
+  if (typeof requested !== "string" || !EFFORTS.has(requested)) return answerEffort(env);
+  if (requested === "low") return requested;
+  return session ? requested : answerEffort(env);
+}
+
 /** The corpus catalog — single source for /api/datasets, the assistant's
  *  self-description, and per-corpus model guidance. `session: true`
  *  datasets are enabled for signed-in members (federated via the internal

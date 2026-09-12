@@ -3,9 +3,9 @@
 import { sha256Hex, today } from "./config";
 import type { Env } from "./env";
 
-export async function kvIncr(cache: KVNamespace, key: string): Promise<number> {
+export async function kvIncr(cache: KVNamespace, key: string, step = 1): Promise<number> {
   const cur = Number((await cache.get(key)) ?? "0");
-  const next = cur + 1;
+  const next = cur + step;
   await cache.put(key, String(next), { expirationTtl: 90000 });
   return next;
 }
@@ -14,13 +14,17 @@ export function clientIp(req: Request): string {
   return req.headers.get("cf-connecting-ip") ?? "unknown";
 }
 
+/** Daily ask quota. `weight` is the effort multiplier: a thorough
+ *  (elevated-effort) answer consumes more of the day's budget —
+ *  different reasoning efforts naturally cost different quota. */
 export async function checkQuota(
   env: Env,
   bucket: string,
   id: string,
   limit: number,
+  weight = 1,
 ): Promise<{ ok: boolean; used: number; limit: number }> {
-  const used = await kvIncr(env.CACHE, `q:${today()}:${bucket}:${await sha256Hex(id)}`);
+  const used = await kvIncr(env.CACHE, `q:${today()}:${bucket}:${await sha256Hex(id)}`, weight);
   return { ok: used <= limit, used, limit };
 }
 

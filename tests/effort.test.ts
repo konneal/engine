@@ -21,3 +21,23 @@ test("invalid values fall back to low, not error", () => {
   assert.equal(answerEffort({ ANSWER_EFFORT: "turbo" }), "low");
   assert.equal(answerEffort({ ANSWER_EFFORT: 3 }), "low");
 });
+
+import { requestEffort } from "../workers/worker_public/src/config.ts";
+
+const member = { sub: "s" };
+
+test("silent or invalid request falls back to the deployment lever", () => {
+  assert.equal(requestEffort({}, member, undefined), "low");
+  assert.equal(requestEffort({}, member, "turbo"), "low");
+  assert.equal(requestEffort({ ANSWER_EFFORT: "medium" }, member, null), "medium");
+});
+
+test("elevated effort is a member lane", () => {
+  assert.equal(requestEffort({}, member, "medium"), "medium");
+  assert.equal(requestEffort({}, null, "medium"), "low");
+  assert.equal(requestEffort({ ANSWER_EFFORT: "high" }, null, "medium"), "high");
+});
+
+test("explicit low always wins", () => {
+  assert.equal(requestEffort({ ANSWER_EFFORT: "medium" }, member, "low"), "low");
+});

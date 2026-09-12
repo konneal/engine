@@ -110,7 +110,7 @@ export async function rerank(
   return null;
 }
 
-export async function generateOnce(env: any, model: string, messages: any[]): Promise<string | null> {
+export async function generateOnce(env: any, model: string, messages: any[], effort?: string): Promise<string | null> {
   // one immediate retry: Workers AI intermittently 8005s a call that
   // succeeds unchanged on the second attempt — a flake must not degrade
   // the answer (a multimodal primary falling to a text-only fallback
@@ -120,7 +120,7 @@ export async function generateOnce(env: any, model: string, messages: any[]): Pr
       const res: any = await env.AI.run(model, {
         messages,
         max_tokens: LIMITS.maxOutputTokens,
-        reasoning_effort: answerEffort(env),
+        reasoning_effort: effort ?? answerEffort(env),
         temperature: 0.6,
         top_p: 0.95,
       });

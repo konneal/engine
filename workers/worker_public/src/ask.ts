@@ -3,7 +3,7 @@
 // echo — everything between "request validated" and "response written".
 // index.ts routes here; this module owns the answer contract.
 
-import { LIMITS, MODELS, num, sha256Hex, roleModel, answerEffort } from "./config";
+import { LIMITS, MODELS, num, sha256Hex, roleModel, answerEffort, requestEffort } from "./config";
 import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, REFUSAL_ANSWER, Hit } from "./pipeline";
 import { sessionFrom } from "./auth";
 import { retrieveInternal } from "./internal_gateway";
@@ -115,14 +115,14 @@ async function attachFigureImages(env: Env, messages: { role: string; content: s
   console.log("figure images attached:", names.join(", "));
 }
 
-async function generateStream(env: Env, model: string, messages: any[]): Promise<ReadableStream<Uint8Array> | null> {
+async function generateStream(env: Env, model: string, messages: any[], effort?: string): Promise<ReadableStream<Uint8Array> | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const res: any = await env.AI.run(model, {
         messages,
         stream: true,
         max_tokens: LIMITS.maxOutputTokens,
-        reasoning_effort: answerEffort(env),
+        reasoning_effort: effort ?? answerEffort(env),
         temperature: 0.6,
         top_p: 0.95,
       });
@@ -225,12 +225,13 @@ async function handleAsk(
   const draftAct = detectDraftIntent(q.query);
 
   const member = tier === "member" ? await sessionFrom(req, env as any) : null;
-
+  // resolved before the quota check: the effort choice prices the ask
+  const effort = requestEffort(env, member, (body as any)?.effort);
 
   const limit =
     tier === "key" ? key!.day_limit : tier === "member" || member ? num(env as any, "MEMBER_DAY_ASK", 300) : num(env as any, "ANON_DAY_ASK", 20);
   const bucketId = tier === "key" ? `key:${key!.id}` : member ? `sub:${member.sub}` : clientIp(req);
-  const quota = await checkQuota(env, "ask", bucketId, limit);
+  const quota = await checkQuota(env, "ask", bucketId, limit, effort === "low" ? 1 : 2);
   if (!quota.ok) {
     return err(429, "quota_exceeded", `Daily question limit reached (${quota.limit}). Try again tomorrow.`);
   }
@@ -262,6 +263,9 @@ async function handleAsk(
   // the selections SALT the answer cache (requestScope.requestSalt).
   const [memNote, memoryUsed] = member && scope.memoryIds.length ? await memoryNote(env, member.sub, scope.memoryIds) : [null, []];
   const requestSaltStr = requestSalt(scope, memoryUsed);
+  // per-request depth toggle (⚡ fast / 🧠 thorough): effort changes the
+  // answer, so it salts the cache with the selections above
+  const salt = requestSaltStr ? `${requestSaltStr}|effort:${effort}` : `effort:${effort}`;
   const federate = member && service && isoOn
     ? (q2: string) => retrieveInternal(service, fedAuth, q2)
     : undefined;
@@ -297,7 +301,7 @@ async function handleAsk(
   // answer caches; corpus surgery bumps it (scripts/invalidate_answer_
   // cache.py) and old-generation entries miss (oimlsmart/rag#72)
   const gen = await corpusGen(env.CACHE);
-  const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, requestSaltStr);
+  const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
@@ -347,7 +351,7 @@ async function handleAsk(
   if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && !fresh) {
     const wv0 = (await warmEmbed) ?? null;
     if (wv0) {
-      const sc0 = await semanticCacheGet(env, gen, wv0, requestSaltStr);
+      const sc0 = await semanticCacheGet(env, gen, wv0, salt);
       if (sc0) {
         console.log("semantic cache hit (pre-understanding)");
         telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang);
@@ -490,7 +494,7 @@ async function handleAsk(
   if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !userImage && !fresh) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
-      const sc = await semanticCacheGet(env, gen, warmVec, requestSaltStr);
+      const sc = await semanticCacheGet(env, gen, warmVec, salt);
       if (sc) {
         console.log("semantic cache hit");
         telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang);
@@ -518,7 +522,7 @@ async function handleAsk(
       { role: "user", content: q.query },
     ];
     if (wantsStream) {
-      const stream = await generateStream(env, model, messages);
+      const stream = await generateStream(env, model, messages, effort);
       if (stream) {
         const encoder = new TextEncoder();
         const sse = new ReadableStream({
@@ -544,8 +548,8 @@ async function handleAsk(
         });
       }
     }
-    let answer = await generateOnce(env, model, messages);
-    if (answer === null) answer = await generateOnce(env, MODELS.fallback, messages);
+    let answer = await generateOnce(env, model, messages, effort);
+    if (answer === null) answer = await generateOnce(env, MODELS.fallback, messages, effort);
     if (answer === null) {
       telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
@@ -808,7 +812,7 @@ async function handleAsk(
   const cites = boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits);
 
   if (wantsStream) {
-    const stream = await generateStream(env, model, messages);
+    const stream = await generateStream(env, model, messages, effort);
     if (stream) {
       const encoder = new TextEncoder();
       const sse = new ReadableStream({
@@ -842,9 +846,9 @@ async function handleAsk(
           }
           if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(REFUSAL_ANSWER)) {
             const wv = (await warmEmbed) ?? null;
-            if (wv) semanticCachePut(env, ctx, gen, wv, requestSaltStr, { answer: canonical, citations: cites, model, query_hash: queryHash });
+            if (wv) semanticCachePut(env, ctx, gen, wv, salt, { answer: canonical, citations: cites, model, query_hash: queryHash });
             ctx.waitUntil(
-              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, requestSaltStr))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
+              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
           }
           controller.close();
@@ -861,7 +865,7 @@ async function handleAsk(
     }
   }
 
-  let answer = await generateOnce(env, model, messages);
+  let answer = await generateOnce(env, model, messages, effort);
   if (answer === null) {
     // the fallback is a text-only model: image parts must be flattened
     // out first or it errors on (or silently ignores) the pixels the
@@ -880,7 +884,7 @@ async function handleAsk(
           ? m
           : { ...m, content: m.content.filter((p: any) => p?.type === "text").map((p: any) => (p?.text ?? "").replace(/\n?\(The user attached an image with this question; interpret it directly when answering\.\)/, "")).join("\n") },
       );
-    answer = await generateOnce(env, MODELS.fallback, flat);
+    answer = await generateOnce(env, MODELS.fallback, flat, effort);
   }
   if (answer) answer = canonicalRefusal(answer);
 
@@ -916,7 +920,7 @@ async function handleAsk(
       const note = retyped || unreferenced
         ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.`
         : ANCHOR_CORRECTION_NOTE;
-      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }]);
+      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], effort);
       if (corrected) {
         const correctedAnswer = canonicalRefusal(corrected);
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
@@ -958,7 +962,7 @@ async function handleAsk(
       });
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
-        const retryAnswer = await generateOnce(env, model, retryMessages);
+        const retryAnswer = await generateOnce(env, model, retryMessages, effort);
         // the answer now comes from the retry passages — citations must follow
         if (retryAnswer) {
           answer = canonicalRefusal(retryAnswer);
@@ -1003,10 +1007,10 @@ async function handleAsk(
   const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
-    if (warmVec) semanticCachePut(env, ctx, gen, warmVec, requestSaltStr, out);
+    if (warmVec) semanticCachePut(env, ctx, gen, warmVec, salt, out);
   }
   if (cacheable) {
-    const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, requestSaltStr)));
+    const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }
   telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
