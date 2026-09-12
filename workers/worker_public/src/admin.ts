@@ -38,6 +38,10 @@ export async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request
   // experiment before the judge does.
   const abMode = body?.mode === "ab";
   const effort = body?.effort === "high" ? "high" : "low";
+  // ab-mode only: an admin-gated system-prompt override, so experiment
+  // harnesses can run judged comparisons through the binding lane — the
+  // REST ai/run token flakes 401 on this account (three waves running)
+  const abPrompt = abMode && typeof body?.prompt === "string" ? body.prompt.slice(0, 4000) : null;
   const model = typeof env.ENRICH_MODEL === "string" && env.ENRICH_MODEL ? env.ENRICH_MODEL : MODELS.enrich;
 
   const usage = { prompt_tokens: 0, completion_tokens: 0, requests: 0, cache_hits: 0 };
@@ -53,11 +57,15 @@ export async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request
           const head = `${m.docidentifier ?? m.doc_id}${m.clause_anchor ? " §" + m.clause_anchor : ""}${m.clause_title ? " — " + m.clause_title : ""}`;
           const res: any = await env.AI.run(model, {
             messages: [
-              { role: "system", content: enrichmentPrompt.trimEnd() },
-              { role: "user", content: `${head}\n\n${c.text.slice(0, 1500)}` },
+              { role: "system", content: (abMode && abPrompt) || enrichmentPrompt.trimEnd() },
+              { role: "user", content: abMode && abPrompt ? String(body?.user_text ?? "").slice(0, 4000) : `${head}\n\n${c.text.slice(0, 1500)}` },
             ],
             max_tokens: 1600,
-            reasoning_effort: abMode ? effort : "low",
+            // measured (2026-09-12, TODO.impl/62): high effort beats low
+            // 58% vs 25% on blind pairwise judging at equal length — the
+            // enrichment lane is one-time and quality-first, so the win
+            // compounds into every future retrieval
+            reasoning_effort: abMode ? effort : "high",
           });
           const raw = typeof res?.response === "string" && res.response.trim()
             ? res.response

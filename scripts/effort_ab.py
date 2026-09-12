@@ -65,7 +65,7 @@ def enrich_pair(admin: httpx.Client, chunk: dict) -> dict | None:
     return out
 
 
-def judge_pair(cf, chunk: dict, low: str, high: str) -> str:
+def judge_pair(admin: httpx.Client, chunk: dict, low: str, high: str) -> str:
     import random as _r
 
     # blind the order so position bias cannot favor a lane
@@ -76,18 +76,16 @@ def judge_pair(cf, chunk: dict, low: str, high: str) -> str:
         f"Chunk text:\n{chunk['text'][:1500]}\n\n"
         f"Candidate A:\n{ca}\n\nCandidate B:\n{cb}"
     )
+    # the judge rides the deployed binding lane: the REST ai/run token
+    # 401-flakes on this account, the worker binding does not
     body = {
-        "messages": [
-            {"role": "system", "content": JUDGE_PROMPT.strip()},
-            {"role": "user", "content": user},
-        ],
-        "max_tokens": 4096,
+        "mode": "ab", "effort": "low", "prompt": JUDGE_PROMPT.strip(), "user_text": user,
+        "chunks": [{"id": "judge", "text": "x", "metadata": {"corpus": "synthetic", "doc_id": "judge"}}],
     }
-    r = cf._post(f"https://api.cloudflare.com/client/v4/accounts/{_ACCOUNT}/ai/run/{JUDGE_MODEL}", body)
-    text = ""
-    result = r.get("result", r)
-    if isinstance(result, dict):
-        text = result.get("response") or (result.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    r = admin.post("/admin/enrich", json=body)
+    r.raise_for_status()
+    res = (r.json().get("results") or [{}])[0]
+    text = res.get("context") or ""
     line = text.strip().splitlines()[0].strip() if text.strip() else "TIE — no answer"
     first = line.split("—")[0].strip().upper()
     if first == "A":
@@ -105,7 +103,7 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
-    from ingest.cf import ACCOUNT_ID, CF  # noqa: PLC0415
+    from ingest.cf import ACCOUNT_ID  # noqa: PLC0415,F401 — kept for parity with other tools
 
     _ACCOUNT = ACCOUNT_ID
     OUT.mkdir(parents=True, exist_ok=True)
@@ -113,40 +111,60 @@ def main() -> int:
     admin = httpx.Client(
         base_url=BASE,
         headers={"Authorization": f"Bearer {token}", "user-agent": "oiml-effort-ab/1.0"},
-        timeout=httpx.Timeout(180.0),
+        timeout=httpx.Timeout(420.0),  # high-effort generation on v4-pro can exceed 3 minutes
     )
 
-    chunks = [
-        json.loads(l) for l in (ARTIFACTS / "chunks.jsonl").open(encoding="utf-8")
-        if (json.loads(l)["metadata"].get("corpus") or "") != "synthetic"
-    ]
+    results = []
+    chunks = []
+    for line in (ARTIFACTS / "chunks.jsonl").open(encoding="utf-8"):
+        d = json.loads(line)
+        if (d["metadata"].get("corpus") or "") != "synthetic":
+            chunks.append(d)
     random.seed(args.seed)
     sample = random.sample(chunks, args.n)
 
-    results = []
-    for i, c in enumerate(sample):
-        pair = None
-        for attempt in range(3):
-            pair = enrich_pair(admin, c)
-            if pair:
-                break
-            time.sleep(3 * (attempt + 1))
-        if not pair:
-            continue
-        row = {"id": c["id"], "locator": f"{c['metadata'].get('docidentifier', '')} §{c['metadata'].get('clause_anchor', '')}", **pair}
-        results.append(row)
-        if (i + 1) % 20 == 0:
-            print(f"  enriched {i + 1}/{args.n}", flush=True)
-    (OUT / "results.jsonl").write_text("\n".join(json.dumps(r) for r in results) + "\n", encoding="utf-8")
+    # incremental and resumable: each completed pair is appended, and a
+    # rerun skips ids already compared (a timeout mid-run must not lose
+    # the hour of generation it already paid for)
+    results_path = OUT / "results.jsonl"
+    done: set[str] = set()
+    if results_path.exists():
+        for line in results_path.open(encoding="utf-8"):
+            results_path_line = json.loads(line)
+            results.append(results_path_line)
+            done.add(results_path_line["id"])
+    with results_path.open("a", encoding="utf-8") as sink:
+        for i, c in enumerate(sample):
+            if c["id"] in done:
+                continue
+            pair = None
+            for attempt in range(3):
+                try:
+                    pair = enrich_pair(admin, c)
+                except Exception as e:  # noqa: BLE001 — transport flake: ladder, then give up on the chunk
+                    print(f"  enrich transport error at {c['id']}: {type(e).__name__}", flush=True)
+                    pair = None
+                if pair:
+                    break
+                time.sleep(5 * (attempt + 1))
+            if not pair:
+                continue
+            row = {"id": c["id"], "locator": f"{c['metadata'].get('docidentifier', '')} §{c['metadata'].get('clause_anchor', '')}", **pair}
+            results.append(row)
+            done.add(row["id"])
+            sink.write(json.dumps(row) + "\n")
+            sink.flush()
+            if len(done) % 20 == 0:
+                print(f"  enriched {len(done)}/{args.n}", flush=True)
     print(f"pairs: {len(results)}")
 
-    cf = CF()
     judged = random.sample(results, min(args.judge_n, len(results)))
+    sample_by_id = {c["id"]: c for c in sample}
     wins = {"low": 0, "high": 0, "tie": 0}
     for i, r in enumerate(judged):
         for attempt in range(4):
             try:
-                wins[judge_pair(cf, next(c for c in sample if c["id"] == r["id"]), r["low"], r["high"])] += 1
+                wins[judge_pair(admin, sample_by_id.get(r["id"], {"metadata": {}, "text": ""}), r["low"], r["high"])] += 1
                 break
             except Exception as e:  # noqa: BLE001
                 if attempt == 3:
@@ -164,7 +182,7 @@ def main() -> int:
         f"- LOW wins: {wins['low']} ({wins['low'] * 100 // n}%) · HIGH wins: {wins['high']} ({wins['high'] * 100 // n}%) · ties: {wins['tie']} ({wins['tie'] * 100 // n}%)",
         f"- mean preamble length — low: {sum(len(r['low']) for r in results) // max(1, len(results))} chars · high: {sum(len(r['high']) for r in results) // max(1, len(results))} chars",
         "",
-        "Judge lane: " + JUDGE_MODEL + " (blind order). Generation lane: /admin/enrich mode:ab (no side effects).",
+        "Judge lane: " + JUDGE_MODEL + " via the worker binding (blind order). Generation lane: /admin/enrich mode:ab (no side effects).",
     ]
     (OUT / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines))
