@@ -31,6 +31,13 @@ export async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request
   // endpoint's upsert side effect). Default mode stays the production
   // enrichment flow (context + embed + upsert in place).
   const contextOnly = body?.mode === "context";
+  // mode:"ab" (the enrichment effort experiment): generate WITHOUT any
+  // side effect — no KV cache read or write, no embed, no upsert — with
+  // an explicit effort. The A/B compares low vs high effort on identical
+  // chunks; polluting the production context cache would decide the
+  // experiment before the judge does.
+  const abMode = body?.mode === "ab";
+  const effort = body?.effort === "high" ? "high" : "low";
   const model = typeof env.ENRICH_MODEL === "string" && env.ENRICH_MODEL ? env.ENRICH_MODEL : MODELS.enrich;
 
   const usage = { prompt_tokens: 0, completion_tokens: 0, requests: 0, cache_hits: 0 };
@@ -39,7 +46,7 @@ export async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request
       if (!c?.id || typeof c?.text !== "string" || !c?.metadata) return { id: c?.id ?? null, ok: false, error: "invalid chunk" };
       try {
         const cacheKey = `e:${c.id}`;
-        let context = force ? null : await env.CACHE.get(cacheKey);
+        let context = force || abMode ? null : await env.CACHE.get(cacheKey);
         const cached = !!context;
         if (!context) {
           const m = c.metadata;
@@ -50,7 +57,7 @@ export async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request
               { role: "user", content: `${head}\n\n${c.text.slice(0, 1500)}` },
             ],
             max_tokens: 1600,
-            reasoning_effort: "low",
+            reasoning_effort: abMode ? effort : "low",
           });
           const raw = typeof res?.response === "string" && res.response.trim()
             ? res.response
@@ -65,7 +72,7 @@ export async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request
             usage.completion_tokens += Number(res.usage.completion_tokens ?? 0);
           }
           usage.requests += 1;
-          ctx.waitUntil(env.CACHE.put(cacheKey, context, { expirationTtl: 2_592_000 }));
+          if (!abMode) ctx.waitUntil(env.CACHE.put(cacheKey, context, { expirationTtl: 2_592_000 }));
         } else {
           usage.cache_hits += 1;
         }
