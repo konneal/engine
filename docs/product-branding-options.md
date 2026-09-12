@@ -1,10 +1,13 @@
 # Product and branding options for the standards-intelligence engine
 
-> Status: decision framing (2026-09-12). The question: should the
-> multi-SDO RAG/Metanorma/Primmel pipeline come to market as a new
-> high-level product, a Metanorma product, or a Primmel product? This
-> document gives each route a one-page positioning frame, compares them,
-> and states a recommendation with the criteria that would change it.
+> Status: DECIDED (2026-09-12) — Option 1, a new high-level product.
+> This document records the positioning frame for each route that was
+> considered, the comparison, and the recommendation that was adopted.
+> Follow-through: a naming sprint with trademark screening (internal
+> candidate: Anneal, from the project's published methodology); the
+> suite co-marketing frame ("authored in Metanorma, modeled in Primmel,
+> served by <brand>"); the deployment naming pattern "[SDO] Answers,
+> powered by <brand>".
 
 ## The suite frame (applies to every option)
 
