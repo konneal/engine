@@ -355,6 +355,18 @@ async function unitAssetRoute(c: RouteContext): Promise<Response> {
   return new Response(obj.body, { headers: { "content-type": types[m[2]] ?? "application/octet-stream", "cache-control": "public, max-age=31536000, immutable", ...corsHeaders(c.req) } });
 }
 
+// rendered publication documents (metanorma-mirror layer 1/2): the
+// clean corpus's own HTML renderings under docs/<slug>.{html,anchors.json},
+// immutable — a citation becomes a door into the original document
+async function docsRoute(c: RouteContext): Promise<Response> {
+  const m = c.path.match(/^\/docs\/([a-z0-9-]+)\.(html|anchors\.json)$/);
+  if (!m) return err(404, "not_found", "Unknown document");
+  const obj = await c.env.UNIT_ASSETS.get(`docs/${m[1]}.${m[2]}`);
+  if (!obj) return new Response("not found", { status: 404 });
+  const type = m[2] === "html" ? "text/html; charset=utf-8" : "application/json; charset=utf-8";
+  return new Response(obj.body, { headers: { "content-type": type, "cache-control": "public, max-age=31536000, immutable", ...corsHeaders(c.req) } });
+}
+
 async function researchRoute(c: RouteContext): Promise<Response> {
   // member-only: a valid RAG session cookie is required (research spend stays with humans)
   const session = c.env.SESSION_SECRET ? await sessionFrom(c.req, c.env as any) : null;
@@ -401,6 +413,7 @@ export const ROUTES: Route[] = [
   { method: "POST", pattern: "/admin/vectors", handler: (c) => handleVectors(c.env, c.req) },
   { method: "POST", pattern: "/admin/caption", handler: (c) => handleCaption(c.env, c.req) },
   { method: "GET", pattern: "/assets/*", handler: unitAssetRoute },
+  { method: "GET", pattern: "/docs/*", handler: docsRoute },
   { method: "POST", pattern: "/api/research", handler: researchRoute },
   { method: "POST", pattern: "/v1/research", handler: researchRoute },
   { method: "POST", pattern: "/admin/judge", handler: (c) => handleJudge(c.env, c.req) },
