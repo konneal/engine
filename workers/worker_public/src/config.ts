@@ -144,6 +144,16 @@ export function answerEffort(env: any): string {
  *  The vocabulary is validated; elevated efforts (medium+) are a member
  *  lane — same cost rule as research — and degrade to the deployment
  *  lever for anonymous or silent requests. */
+/** Elevated effort reasons longer — the output budget must grow with it
+ *  or reasoning starves the content (the GLM-5 rule; measured
+ *  2026-09-12: medium at the flat 3072 budget scored 5/38 on the golden
+ *  set — empty answers — versus 37–38/38 at low). */
+export function effortBudget(effort: string): number {
+  if (effort === "medium") return LIMITS.maxOutputTokens * 2;
+  if (effort === "high" || effort === "max") return LIMITS.maxOutputTokens * 4;
+  return LIMITS.maxOutputTokens;
+}
+
 export function requestEffort(env: any, session: unknown, requested: unknown): string {
   if (typeof requested !== "string" || !EFFORTS.has(requested)) return answerEffort(env);
   if (requested === "low") return requested;

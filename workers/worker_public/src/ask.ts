@@ -3,7 +3,7 @@
 // echo — everything between "request validated" and "response written".
 // index.ts routes here; this module owns the answer contract.
 
-import { LIMITS, MODELS, num, sha256Hex, roleModel, answerEffort, requestEffort } from "./config";
+import { LIMITS, MODELS, num, sha256Hex, roleModel, answerEffort, requestEffort, effortBudget } from "./config";
 import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, REFUSAL_ANSWER, Hit } from "./pipeline";
 import { sessionFrom } from "./auth";
 import { retrieveInternal } from "./internal_gateway";
@@ -121,7 +121,7 @@ async function generateStream(env: Env, model: string, messages: any[], effort?:
       const res: any = await env.AI.run(model, {
         messages,
         stream: true,
-        max_tokens: LIMITS.maxOutputTokens,
+        max_tokens: effortBudget(effort ?? answerEffort(env)),
         reasoning_effort: effort ?? answerEffort(env),
         temperature: 0.6,
         top_p: 0.95,
