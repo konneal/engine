@@ -1,6 +1,5 @@
 node_modules/
 .wrangler/
-dist/
 .venv/
 __pycache__/
 *.pyc
@@ -10,6 +9,4 @@ artifacts/
 .DS_Store
 
 .astro/
-dist/
-dist-types/
 dist-types/

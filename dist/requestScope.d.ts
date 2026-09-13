@@ -1,0 +1,24 @@
+export interface RequestScope {
+    /** dataset ids the request may search */
+    scopeIds: string[];
+    /** corpus values the scope maps to (for the corpus-scope stage) */
+    corpora: Set<string>;
+    /** true when the scope is narrower than the session default — the
+     *  stage only runs when narrowed (the default costs nothing) */
+    narrowed: boolean;
+    /** ISO federation on? (gates the internal binding) */
+    isoOn: boolean;
+    /** raw (validated) memory ids from the body — empty for anon */
+    memoryIds: string[];
+}
+/** Validate + intersect. Returns { error } when the request explicitly
+ *  disables every dataset (a user error, not a scope). */
+export declare function resolveRequestScope(body: any, member: unknown): RequestScope | {
+    error: "empty-datasets";
+};
+/** The answer-cache salt: request-scoped context that materially changes
+ *  the answer (dataset scope, memory selection). Requests differing only
+ *  in salt share query text — an unsalted key would serve a scoped (or
+ *  memory-flavored) answer to a plain ask. Null = default scope, no
+ *  memory: keys stay byte-identical to the pre-salt era. */
+export declare function requestSalt(scope: RequestScope, memoryUsed: string[]): string | null;

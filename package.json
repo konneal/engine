@@ -40,8 +40,8 @@
       "default": "./dist/index.js"
     },
     "./setProfile": {
-      "types": "./dist/setProfile.d.ts",
-      "default": "./dist/setProfile.js"
+      "types": "./dist/profile.d.ts",
+      "default": "./dist/profile.js"
     },
     "./config": {
       "types": "./dist/config.d.ts",

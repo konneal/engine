@@ -1,0 +1,290 @@
+// workers/worker_public/src/profile.gen.ts
+var PROFILE = {
+  "publisher": {
+    "id": "fixture",
+    "name": "Fixture",
+    "full_name": "The Fixture Publisher",
+    "product_name": "Fixture Answers",
+    "description": "A minimal publisher profile exercising every declared surface: an open dataset, a permission-gated dataset, production and lane corpora, prompt vars and retrieval vocabulary.",
+    "domains": {
+      "public": "fixture.example.org"
+    },
+    "identity": {
+      "issuer": "https://id.fixture.example.org"
+    },
+    "codec": "plain-slug"
+  },
+  "datasets": [
+    {
+      "id": "pub",
+      "label": "Fixture Publications",
+      "description": "The fixture publisher's corpus",
+      "note": "Some passages come from the fixture corpus \u2014 cite them the same way as every other passage."
+    },
+    {
+      "id": "internal",
+      "label": "Internal corpus",
+      "description": "An access-restricted corpus proving the permission gate",
+      "session": true,
+      "permission": "preview"
+    }
+  ],
+  "corpora": {
+    "production": [
+      "pub",
+      "dirty",
+      "clean",
+      "synthetic",
+      "model"
+    ],
+    "lanes": {
+      "exp_a": [
+        "exp_a"
+      ],
+      "exp_b": [
+        "exp_b"
+      ],
+      "glossary": [
+        "glossary"
+      ]
+    }
+  },
+  "sources": {
+    "corpora": {
+      "clean": {
+        "repo": "fixtures/corpus",
+        "note": "the engine's fixture corpus"
+      }
+    },
+    "bibliography": {},
+    "terminology": {},
+    "models": {}
+  },
+  "ui": {
+    "suggestions": [
+      "What is in the fixture corpus?",
+      "Which documents does the fixture publisher issue?"
+    ],
+    "models_disclosure": [
+      {
+        "role": "Answers",
+        "model": "fixture-answer-model"
+      }
+    ],
+    "smoke": [
+      {
+        "label": "sanity",
+        "query": "What is in the fixture corpus?",
+        "expect": "fixture"
+      }
+    ]
+  },
+  "retrieval": {
+    "process_expansion": " fixture certification system framework application evaluation"
+  },
+  "prompts": {
+    "vars": {
+      "assistant_identity": "the fixture assistant \u2014 a public service answering questions about the fixture publisher's documents",
+      "refusal_sentence": "I don't have information on this in the indexed fixture documents."
+    }
+  }
+};
+
+// workers/worker_public/src/profile.ts
+var current = PROFILE;
+function P() {
+  return current;
+}
+
+// workers/worker_public/src/config.ts
+var MODELS = {
+  embed: "@cf/qwen/qwen3-embedding-0.6b",
+  rerank: "@cf/baai/bge-reranker-base",
+  // ANSWER MODEL (all tiers, user decision 2026-08-29): glm-5.3-flash —
+  // natively multimodal (vision-unified contract), GLM family, flash tier.
+  // Vision image-parts land with answer contract v2; text answers work now.
+  anon: "@cf/zai-org/glm-5.3-flash",
+  member: "@cf/zai-org/glm-5.3-flash",
+  // hot-path understanding/summarize stays on the cheap Qwen (cost-first lane)
+  understand: "@cf/qwen/qwen3-30b-a3b-fp8",
+  // generation fallback when the answer model is unavailable
+  fallback: "@cf/qwen/qwen3-30b-a3b-fp8",
+  grader: "@cf/deepseek-ai/deepseek-v4-flash-0731",
+  // CRAG grader + judges (unsuffixed slug was retired → silent 5018s)
+  // contextual enrichment is the QUALITY-FIRST lane (one-time spend over
+  // the corpus, its quality persists into every future retrieval)
+  enrich: "@cf/deepseek-ai/deepseek-v4-pro-0813",
+  // final-tier listwise reranker for hard/member queries (cascade:
+  // cross-encoder prunes, listwise orders jointly)
+  listwise: "@cf/zai-org/glm-4.7-flash",
+  // deep-research loop (G10): bounded agentic iterations, members-only
+  research: "@cf/zai-org/glm-5.3-flash"
+};
+var LIMITS = {
+  // input sizes: generous — real questions can be long (pasted scenarios,
+  // multi-part asks). The context BUDGET is the real governor of what the
+  // model sees; these caps only bound abuse.
+  maxInputChars: 8e3,
+  maxOutputTokens: 3072,
+  // qwen3-30b-a3b always reasons; 768 starved the answer entirely
+  retrieveK: 50,
+  // Vectorize caps topK at 50 when returnMetadata=all
+  rerankKeep: 10,
+  // 8 crowded out dirty-lane goldens once 3k enriched MKO clean chunks entered the pool
+  cacheTtlSec: 6 * 3600,
+  // context-window budget (estimated tokens) for the assembled prompt —
+  // system + summary + history slice + passages must fit or the model
+  // request fails. 16k is conservative for the qwen3 tier (pre-budget
+  // traffic at ~12k+ never hit a length error); raise via INPUT_TOKEN_BUDGET
+  // after watching logs for length rejections
+  inputTokenBudget: 16e3,
+  maxPassageTokens: 900
+  // per-passage cap (clause chunks with tables can be huge)
+};
+var THRESHOLDS = {
+  /** HyDE candidate score discount — hypothetical-answer vectors match
+   *  differently than question vectors; 0.7 keeps them competitive
+   *  without letting a bad hypothetical outrank the real query. */
+  hydeDiscount: 0.7,
+  /** Graph-lane candidate discount — graph-filtered chunks enter the
+   *  pool below the primary dense lane; they must earn their window
+   *  slot under the cross-encoder, not by graph membership alone. */
+  graphLaneDiscount: 0.75,
+  /** Concept-graph candidate discount — same rationale as the graph
+   *  lane: definitional content enters discounted. */
+  conceptGraphDiscount: 0.75,
+  /** Multi-hop sub-query discount — sub-question hits are unioned, not
+   *  RRF-fused; the discount keeps them from dominating the primary
+   *  ranking on their first appearance. */
+  subQueryDiscount: 0.8,
+  /** Federated-ISO discount — the public corpus answers by default;
+   *  internal ISO passages compete but don't preempt. */
+  federateDiscount: 0.95,
+  /** Standard-reference nudge (L5): when the question asks about an
+   *  invoked ISO/IEC standard, chunks that CARRY such a citation (their
+   *  text contains an ISO/IEC identifier) get a spread-scaled boost —
+   *  the citing clause is the answer, and generic family prose otherwise
+   *  fills the window (measured: l5a-iso-humidity flips ~1/6 runs). */
+  stdRefNudgeSpread: 0.35,
+  /** Edition cover — the score multiplier for current-edition chunks the
+   *  cover stage fetches when a pool holds ONLY stale editions of a
+   *  document. Just under the top: the point is REPRESENTATION (so
+   *  edition steering can demote the stale siblings and diversity keeps
+   *  the current overview), not free ranking. */
+  editionCoverDiscount: 0.9,
+  /** Overview-chunk demotion — overview chunks repeat title/doctype
+   *  boilerplate and embed strongly for name-like queries, crowding
+   *  clause chunks out of the rerank window. */
+  overviewDemotion: 0.85,
+  /** Glossary-link cosine floor — below this the dense match to a
+   *  defined term is noise, not a candidate. Calibrated on the
+   *  drifting→durability probe (durability-def 0.542, noise ~0.3). */
+  glossaryCosineFloor: 0.5,
+  /** Exact-term nudge (spread multiplier) — clause chunks whose head IS
+   *  the asked-for term get a decisive nudge because publication headers
+   *  contain the title words and the reranker alone is unreliable there;
+   *  >1 so it dominates the spread, unlike the additive steering boosts. */
+  termNudgeSpread: 1.5,
+  /** Concept-steering rerank boost (spread fraction) — the vocabulary
+   *  link's defining families get the edition-steering boost idiom.
+   *  0.15 is enough to lift in-family content past the cross-encoder's
+   *  vocabulary bias without overriding genuine relevance. */
+  conceptSteerSpread: 0.15,
+  /** Cross-publication recency boost (spread fraction) — a
+   *  current-edition publication ranks over stale ones; composed with
+   *  the family-relative demotion below. */
+  crossPubRecencySpread: 0.1,
+  /** Family-relative edition demotion (spread fraction) — superseded
+   *  editions are demoted when a newer edition of the same publication
+   *  is in the pool; a sibling one revision back still competes. */
+  familyDemoteSpread: 0.4,
+  /** Relevance-floored window — passages below this fraction of the
+   *  top rerank score leave the window (the evidence-budget principle;
+   *  structural units are exempt). */
+  windowFloorFraction: 0.25,
+  /** Small-to-big parent fetch discount — the parent clause enters at
+   *  a discount because it's supplementary grounding, not the answer. */
+  smallToBigDiscount: 0.7,
+  /** Section-descent child discount — children fetched from a ranked
+   *  depth-1 summary enter discounted. */
+  sectionDescentDiscount: 0.8,
+  /** History budget share — the fraction of the context budget the
+   *  conversation slice may consume; older turns overflow into the
+   *  compacted summary instead of starving the passages. */
+  historyBudgetShare: 0.3
+};
+function processExpansion() {
+  return P().retrieval.process_expansion;
+}
+function roleModel(env, role) {
+  const ov = env[`${role.toUpperCase()}_MODEL`];
+  return typeof ov === "string" && ov.startsWith("@cf/") ? ov : MODELS[role];
+}
+var EFFORTS = /* @__PURE__ */ new Set(["low", "medium", "high", "max"]);
+function answerEffort(env) {
+  const v = env?.ANSWER_EFFORT;
+  return typeof v === "string" && EFFORTS.has(v) ? v : "low";
+}
+function effortBudget(effort) {
+  if (effort === "medium") return LIMITS.maxOutputTokens * 2;
+  if (effort === "high" || effort === "max") return LIMITS.maxOutputTokens * 4;
+  return LIMITS.maxOutputTokens;
+}
+function requestEffort(env, session, requested) {
+  if (typeof requested !== "string" || !EFFORTS.has(requested)) return answerEffort(env);
+  if (requested === "low") return requested;
+  return session ? requested : answerEffort(env);
+}
+function DATASETS() {
+  return P().datasets;
+}
+function hasPermission(session, code) {
+  const roles = session?.roles;
+  return Array.isArray(roles) && roles.map(String).includes(code);
+}
+function datasetAllowed(d, session) {
+  if (!d.session) return true;
+  if (!session) return false;
+  return hasPermission(session, d.permission ?? "ai-preview");
+}
+function datasetsFor(session) {
+  return DATASETS().map((d) => ({
+    id: d.id,
+    label: d.label,
+    description: d.description,
+    enabled: datasetAllowed(d, session),
+    ...d.session ? { requires: `the ${d.permission ?? "ai-preview"} permission (id.oimlsmart.org)`, authenticated: !!session } : {}
+  }));
+}
+function SUGGESTIONS() {
+  return [...P().ui.suggestions];
+}
+function num(env, key, fallback) {
+  const v = Number(env[key]);
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+}
+function today() {
+  return (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+}
+async function sha256Hex(s) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+export {
+  DATASETS,
+  LIMITS,
+  MODELS,
+  SUGGESTIONS,
+  THRESHOLDS,
+  answerEffort,
+  datasetAllowed,
+  datasetsFor,
+  effortBudget,
+  hasPermission,
+  num,
+  processExpansion,
+  requestEffort,
+  roleModel,
+  sha256Hex,
+  today
+};
