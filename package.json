@@ -2,15 +2,12 @@
   "name": "oiml-rag",
   "private": true,
   "workspaces": [
-    "workers/*",
-    "site"
+    "workers/*"
   ],
   "scripts": {
     "typecheck": "tsc -p workers/worker_public",
     "deploy:public": "npm run deploy -w workers/worker_public",
     "dev:public": "npm run dev -w workers/worker_public",
-    "site:build": "npm run build -w site",
-    "site:dev": "npm run dev -w site",
     "deploy": "./scripts/deploy.sh",
     "test:golden": "node scripts/eval.mjs",
     "test:e2e": "node tests/e2e.mjs",

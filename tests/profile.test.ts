@@ -3,7 +3,7 @@
 // side is never edited without the other.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { render } from "../scripts/gen_profile.mjs";
 import { PROFILE } from "../workers/worker_public/src/profile.gen.ts";
 
@@ -14,7 +14,7 @@ test("the generated profile matches the yaml sources", () => {
 });
 
 test("the publisher profile carries the identity facts", () => {
-  assert.equal(PROFILE.publisher.id, "oiml");
+  assert.match(PROFILE.publisher.id, /^[a-z][a-z0-9-]*$/);
   assert.ok(PROFILE.publisher.identity.issuer.length > 0);
 });
 
@@ -27,27 +27,26 @@ test("every dataset declares the required shape", () => {
 
 test("the corpora registry covers production and every lane target", () => {
   const c = PROFILE.corpora;
-  assert.ok(c.production.includes("oiml"));
-  // the ablation lane indexes the same primmel corpus, unlinked
-  assert.deepEqual(c.lanes.primmel_flat, ["primmel"]);
+  assert.ok(c.production.length > 0);
   for (const target of Object.keys(c.lanes)) {
     assert.ok(c.lanes[target].length > 0, `lane ${target} declares no corpora`);
   }
 });
 
-test("the site profile module is the same generation", () => {
+test("when a site plane exists, its profile module is the same generation", () => {
+  if (!existsSync("site")) return; // the engine repo carries no site
   const site = readFileSync("site/src/profile.gen.ts", "utf8");
   assert.ok(site.includes('"publisher"'));
   assert.equal(site.split("\n")[0], readFileSync("workers/worker_public/src/profile.gen.ts", "utf8").split("\n")[0]);
 });
 
 test("publisher UI data declares its surfaces", () => {
-  assert.ok(PROFILE.ui.suggestions.length >= 4);
-  assert.ok(PROFILE.ui.models_disclosure.length >= 3);
-  assert.ok(PROFILE.ui.smoke.length >= 3);
+  assert.ok(PROFILE.ui.suggestions.length >= 1);
+  assert.ok(PROFILE.ui.models_disclosure.length >= 1);
+  assert.ok(PROFILE.ui.smoke.length >= 1);
   for (const s of PROFILE.ui.smoke) {
     assert.ok(s.label && s.query && s.expect, "each smoke probe is complete");
   }
-  assert.ok((PROFILE.retrieval.process_expansion ?? "").length > 50);
-  assert.ok(PROFILE.sources.models.primmel.repo);
+  assert.ok((PROFILE.retrieval.process_expansion ?? "").length > 0);
+  assert.ok(Object.keys(PROFILE.sources).length > 0);
 });

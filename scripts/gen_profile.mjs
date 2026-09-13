@@ -2,7 +2,7 @@
 // modules (workers + site). The generated files are committed; the drift
 // test (tests/profile.test.ts) fails CI when someone edits one side
 // without regenerating — the same discipline as the estate's gen:data.
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import YAML from "yaml";
 
 const HEADER =
@@ -24,6 +24,7 @@ const render = (profileDir = "profile") => {
 
 if (process.argv[1].endsWith("gen_profile.mjs") && !process.env.PROFILE_RENDER_ONLY) {
   for (const out of ["workers/worker_public/src/profile.gen.ts", "site/src/profile.gen.ts"]) {
+    if (out.startsWith("site/") && !existsSync("site")) continue; // engine repo: no site plane
     writeFileSync(out, render());
     console.log(`generated ${out}`);
   }
