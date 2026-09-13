@@ -36,3 +36,16 @@ export interface Env {
         fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
     };
 }
+import type { ModelRunner } from "./ports/model.ts";
+import type { VectorIndex } from "./ports/vector.ts";
+import type { Kv } from "./ports/kv.ts";
+import type { Blobs } from "./ports/blobs.ts";
+import type { Runtime } from "./ports/runtime.ts";
+export declare function portModelRunner(env: Env): ModelRunner;
+export declare function portIndex(env: Env, which?: "public" | "primmel" | "composed" | "plain" | "adoc" | "mko" | "pflat" | "glossary"): VectorIndex;
+export declare function portKv(env: Env): Kv;
+export declare function portBlobs(env: Env): Blobs;
+/** Does the deployment bind this lane index? Presence wiring stays in
+ *  the ports layer so domain stages never touch raw bindings. */
+export declare function hasLane(env: Env, which: "glossary"): boolean;
+export declare function portRuntime(ctx: ExecutionContext | undefined): Runtime;

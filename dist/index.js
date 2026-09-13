@@ -28,80 +28,24 @@ import {
 } from "./chunk-MB74PTRM.js";
 
 // workers/worker_public/src/ai.ts
-var embedShapeOrder = null;
-var EMBED_SHAPES = {
-  // "text" first: the verified request shape for qwen3-embedding-0.6b —
-  // every wrong-shape attempt also burns AI rate budget.
-  text: (t) => ({ text: [t] }),
-  "input.input": (t) => ({ input: { input: [t] } }),
-  array: (t) => ({ input: [t] })
-};
-function extractVec(res) {
-  const r = res;
-  const d = r?.data ?? r?.result?.data;
-  if (Array.isArray(d)) {
-    const first = d[0];
-    if (Array.isArray(first)) return first.map(Number);
-    if (first && Array.isArray(first.embedding)) return first.embedding.map(Number);
-  }
-  if (Array.isArray(r?.embedding)) return r.embedding.map(Number);
-  return null;
-}
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
-async function embed(ai, model, text) {
-  const names = embedShapeOrder ?? Object.keys(EMBED_SHAPES);
-  for (const name of names) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const res = await ai.run(model, EMBED_SHAPES[name](text));
-        const vec = extractVec(res);
-        if (vec && vec.length > 0) {
-          embedShapeOrder = [name, ...names.filter((n) => n !== name)];
-          return vec;
-        }
-      } catch {
-      }
-      if (attempt < 2) await delay(250 * (attempt + 1));
+async function embed(ai, _model, text) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const vecs = await ai.embed([text]);
+      if (vecs?.[0]?.length) return vecs[0];
+    } catch {
     }
+    if (attempt < 2) await delay(250 * (attempt + 1));
   }
-  throw new Error(`embedding failed for all request shapes (${model})`);
+  return [];
 }
 async function rerank(ai, model, query, texts) {
-  const shapes = [
-    { query, contexts: texts.map((t) => ({ text: t })) },
-    { query, contexts: texts },
-    { query, candidates: texts.map((t, i) => ({ id: String(i), text: t })) },
-    { query, passages: texts }
-  ];
-  let lastErr = null;
-  for (const body of shapes) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const res = await ai.run(model, body);
-        const raw = res?.data ?? res?.result?.data ?? res?.response;
-        if (!Array.isArray(raw)) {
-          lastErr = new Error(`rerank shape returned ${typeof raw}`);
-          break;
-        }
-        const scores = new Array(texts.length).fill(NaN);
-        raw.forEach((x, i) => {
-          if (typeof x === "number") {
-            scores[i] = x;
-            return;
-          }
-          const rawId = x?.id;
-          const id = Number.isInteger(rawId) ? rawId : /^\d+$/.test(String(rawId ?? "")) ? Number(rawId) : i;
-          const n = Number(x?.score ?? x?.relevance_score ?? NaN);
-          if (id >= 0 && id < scores.length) scores[id] = n;
-        });
-        if (scores.some((s) => Number.isFinite(s))) return scores;
-        lastErr = new Error("rerank scores unparseable");
-      } catch (e) {
-        lastErr = e;
-      }
-    }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const scores = await ai.rerank(model, query, texts);
+    if (scores && scores.some((s) => Number.isFinite(s))) return scores;
   }
-  console.error("rerank failed, using vector order:", String(lastErr));
+  console.error("rerank failed, using vector order");
   return null;
 }
 async function generateOnce(env, model, messages, effort) {
@@ -494,18 +438,117 @@ var hyde = {
   }
 };
 
+// workers/worker_public/src/ports/cloudflare/adapters.ts
+var by20 = (xs) => {
+  const out = [];
+  for (let i = 0; i < xs.length; i += 20) out.push(xs.slice(i, i + 20));
+  return out;
+};
+var RERANK_SHAPES = (query, texts) => [
+  { query, contexts: texts.map((t) => ({ text: t })) },
+  { query, contexts: texts },
+  { query, candidates: texts.map((t, i) => ({ id: String(i), text: t })) },
+  { query, passages: texts }
+];
+function cfModelRunner(ai) {
+  const A = ai;
+  return {
+    async embed(texts) {
+      const res = await A.run("@cf/qwen/qwen3-embedding-0.6b", { text: texts });
+      const shape = res?.data ?? res?.shape ?? res;
+      return Array.isArray(shape) ? shape : shape?.data ?? [];
+    },
+    async rerank(model, query, texts) {
+      for (const body of RERANK_SHAPES(query, texts)) {
+        try {
+          const res = await A.run(model, body);
+          const raw = res?.data ?? res?.result?.data ?? res?.response;
+          if (!Array.isArray(raw)) continue;
+          const scores = new Array(texts.length).fill(NaN);
+          raw.forEach((x, i) => {
+            if (typeof x === "number") {
+              scores[i] = x;
+              return;
+            }
+            const id = Number(x?.id ?? x?.index ?? i);
+            const s = Number(x?.score ?? x?.relevance_score);
+            if (Number.isInteger(id) && id >= 0 && id < texts.length && Number.isFinite(s)) scores[id] = s;
+          });
+          if (scores.some((s) => Number.isFinite(s))) return scores;
+        } catch {
+        }
+      }
+      return null;
+    },
+    async run(req) {
+      const res = await ai.run(req.model, {
+        messages: req.messages,
+        max_tokens: req.maxTokens,
+        ...req.effort ? { reasoning_effort: req.effort } : {},
+        ...req.temperature != null ? { temperature: req.temperature } : {},
+        ...req.topP != null ? { top_p: req.topP } : {},
+        ...req.topK != null ? { top_k: req.topK } : {},
+        ...req.stream ? { stream: true } : {}
+      });
+      if (req.stream && res && typeof res.getReader === "function") return { text: null, stream: res };
+      if (req.stream && res?.body && typeof res.body.getReader === "function") return { text: null, stream: res.body };
+      const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+      return { text: typeof text === "string" ? text : null };
+    }
+  };
+}
+function cfVectorIndex(index) {
+  const ix = index;
+  return {
+    async query(q) {
+      const r = await ix.query(q.vector, {
+        topK: q.topK,
+        returnMetadata: "all",
+        ...q.filter ? { filter: q.filter } : {}
+      });
+      return (r.matches ?? r).map((m) => ({ id: m.id, score: m.score, metadata: m.metadata ?? null }));
+    },
+    async upsert(vectors) {
+      for (const group of by20(vectors)) await ix.upsert(group);
+    },
+    async getByIds(ids) {
+      const out = [];
+      for (const group of by20(ids)) {
+        const got = await ix.getByIds(group);
+        out.push(...(got ?? []).map((m) => ({ id: m.id, score: 0, metadata: m.metadata ?? null })));
+      }
+      return out;
+    }
+  };
+}
+
+// workers/worker_public/src/env.ts
+function portModelRunner(env) {
+  return cfModelRunner(env.AI);
+}
+function portIndex(env, which = "public") {
+  const b = which === "public" ? env.VECTORIZE : which === "primmel" ? env.EXP_PRIMMEL : which === "composed" ? env.EXP_COMPOSED : which === "plain" ? env.EXP_PLAIN : which === "adoc" ? env.EXP_ADC : which === "mko" ? env.EXP_MKO : which === "pflat" ? env.EXP_PFLAT : env.GLOSSARY;
+  return cfVectorIndex(b);
+}
+function hasLane(env, which) {
+  switch (which) {
+    case "glossary":
+      return !!env.GLOSSARY;
+  }
+}
+
 // workers/worker_public/src/stages/glossary.ts
 var glossary = {
   name: "glossary",
   failure: "additive",
-  when: (c) => !!c.env.GLOSSARY && c.vector.length > 0,
+  when: (c) => hasLane(c.env, "glossary") && c.vector.length > 0,
   prefetch: (c) => {
     c.lane.glossary = (async () => {
-      const g = await c.env.GLOSSARY.query(c.vector, { topK: 5, returnMetadata: "all" });
-      const cands = (g.matches ?? []).filter((m) => m.score >= THRESHOLDS.glossaryCosineFloor);
+      const g = await portIndex(c.env, "glossary").query({ vector: c.vector, topK: 5 });
+      const cands = g.filter((m) => m.score >= THRESHOLDS.glossaryCosineFloor);
       if (!cands.length) return [];
       const texts = cands.map((m) => String(m.metadata?.chunk_text ?? ""));
-      const rs = await rerank(c.env.AI, MODELS.rerank, c.query, texts);
+      const rs = await rerank(portModelRunner(c.env), MODELS.rerank, c.query, texts);
       return cands.map((m, i) => ({
         term: String(m.metadata?.clause_title ?? "").trim(),
         definition: String(m.metadata?.chunk_text ?? "").split(" \u2014 ").slice(1).join(" \u2014 ").slice(0, 300),
@@ -860,7 +903,7 @@ var rerankStage = {
   when: (c) => c.hits.length > 1,
   run: async (c) => {
     const tRerank = Date.now();
-    const scores = await rerank(c.env.AI, MODELS.rerank, c.query, c.hits.map((h) => h.text));
+    const scores = await rerank(portModelRunner(c.env), MODELS.rerank, c.query, c.hits.map((h) => h.text));
     console.log("stage: rerank", Date.now() - tRerank, "ms over", c.hits.length, "candidates");
     if (scores) {
       c.hits.forEach((h, i) => h.rerank_score = scores[i]);
@@ -2670,8 +2713,8 @@ async function understandQuery(ai, model, query, history, entities = []) {
   const ATTEMPT_TIMEOUTS = [1e4, 5e3];
   for (let attempt = 0; attempt < ATTEMPT_TIMEOUTS.length; attempt++) {
     const call = (async () => {
-      const res = await ai.run(model, body);
-      const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+      const res = await ai.run({ model, messages: body.messages, effort: body.reasoning_effort, maxTokens: body.max_tokens, temperature: body.temperature, topP: body.top_p, topK: body.top_k });
+      const text = res?.text ?? null;
       return typeof text === "string" ? extractJson(text) : null;
     })();
     const timeout = new Promise((r) => setTimeout(() => r(null), ATTEMPT_TIMEOUTS[attempt]));
@@ -2961,7 +3004,7 @@ async function handleSearch(env, ctx, req, tier, key) {
   if (!quota.ok) {
     return err(429, "quota_exceeded", `Daily search limit reached (${quota.limit}). Try again tomorrow.`);
   }
-  const understanding = await understandQuery(env.AI, MODELS.understand, q.query, []);
+  const understanding = await understandQuery(portModelRunner(env), MODELS.understand, q.query, []);
   const graphDocNumbers = await graphExpand(env, understanding);
   let retrieved;
   try {
@@ -3385,7 +3428,7 @@ async function handleResearch(env, ctx, req, session) {
   const maxIters = Math.min(Math.max(Number(body?.max_iterations) || 3, 1), 3);
   const started = Date.now();
   const queryHash = await sha256Hex(q.query);
-  const understanding = await understandQuery(env.AI, MODELS.understand, q.query, [], []);
+  const understanding = await understandQuery(portModelRunner(env), MODELS.understand, q.query, [], []);
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);
   const accumulated = /* @__PURE__ */ new Map();
@@ -3582,7 +3625,7 @@ async function resolveBlocks(db, refs) {
     const placeholders = batch.map((_, n) => `?${n + 1}`).join(",");
     try {
       const res = await db.prepare(`SELECT unit_id, type, docidentifier, edition, payload FROM unit_payloads WHERE unit_id IN (${placeholders})`).bind(...batch).all();
-      for (const r of res.results ?? []) {
+      for (const r of res.results) {
         let payload = {};
         try {
           payload = JSON.parse(String(r.payload));
@@ -4408,7 +4451,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   let optimisticHits = [];
   const t0 = Date.now();
   if (!cached) {
-    const understandingP = understandQuery(env.AI, roleModel(env, "understand"), q.query, history, convEntities);
+    const understandingP = understandQuery(portModelRunner(env), roleModel(env, "understand"), q.query, history, convEntities);
     try {
       optimisticVec = await warmEmbed ?? null;
       if (optimisticVec) {

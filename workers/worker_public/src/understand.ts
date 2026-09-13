@@ -1,3 +1,4 @@
+import type { ModelRunner } from "./ports/model.ts";
 import { extractJson, type QueryUnderstanding } from "./understandContract.ts";
 export type { QueryUnderstanding };
 
@@ -12,7 +13,7 @@ import SYSTEM from "../prompts/understanding.md";
 
 /** Understand the query with the cheap model. Null = use the regex fallback. */
 export async function understandQuery(
-  ai: any,
+  ai: ModelRunner,
   model: string,
   query: string,
   history: Array<{ role: string; content: string }>,
@@ -51,8 +52,8 @@ export async function understandQuery(
   const ATTEMPT_TIMEOUTS = [10000, 5000];
   for (let attempt = 0; attempt < ATTEMPT_TIMEOUTS.length; attempt++) {
     const call = (async () => {
-      const res: any = await ai.run(model, body);
-      const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+      const res = await ai.run({ model, messages: (body as any).messages, effort: (body as any).reasoning_effort, maxTokens: (body as any).max_tokens, temperature: (body as any).temperature, topP: (body as any).top_p, topK: (body as any).top_k });
+      const text = res?.text ?? null;
       return typeof text === "string" ? extractJson(text) : null;
     })();
     const timeout = new Promise<null>((r) => setTimeout(() => r(null), ATTEMPT_TIMEOUTS[attempt]));

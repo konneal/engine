@@ -12,11 +12,12 @@
 //     final text (tokenized or not) resolves from D1
 //
 // Additive throughout: any failure returns what it has.
+import type { StoreQuery } from "./ports/store.ts";
 import { resolveBlocks, type ResolvedBlock } from "./refs.ts";
 import type { Hit } from "./pipeline.ts";
 
 export async function completeTables(
-  db: D1Database,
+  db: StoreQuery,
   answer: string,
   used: Hit[],
 ): Promise<ResolvedBlock[]> {
@@ -54,7 +55,7 @@ export async function completeTables(
 }
 
 export async function completeFigures(
-  db: D1Database,
+  db: StoreQuery,
   answer: string,
   alreadyAttached: ResolvedBlock[],
 ): Promise<ResolvedBlock[]> {

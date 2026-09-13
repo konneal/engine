@@ -1,3 +1,4 @@
+import type { StoreQuery } from "./ports/store.ts";
 export interface ResolvedBlock {
     unit_id: string;
     type: string;
@@ -22,9 +23,9 @@ export declare function sanitizeRefs(text: string, available: ReadonlySet<string
 /** Resolve validated refs to producer payloads from D1 (unit_payloads).
  *  Unknown-to-D1 ids are skipped — a ref without a payload renders as a
  *  plain token, never as fabricated data. */
-export declare function resolveBlocks(db: D1Database, refs: string[]): Promise<ResolvedBlock[]>;
+export declare function resolveBlocks(db: StoreQuery, refs: string[]): Promise<ResolvedBlock[]>;
 /** One pass: validate + resolve + strip invalid tokens. */
-export declare function contractV2(db: D1Database, answer: string, usedHits: ReadonlyArray<{
+export declare function contractV2(db: StoreQuery, answer: string, usedHits: ReadonlyArray<{
     metadata: {
         unit_id?: string | undefined;
     };

@@ -1,5 +1,7 @@
 // Passage search: retrieval without generation (TODO.impl/23).
 import { LIMITS, MODELS, num, sha256Hex } from "./config";
+import { portModelRunner } from "./env.ts";
+import type { Background } from "./ports/runtime.ts";
 import { retrieve } from "./pipeline";
 import { understandQuery } from "./understand";
 import { sessionFrom } from "./auth";
@@ -11,7 +13,7 @@ import type { Hit } from "../../shared/chunk.ts";
 
 export async function handleSearch(
   env: Env,
-  ctx: ExecutionContext,
+  ctx: Background,
   req: Request,
   tier: "anon" | "key" | "member",
   key: ApiKey | null,
@@ -28,7 +30,7 @@ export async function handleSearch(
     return err(429, "quota_exceeded", `Daily search limit reached (${quota.limit}). Try again tomorrow.`);
   }
 
-  const understanding = await understandQuery(env.AI, MODELS.understand, q.query, []);
+  const understanding = await understandQuery(portModelRunner(env), MODELS.understand, q.query, []);
   const graphDocNumbers = await graphExpand(env, understanding);
   let retrieved;
   try {
