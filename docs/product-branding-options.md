@@ -1,13 +1,23 @@
 # Product and branding options for the standards-intelligence engine
 
 > Status: DECIDED (2026-09-12) — Option 1, a new high-level product.
-> This document records the positioning frame for each route that was
-> considered, the comparison, and the recommendation that was adopted.
-> Follow-through: a naming sprint with trademark screening (internal
-> candidate: Anneal, from the project's published methodology); the
-> suite co-marketing frame ("authored in Metanorma, modeled in Primmel,
-> served by <brand>"); the deployment naming pattern "[SDO] Answers,
-> powered by <brand>".
+> **The name is Konneal** (decided 2026-09-13; the GitHub org and the
+> domains are secured). The name decodes on three levels, all of them
+> the product's own: K = knowledge (K-onneal is knowledge annealment,
+> the methodology this system invented and published); anneal stays
+> fully legible inside the spelling, so the name carries the story in
+> one step; and konne(ction) — the SDO connects to its members,
+> questions connect to clauses, citations connect answers to the
+> original document. Web collision scan found no company, product or
+> brand using either Konneal or Konnea; formal trademark screening
+> (classes 9/42, target jurisdictions) remains the one professional
+> step before public marketing.
+>
+> Suite frame: *authored in Metanorma, modeled in Primmel, served by
+> Konneal.* Deployments stay white-labeled per SDO — "[SDO] Answers,
+> powered by Konneal" — as OIML SMART AI presents today. When the
+> engine is extracted (migration step 5), it lands in the Konneal org;
+> this repository becomes publisher-oiml, the reference profile.
 
 ## The suite frame (applies to every option)
 
