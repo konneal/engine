@@ -11,16 +11,20 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function embed(ai: ModelRunner, _model: string, text: string): Promise<number[]> {
   // the adapter owns the request shape; two attempts cover transient
   // capacity errors shared with the ingest lane
+  let lastError: unknown = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const vecs = await ai.embed([text]);
       if (vecs?.[0]?.length) return vecs[0];
-    } catch {
-      // retry
+      lastError = new Error("adapter returned no vector");
+    } catch (e) {
+      lastError = e;
     }
     if (attempt < 2) await delay(250 * (attempt + 1));
   }
-  return [];
+  // never return an empty vector — the index rejects it with an opaque
+  // 40006; a throw surfaces the real failure through the caller's catch
+  throw new Error(`embed failed after retries: ${String(lastError)}`);
 }
 
 import { answerEffort, effortBudget } from "./config.ts";
