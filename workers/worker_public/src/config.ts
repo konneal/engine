@@ -1,4 +1,4 @@
-import { MODEL_CORPUS_NOTE } from "./modelplane.ts";
+import { PROFILE } from "./profile.gen.ts";
 
 export const MODELS = {
   embed: "@cf/qwen/qwen3-embedding-0.6b",  rerank: "@cf/baai/bge-reranker-base",
@@ -179,27 +179,9 @@ export interface Dataset {
   note?: string;
 }
 
-export const DATASETS: Dataset[] = [
-  {
-    id: "oiml",
-    label: "OIML Publications",
-    description: "Recommendations, Documents, Basic publications, Guides",
-  },
-  {
-    id: "smart-model",
-    label: "OIML SMART Models",
-    description: "The machine-readable Recommendation models (requirements' constraints, applicability rules, acceptance criteria, tests, terms) — derived from the Primmel packages",
-    note: MODEL_CORPUS_NOTE,
-  },
-  {
-    id: "iso",
-    label: "ISO/IEC Conformity Assessment",
-    description: "ISO/IEC 17xxx standards — federated with OIML results for members",
-    session: true,
-    permission: "ai-preview",
-    note: "Some passages come from the internal ISO/IEC corpus (labeled ISO/IEC …) — use them alongside the OIML passages and cite them the same way.",
-  },
-];
+// The catalog is publisher data (profile/datasets.yaml, codegen into
+// profile.gen.ts) — the engine ships no publisher facts
+export const DATASETS: readonly Dataset[] = PROFILE.datasets;
 
 /** The estate permission gate: a session-gated dataset requires BOTH
  *  membership and the named permission (a role code the account carries

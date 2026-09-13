@@ -31,17 +31,22 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path as _Path
 from typing import Literal
 
+import yaml as _yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-# ── the corpus registry (SSOT) ─────────────────────────────────────────
-# production corpora are legal in idx_oiml_public_v2; lane corpora only
-# in their comparison index. smart-model is the model-plane projection.
-PRODUCTION_CORPORA = frozenset({"oiml", "dirty", "clean", "synthetic", "smart-model"})
-LANE_CORPORA = frozenset({"exp_plain", "exp_adoc", "exp_mko", "primmel", "primmel_flat", "exp_composed"})
+# ── the corpus registry ────────────────────────────────────────────────
+# Declared in profile/corpora.yaml (the publisher profile — the single
+# place a publisher's facts live; the TS wire schema reads the same file
+# through profile.gen.ts). Production corpora are legal in the
+# production index; lane corpora only in their comparison index.
+_REGISTRY = _yaml.safe_load((_Path(__file__).resolve().parents[1] / "profile" / "corpora.yaml").read_text())
+PRODUCTION_CORPORA = frozenset(_REGISTRY["production"])
+LANE_CORPORA = frozenset(k for k in _REGISTRY["lanes"] if k != "glossary")
 # the vocabulary lane: serving-side (the L2 nomenclature bridge), its own index
-SERVING_LANE_CORPORA = frozenset({"glossary"})
+SERVING_LANE_CORPORA = frozenset({"glossary"}) & frozenset(k for k in _REGISTRY["lanes"])
 
 MAX_META_BYTES = 9_000  # Vectorize hard limit is 10KB per vector metadata
 MAX_TEXT_CHARS = 2_800  # the 40016 lesson (2026-08-31): cap chunk_text
@@ -56,15 +61,7 @@ Target = Literal["production", "exp_plain", "exp_adoc", "exp_mko", "primmel", "p
 # which corpora may an index hold — the structural incident guard
 TARGET_CORPORA: dict[str, frozenset[str]] = {
     "production": PRODUCTION_CORPORA,
-    "exp_plain": frozenset({"exp_plain"}),
-    "exp_adoc": frozenset({"exp_adoc"}),
-    "exp_mko": frozenset({"exp_mko"}),
-    "primmel": frozenset({"primmel"}),
-    # the ablation lane indexes the SAME primmel corpus, unlinked
-    "primmel_flat": frozenset({"primmel"}),
-    "exp_composed": frozenset({"exp_composed"}),
-    # the vocabulary lane (L2 nomenclature bridge)
-    "glossary": frozenset({"glossary"}),
+    **{target: frozenset(corpora) for target, corpora in _REGISTRY["lanes"].items()},
 }
 
 

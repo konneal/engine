@@ -130,9 +130,14 @@ The ecosystem was multi-SDO before this system was:
   (engine CI runs the reference profiles' suites against fixture
   corpora).
 
+> Migration status: **step 1 shipped** (2026-09-12) — `profile/` exists,
+> datasets and corpora registries are consumed from it by both the
+> TypeScript and Python sides, with a drift test. See
+> TODO.impl/70-profile-extraction.md for the board.
+
 ## 7. Migration path (incremental, no rewrite)
 
-1. **Profile extraction, no behavior change.** Move the OIML-specific
+1. **Profile extraction, no behavior change.** *(done)* Move the OIML-specific
    tables (`DATASETS`, corpus registries, prompt voice variables) into
    `profile/` in this repository, consumed at build time. The OIML
    deployment becomes the first profile; every test stays green because
