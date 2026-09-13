@@ -27,6 +27,7 @@ import type { PipelineContext, RetrieveOptions, GlossaryEntry } from "./stages/t
 // import surface keeps working
 export type { ChunkMeta, Hit } from "../../shared/chunk";
 import type { ChunkMeta, Hit } from "../../shared/chunk";
+import { portModelRunner } from "./env.ts";
 
 export interface Retrieved {
   hits: Hit[];
@@ -99,8 +100,8 @@ export async function retrieve(
     rq === folded && opts.optimisticVec
       ? Promise.resolve(opts.optimisticVec)
       : rq === folded && opts.warmEmbed
-        ? opts.warmEmbed.then((w) => w ?? embed(env.AI, MODELS.embed, rq))
-        : embed(env.AI, MODELS.embed, rq);
+        ? opts.warmEmbed.then((w) => w ?? embed(portModelRunner(env), MODELS.embed, rq))
+        : embed(portModelRunner(env), MODELS.embed, rq);
   const lexicalP = lexicalPrefilter(env, rq).catch(() => [] as Hit[]);
   const [vector, lexicalHits0] = await Promise.all([vectorP, lexicalP]);
   // The declared context's seal binds the lexical lane at the SOURCE: the

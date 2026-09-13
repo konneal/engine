@@ -11,6 +11,7 @@ import relevancyPrompt from "../prompts/relevancy.md";
 import precisionPrompt from "../prompts/precision.md";
 import { scoreFaithfulness } from "./faithfulness";
 import { scoreJudge } from "./grader";
+import { portModelRunner } from "./env.ts";
 
 /** Contextual enrichment (quality-first lane): for each chunk, write a
  *  situating context (KV-cached per chunk id), embed context+text, and
@@ -87,7 +88,7 @@ export async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request
         if (contextOnly) return { id: c.id, ok: true, cached, context };
         const original = typeof c.metadata.chunk_text === "string" && c.metadata.chunk_text ? c.metadata.chunk_text : c.text;
         const enriched = `${context}\n\n${original}`;
-        const vector = await embed(env.AI, MODELS.embed, enriched.slice(0, 6000));
+        const vector = await embed(portModelRunner(env), MODELS.embed, enriched.slice(0, 6000));
         await env.VECTORIZE.upsert([{ id: c.id, values: vector, metadata: { ...c.metadata, chunk_text: enriched, ctx: "1" } }]);
         return { id: c.id, ok: true, cached, context };
       } catch (e: any) {
@@ -167,7 +168,7 @@ export async function handleSectionUnit(env: Env, ctx: ExecutionContext, req: Re
         const childAnchors = u.children.map((c: any) => c.anchor).filter(Boolean).join(",");
         const text = `§${m.clause_anchor}${m.clause_title ? " " + m.clause_title : ""} — ${summary}\nCovers: ${childAnchors}`;
         const vectorText = `${m.docidentifier ?? m.doc_id} §${m.clause_anchor} ${text}`.slice(0, 2000);
-        const vector = await embed(env.AI, MODELS.embed, vectorText);
+        const vector = await embed(portModelRunner(env), MODELS.embed, vectorText);
         await env.VECTORIZE.upsert([
           { id: u.id, values: vector, metadata: { ...m, chunk_text: text, section_summary: "1", child_anchors: childAnchors, ctx: "1" } },
         ]);
@@ -291,7 +292,7 @@ export async function handleVectors(env: Env, req: Request): Promise<Response> {
       if (!texts.length) return err(400, "invalid_input", "texts: 1-16 required");
       const vectors: number[][] = [];
       for (const t of texts) {
-        const v = await embed(env.AI, MODELS.embed, t.slice(0, 6000));
+        const v = await embed(portModelRunner(env), MODELS.embed, t.slice(0, 6000));
         vectors.push(v);
       }
       return json({ vectors });
