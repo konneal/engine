@@ -1,10 +1,16 @@
 # The Konneal extraction plan — packages, phases, end-state
 
-> Status: PLAN v2 (2026-09-13) — presented for approval before
-> implementation. v2 deepens three guarantees the extraction must make
-> for the reference deployment: the Metanorma/Primmel content build
-> stays first-class (§2.1), the interface is genuinely custom-able (§2.2),
-> and the Cloudflare deployment topology stays the publisher's (§2.3). Extends docs/multi-sdo-architecture.md §7 (whose
+> Status: PLAN v3 (2026-09-13) — the boundary is redrawn: **Konneal is
+> the backend** — the build pipeline and the API plane — and nothing
+> else. The user plane (interface, site shell, articles, branding)
+> belongs wholly to the publisher. The shareable surface between them
+> is the documented API plus one small package: `@konneal/client`, the
+> API types, the streaming client and the contract-bound renderers
+> (typed blocks, citations, the in-context document pane). v3 keeps the
+> v2 guarantees — content build first-class (§2.1), real customization
+> (§2.2, now by ownership rather than theming), publisher-owned
+> Cloudflare topology (§2.3) — and simplifies the extraction
+> accordingly. Extends docs/multi-sdo-architecture.md §7 (whose
 > step 1, the profile extraction, is shipped) into the full package
 > topology and the phased extraction. The discipline is the one this
 > codebase already keeps: every phase lands with zero behavior change,
@@ -36,9 +42,9 @@ konneal/engine                      (the monorepo — one version train)
 ├── packages/engine-workers/       @konneal/engine      (npm)
 │     routes table, ask pipeline, stages, verdict engine, absence,
 │     verify, research, auth relying-party, quota, admin ops
-├── packages/ui/                   @konneal/ui          (npm)
-│     the Astro+Vue site template: chat app, article/MDX system,
-│     DocPane, sidebar, annealment panel (data fed from the profile)
+├── packages/client/               @konneal/client      (npm)
+│     the API types, the SSE client, and the contract-bound
+│     renderers (typed blocks, citations, the document pane)
 ├── packages/profile-schema/       @konneal/profile     (npm)
 │     the profile schema, codegen, drift guard
 ├── ingest/                        konneal-ingest       (PyPI)
@@ -63,8 +69,10 @@ oimlsmart/ai                        becomes publisher-oiml (reference)
 │                   prompts.yaml (voice vars + rare overrides),
 │                   codec: oiml-pubid
 ├── theme/          logo, colors, fonts, nav labels
-├── site/           the OIML articles (MDX) + branding/layout overrides;
-│                   the chat app and shells come from @konneal/ui
+├── site/           the ENTIRE user plane, unchanged: the chat app,
+│                   the articles (MDX), the annealment panel, branding,
+│                   the site shell — consuming @konneal/client for the
+│                   contract components
 ├── deploy/         wrangler.toml(s) — bindings, vars, INDEX_VERSION —
 │                   and the thin deploy wrapper
 ├── whitepaper/     OIML's academic artifact (content, stays)
@@ -102,34 +110,47 @@ index version, so a deployment never serves an index built by an
 ingest version its serving engine cannot read — the freshness
 mechanism extended from content drift to engine drift.
 
-### 2.2 The custom interface (three layers, not two)
+### 2.2 The interface (owned by the publisher, served by contract)
 
-`@konneal/ui` is a template with real extension points, because a
-publisher's site is never only theming:
+The publisher owns the entire user plane: the chat application, the
+article pages, the site shell of their choosing, the branding, the
+annealment panel, the whitepaper surface. Nothing about their frontend
+waits on an engine release, and nothing about the engine carries their
+taste. OIML's site stays exactly where it is, in the deployment
+repository, including the site-shell dependency it already uses.
 
-1. **Theme** — logo, colors, fonts, nav labels from `theme/`.
-2. **Data-fed components** — the datasets sidebar already reads the
-   API; the annealment panel, the composer suggestions and the
-   disclosed model policy all become profile-fed (they are publisher
-   content), so they update with the profile, not the engine.
-3. **Shadowing and extension** — the deployment's
-   `site/src/overrides/` shadows any component by name (resolution
-   order puts the deployment first), and new pages, components and
-   MDX articles are added freely. OIML's articles, whitepaper page and
-   any bespoke surface live entirely in the deployment repo.
+Two things cross the boundary, and only two:
 
-The worker side is extensible the same way, because OIML has real
-custom logic: the application-draft acts are an OIML-CS concept. The
-entry composes rather than configures:
+1. **The documented API** (spec-api.md): ask and search, absence and
+   verification, research, sessions, projects and memory files,
+   datasets, auth, administration, and the MCP servers. The UI already
+   speaks it over HTTP and server-sent events, and the UI test suite
+   already runs against stubbed APIs — the seam exists and is proven.
+   The memory and project features are backend features: the engine
+   owns the D1 schema and CRUD; the publisher's frontend renders them.
+2. **`@konneal/client`** — a small npm package extracted from the
+   current site: the API types, the streaming client, and the
+   contract-bound renderers (formula/table/figure/verdict blocks,
+   citation chips, the in-context document pane). Renderers of the
+   answer contract ship with the contract, so block rendering cannot
+   fork and drift from the wire types; pages, layout and everything
+   else stay publisher code consuming them.
+
+For the second SDO, the Konneal org ships a **forkable UI starter** —
+`konneal/ui-starter`, seeded from OIML's site at extraction and kept
+as a template to copy, not a dependency to pin. Fork-not-depend is the
+honest model for frontends.
+
+Backend customization still composes, because publisher logic is not
+only frontend: the OIML-CS application-draft acts are ask-path
+behavior. The worker entry stays composable —
 
 ```ts
 createWorker({ profile, hooks: { acts: oimlDraftActs }, extraRoutes })
 ```
 
-Custom routes reuse the engine's handlers and auth; the draft-act
-branch moves out of the engine's ask path into the deployment's hook.
-Publisher prompt voice already travels with datasets; the hook is the
-same doctrine for publisher behavior.
+— with custom routes reusing the engine's handlers and auth, and the
+draft-act branch moving out of the engine's ask path into OIML's hook.
 
 ### 2.3 The Cloudflare topology (bindings are the publisher's facts)
 
@@ -205,10 +226,20 @@ the full promotion gate runs against production before the flip is
 declared done. Nothing about the deployment's operations changes —
 same wrangler, same bindings, same deploy flow.
 
-**Phase D — the ecosystem**: `create-publisher` scaffolding, the
-reference matrix in engine CI (this profile as fixture #1, a second
-fixture from another Metanorma flavor), the product site build in
+**Phase D — the ecosystem**: the forkable `konneal/ui-starter` seeded
+from OIML's site, `create-publisher` scaffolding, the reference matrix
+in engine CI (this profile as fixture #1, a second fixture from
+another Metanorma flavor), the product site build in
 `konneal.github.io`, and the public flip of the repos at launch.
+
+The backend-only boundary shrinks the extraction itself: Phase B moves
+the workers, ingest, harness and docs — never the site; the client
+package is extracted from the site in Phase C, with the site's
+remaining local copies deleted behind a one-release deprecation so the
+flip is a lockfile change, not a rewrite. The UI test suite stays in
+the deployment repo (it tests the deployment's frontend); the engine's
+CI tests the API plane, which the golden and annealment runners
+already exercise over HTTP.
 
 ## 5. Invariants that make each phase safe
 
@@ -225,8 +256,12 @@ fixture from another Metanorma flavor), the product site build in
 - **Workers-from-npm ergonomics**: standard wrangler bundling; verified
   in phase B before the flip, with the current repo as fallback the
   whole time.
-- **UI↔API shape drift**: eliminated by construction — the UI ships in
-  the engine's monorepo, versioned with the workers.
+- **Contract-renderer drift**: eliminated where it matters — the
+  block renderers ship in `@konneal/client` with the types; the
+  publisher's pages cannot fork the contract even though they own the
+  frontend. The residual risk is an SDO ignoring the client package in
+  a bespoke frontend; the API docs and the MCP surface keep the wire
+  honest regardless.
 - **History preservation**: filter-repo per subtree; the reference
   READMEs cross-link so the archaeology stays reachable from both
   repos.
