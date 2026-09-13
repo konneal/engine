@@ -10,7 +10,7 @@ const BASE = process.env.BASE_URL ?? "https://ai.oimlsmart.org";
 const N = Number(process.argv[2] ?? 5);
 const want = (process.argv[3] ?? "tbl-r76-mpe-class3,def-loadcell,refuse-cooking").split(",");
 
-const table = JSON.parse(readFileSync("tests/golden/table-cases.json", "utf8"));
+const table = JSON.parse(readFileSync(`${process.env.KO_EVAL_DIR ?? "profile/evals"}/table-cases.json`, "utf8"));
 const probes = [
   { id: "doc-r60", query: "What is OIML R 60?", expect: { answer_any: ["load cell"] } },
   { id: "def-loadcell", query: "what is a load cell", expect: { answer_any: ["transducteur|transducer|force"] } },

@@ -1,4 +1,4 @@
-// Golden-set eval: the promotion gate. Runs tests/golden/cases.json
+// Golden-set eval: the promotion gate. Runs the publisher's suite (profile/evals/cases.json; KO_EVAL_DIR overrides)
 // against the live service and writes artifacts/eval-report.json.
 // Exit 0 when the pass rate clears the threshold (default 0.9).
 //
@@ -42,7 +42,7 @@ if (!KEY) {
   process.exit(2);
 }
 
-const cases = JSON.parse(readFileSync(new URL("../tests/golden/cases.json", import.meta.url), "utf8"));
+const cases = JSON.parse(readFileSync(new URL(`../${process.env.KO_EVAL_DIR ?? "profile/evals"}/cases.json`, import.meta.url), "utf8"));
 
 async function runCase(c) {
   const checks = [];

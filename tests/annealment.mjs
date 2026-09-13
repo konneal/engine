@@ -10,7 +10,8 @@ const args = process.argv.slice(2);
 const rungFilter = args.includes("--rung") ? args[args.indexOf("--rung") + 1] : null;
 const lane = args.includes("--lane") ? args[args.indexOf("--lane") + 1] : null;
 
-const cases = JSON.parse(readFileSync("tests/golden/annealment.json", "utf8"))
+const EVALS = process.env.KO_EVAL_DIR ?? "profile/evals"
+const cases = JSON.parse(readFileSync(`${EVALS}/annealment.json`, "utf8"))
   .filter((c) => !rungFilter || c.rung === rungFilter)
   .filter((c) => !lane || c.lanes.includes(lane));
 
@@ -81,7 +82,7 @@ for (const [r, v] of Object.entries(byRung)) console.log(`  ${r}: ${v.pass}/${v.
 // runs every case on every lane (E/F were tagged after the set froze).
 if (laneXIdx >= 0) {
   const laneKey = args[laneXIdx + 1];
-  const all = JSON.parse(readFileSync("tests/golden/annealment.json", "utf8"));
+  const all = JSON.parse(readFileSync(`${EVALS}/annealment.json`, "utf8"));
   let lp = 0;
   const byRungLane = {};
   for (const c of all) {
