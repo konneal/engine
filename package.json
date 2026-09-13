@@ -1,5 +1,5 @@
 {
-  "name": "oiml-rag",
+  "name": "@konneal/engine",
   "private": true,
   "workspaces": [
     "workers/*"
@@ -24,5 +24,21 @@
   "dependencies": {
     "@astrojs/markdown-satteri": "^0.4.1",
     "@astrojs/mdx": "^4.3.14"
-  }
+  },
+  "version": "0.1.0",
+  "description": "The Konneal engine: the publisher-agnostic build pipeline and API plane for standards intelligence (retrieval, answer contract, verdicts, evaluation).",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./workers/worker_public/src/index.ts",
+  "exports": {
+    ".": "./workers/worker_public/src/index.ts",
+    "./setProfile": "./workers/worker_public/src/profile.ts"
+  },
+  "files": [
+    "workers",
+    "docs",
+    "profile",
+    "scripts/gen_profile.mjs",
+    "README.md"
+  ]
 }

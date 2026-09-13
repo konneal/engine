@@ -4,7 +4,7 @@
 // index.ts routes here; this module owns the answer contract.
 
 import { LIMITS, MODELS, num, sha256Hex, roleModel, answerEffort, requestEffort, effortBudget } from "./config";
-import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, REFUSAL_ANSWER, Hit } from "./pipeline";
+import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, refusalAnswer, Hit } from "./pipeline";
 import { sessionFrom } from "./auth";
 import { retrieveInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
@@ -747,7 +747,7 @@ async function handleAsk(
   }
   const { hits } = retrieved;
   if (hits.length === 0 && !liveRecords?.length && !boundModel) {
-    const answer = REFUSAL_ANSWER;
+    const answer = refusalAnswer();
     const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
     telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang);
     return json({ ...out, quota, });
@@ -830,7 +830,7 @@ async function handleAsk(
           }
           const canonical0 = canonicalRefusal(full);
           // answer contract v2: validate [[u:]] refs, resolve typed blocks
-          const c2 = canonical0.includes(REFUSAL_ANSWER)
+          const c2 = canonical0.includes(refusalAnswer())
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
             : await contractV2(env.DB, canonical0, usedHits);
           send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: verdictBlock ? [...c2.blocks, verdictBlock] : c2.blocks, context_applied: ctxApplied });
@@ -844,7 +844,7 @@ async function handleAsk(
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified — not caching");
           }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(REFUSAL_ANSWER)) {
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(refusalAnswer())) {
             const wv = (await warmEmbed) ?? null;
             if (wv) semanticCachePut(env, ctx, gen, wv, salt, { answer: canonical, citations: cites, model, query_hash: queryHash });
             ctx.waitUntil(
@@ -893,7 +893,7 @@ async function handleAsk(
   // the passages or a typed table was retyped as markdown; the retry
   // wins only if it verifies better.
   let used = usedHits;
-  if (answer && !answer.includes(REFUSAL_ANSWER)) {
+  if (answer && !answer.includes(refusalAnswer())) {
     const anchors = checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
     const hasTableUnit = used.some((h: Hit) => h.metadata.unit_id && h.metadata.block === "table");
     const retyped = tableRetyped(answer, hasTableUnit);
@@ -947,7 +947,7 @@ async function handleAsk(
   // The model critiques its own answer; if claims are ungrounded, retry
   // retrieval with the missing-info hint (max one retry).
   // Ref: selfrag.github.io; arXiv 2606.05658 bounded reflection
-  if (answer && !answer.includes(REFUSAL_ANSWER)) {
+  if (answer && !answer.includes(refusalAnswer())) {
     const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h: Hit) => h.text));
     console.log("reflection:", reflection ? (reflection.grounded ? "grounded" : "ungrounded") : "null");
     if (reflection && !reflection.grounded && reflection.missing_info) {
@@ -977,11 +977,11 @@ async function handleAsk(
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
   const finalCites = boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used);
-  const c2ns = answer.includes(REFUSAL_ANSWER)
+  const c2ns = answer.includes(refusalAnswer())
     ? { text: answer, blocks: [] as Awaited<ReturnType<typeof contractV2>>["blocks"], dropped: [] as string[] }
     : await contractV2(env.DB, answer, used);
   answer = c2ns.text;
-  const finalAnchors = answer.includes(REFUSAL_ANSWER)
+  const finalAnchors = answer.includes(refusalAnswer())
     ? { total: 0, violations: [] as string[] }
     : checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
   if (finalAnchors.violations.length > 0) {
@@ -995,7 +995,7 @@ async function handleAsk(
   // fallback) but contractV2 then dropped the reference because the unit
   // wasn't in the used passages — leaving no block and no token.
   let completionBlocks: Awaited<ReturnType<typeof completeTables>> = [];
-  if (!answer.includes(REFUSAL_ANSWER) && !c2ns.blocks.some((b: any) => b.type === "table")) {
+  if (!answer.includes(refusalAnswer()) && !c2ns.blocks.some((b: any) => b.type === "table")) {
     completionBlocks = await completeTables(env.DB, answer, used);
     if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
   }
@@ -1004,7 +1004,7 @@ async function handleAsk(
   completionBlocks.push(...(await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks])));
 
   const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
-  const cacheable = !contextual && !declaredCtx && !answer.includes(REFUSAL_ANSWER) && finalAnchors.violations.length === 0;
+  const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) semanticCachePut(env, ctx, gen, warmVec, salt, out);

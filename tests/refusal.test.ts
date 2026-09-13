@@ -4,7 +4,8 @@
 // stripping, no build step): node --test tests/refusal.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canonicalRefusal, REFUSAL_ANSWER } from "../workers/worker_public/src/refusal.ts";
+import { canonicalRefusal, refusalAnswer } from "../workers/worker_public/src/refusal.ts";
+const REFUSAL_ANSWER = refusalAnswer(); // the fixture profile's sentence
 
 test("the pinned sentence passes through untouched", () => {
   assert.equal(canonicalRefusal(REFUSAL_ANSWER), REFUSAL_ANSWER);

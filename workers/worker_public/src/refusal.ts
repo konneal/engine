@@ -1,8 +1,10 @@
-import { PROFILE } from "./profile.gen.ts";
+import { P } from "./profile.ts";
 /** The one sanctioned refusal sentence (also in prompts/system.md).
  *  Refusals are never cached: a refusal says "retrieval found nothing",
  *  which is a property of the moment, not of the question. */
-export const REFUSAL_ANSWER: string = PROFILE.prompts.vars.refusal_sentence;
+export function refusalAnswer(): string {
+  return P().prompts.vars.refusal_sentence;
+}
 
 // the model occasionally paraphrases the refusal sentence ("...information
 // on how to make lasagna in the indexed..."); the API contract is the
@@ -50,13 +52,14 @@ function sentenceEnd(answer: string, i: number): number {
  *  included) for the pinned one — the redirect tail survives. An answer
  *  outside the refusal family is returned byte-identical. */
 export function canonicalRefusal(answer: string): string {
-  if (answer.includes(REFUSAL_ANSWER)) return answer;
+  const CANON = refusalAnswer();
+  if (answer.includes(CANON)) return answer;
   const variant = answer.match(REFUSAL_VARIANT);
-  if (variant) return answer.replace(variant[0], REFUSAL_ANSWER);
+  if (variant) return answer.replace(variant[0], CANON);
   for (const drift of REFUSAL_DRIFT) {
     const m = drift.exec(answer);
     if (!m) continue;
-    return answer.slice(0, sentenceStart(answer, m.index)) + REFUSAL_ANSWER + answer.slice(sentenceEnd(answer, m.index));
+    return answer.slice(0, sentenceStart(answer, m.index)) + CANON + answer.slice(sentenceEnd(answer, m.index));
   }
   return answer;
 }

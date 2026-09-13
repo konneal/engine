@@ -1,6 +1,6 @@
 import { embed } from "./ai";
-import { PROFILE } from "./profile.gen.ts";
-import { LIMITS, MODELS, DATASETS, THRESHOLDS } from "./config";
+import { P } from "./profile.ts";
+import { LIMITS, MODELS, DATASETS, THRESHOLDS, processExpansion } from "./config";
 import systemPromptText from "../prompts/system.md";
 import conversationalPromptText from "../prompts/conversational.md";
 import listwisePromptText from "../prompts/listwise.md";
@@ -10,7 +10,7 @@ import { tableContext } from "./tablecontext";
 // (refusals are never cached: a refusal says "retrieval found nothing",
 // which is a property of the moment, not of the question); re-exported
 // here so the existing import surface keeps working
-export { REFUSAL_ANSWER } from "./refusal";
+export { refusalAnswer } from "./refusal";
 
 /** Fill {{TOKEN}} placeholders in a prompt data file. Unknown/empty tokens
  *  resolve to "" so optional lines vanish cleanly. */
@@ -88,7 +88,7 @@ export async function retrieve(
   const filter = filters ? toVectorizeFilter(filters) : null;
   const folded = retrievalQuery(query, opts.prev);
   let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || folded;
-  if (u?.process_intent) rq += THRESHOLDS.processExpansion;
+  if (u?.process_intent) rq += processExpansion();
   // Dense embed + full-corpus BM25 prefilter in parallel (G-ETSI-1 /
   // arXiv:2604.09868 §II-B5). Lexical must scan the whole corpus — the
   // old keywordRank only re-ordered dense hits and could not recover
@@ -160,10 +160,10 @@ export interface BuiltMessages {
  *  catalog — the same SSOT /api/datasets serves. Routing is decided by
  *  query UNDERSTANDING (understanding.ts), never by string matching. */
 export function identityNote(member: boolean): string {
-  const corpora = DATASETS.filter((d) => !d.session || member)
+  const corpora = DATASETS().filter((d) => !d.session || member)
     .map((d) => `- ${d.label}: ${d.description}`)
     .join("\n");
-  const locked = DATASETS.filter((d) => d.session && !member);
+  const locked = DATASETS().filter((d) => d.session && !member);
   const upsell = locked.length
     ? `Signed-in members additionally search: ${locked.map((d) => `${d.label} (${d.description})`).join("; ")}.`
     : "";
@@ -251,7 +251,7 @@ export function buildMessages(
   // per-corpus guidance travels WITH the dataset (config.ts): every
   // dataset whose corpus appears in the passages contributes its note —
   // new corpora need a catalog entry, never pipeline changes
-  const corpusNotes = DATASETS.filter(
+  const corpusNotes = DATASETS().filter(
     (d) => d.note && hits.some((h) => (h.metadata as any).corpus === d.id),
   )
     .map((d) => d.note!)
@@ -260,7 +260,7 @@ export function buildMessages(
   // the prompt itself is data (prompts/system.md); one rule per line,
   // joined with spaces exactly as the original array form
   const system = fill(systemPromptText, {
-    ...PROFILE.prompts.vars,
+    ...P().prompts.vars,
     HISTORY_CONTEXT: history.length
       ? " Earlier turns of this conversation are provided for context — answer the LATEST question, treating the passages below as the source of truth for facts and citations."
       : "",
