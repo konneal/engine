@@ -31,7 +31,7 @@
   },
   "version": "0.1.0",
   "description": "The Konneal engine: the publisher-agnostic build pipeline and API plane for standards intelligence (retrieval, answer contract, verdicts, evaluation).",
-  "license": "UNLICENSED",
+  "license": "BSD-3-Clause",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -63,5 +63,8 @@
     "profile",
     "scripts/gen_profile.mjs",
     "README.md"
-  ]
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
