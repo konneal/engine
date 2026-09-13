@@ -59,7 +59,7 @@ async function cacheGet(env: Env, gen: string, ns: string, query: string, lang?:
 /** Start an embed call without awaiting failures — null result means the
  *  caller simply embeds fresh. */
 function embedWarm(env: Env, text: string): Promise<number[] | null> {
-  return embed(env.AI, MODELS.embed, text).catch(() => null);
+  return embed(portModelRunner(env), MODELS.embed, text).catch(() => null);
 }
 
 /** GLM-5.3-Flash is natively multimodal: when the used passages contain
@@ -290,7 +290,7 @@ async function handleAsk(
   // continuity block (below) instead of silently dropped
   const budget = num(env as any, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
   const { kept: keptHistory, overflow } = splitHistory(history, budget);
-  const summary = overflow.length >= 2 ? ((await summarizeHistory(env.AI, MODELS.understand, overflow)) ?? undefined) : undefined;
+  const summary = overflow.length >= 2 ? ((await summarizeHistory(env, MODELS.understand, overflow)) ?? undefined) : undefined;
   let retrieved;
   // fresh (regenerate) skips the cache read; contextual follow-ups,
   // declared-context asks, draft asks and image asks skip the cache

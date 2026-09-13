@@ -1,6 +1,13 @@
 // The worker's binding surface (typed once, imported everywhere).
+/** The Workers AI binding — run() only. Domain code goes through
+ *  portModelRunner(env); a precisely-typed AI closes the door on passing
+ *  the raw binding where a ModelRunner is expected (the v2.107 outage). */
+export interface AiBinding {
+  run(model: string, body: unknown): Promise<unknown>;
+}
+
 export interface Env {
-  AI: any;
+  AI: AiBinding;
   VECTORIZE: any;
   EXP_PRIMMEL: any;
   EXP_COMPOSED: any;

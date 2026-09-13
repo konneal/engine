@@ -30,15 +30,18 @@ import {
 // workers/worker_public/src/ai.ts
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 async function embed(ai, _model, text) {
+  let lastError = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const vecs = await ai.embed([text]);
       if (vecs?.[0]?.length) return vecs[0];
-    } catch {
+      lastError = new Error("adapter returned no vector");
+    } catch (e) {
+      lastError = e;
     }
     if (attempt < 2) await delay(250 * (attempt + 1));
   }
-  return [];
+  throw new Error(`embed failed after retries: ${String(lastError)}`);
 }
 async function rerank(ai, model, query, texts) {
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -418,26 +421,6 @@ var dense = {
   }
 };
 
-// workers/worker_public/src/stages/hyde.ts
-var hyde = {
-  name: "hyde",
-  failure: "additive",
-  when: (c) => !!c.u?.hypothetical_answer && !c.filter,
-  prefetch: (c) => {
-    c.lane.hyde = embed(c.env.AI, MODELS.embed, c.u.hypothetical_answer).then((hv) => c.env.VECTORIZE.query(hv, { topK: 20, returnMetadata: "all" }));
-  },
-  run: async (c) => {
-    const hres = await c.lane.hyde;
-    const seenIds = new Set(c.matches.map((m) => m.id));
-    for (const m of (hres.matches ?? []).slice(0, 10)) {
-      if (!seenIds.has(m.id)) {
-        c.matches.push({ id: m.id, score: m.score * THRESHOLDS.hydeDiscount, metadata: m.metadata });
-        seenIds.add(m.id);
-      }
-    }
-  }
-};
-
 // workers/worker_public/src/ports/cloudflare/adapters.ts
 var EMBED_REQUEST_SHAPES = {
   // "text" first: the verified request shape for qwen3-embedding-0.6b
@@ -569,6 +552,26 @@ function hasLane(env, which) {
       return !!env.GLOSSARY;
   }
 }
+
+// workers/worker_public/src/stages/hyde.ts
+var hyde = {
+  name: "hyde",
+  failure: "additive",
+  when: (c) => !!c.u?.hypothetical_answer && !c.filter,
+  prefetch: (c) => {
+    c.lane.hyde = embed(portModelRunner(c.env), MODELS.embed, c.u.hypothetical_answer).then((hv) => c.env.VECTORIZE.query(hv, { topK: 20, returnMetadata: "all" }));
+  },
+  run: async (c) => {
+    const hres = await c.lane.hyde;
+    const seenIds = new Set(c.matches.map((m) => m.id));
+    for (const m of (hres.matches ?? []).slice(0, 10)) {
+      if (!seenIds.has(m.id)) {
+        c.matches.push({ id: m.id, score: m.score * THRESHOLDS.hydeDiscount, metadata: m.metadata });
+        seenIds.add(m.id);
+      }
+    }
+  }
+};
 
 // workers/worker_public/src/stages/glossary.ts
 var glossary = {
@@ -1292,7 +1295,7 @@ async function retrieve(env, query, opts = {}) {
   const folded = retrievalQuery(query, opts.prev);
   let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || folded;
   if (u?.process_intent) rq += processExpansion();
-  const vectorP = rq === folded && opts.optimisticVec ? Promise.resolve(opts.optimisticVec) : rq === folded && opts.warmEmbed ? opts.warmEmbed.then((w) => w ?? embed(env.AI, MODELS.embed, rq)) : embed(env.AI, MODELS.embed, rq);
+  const vectorP = rq === folded && opts.optimisticVec ? Promise.resolve(opts.optimisticVec) : rq === folded && opts.warmEmbed ? opts.warmEmbed.then((w) => w ?? embed(portModelRunner(env), MODELS.embed, rq)) : embed(portModelRunner(env), MODELS.embed, rq);
   const lexicalP = lexicalPrefilter(env, rq).catch(() => []);
   const [vector, lexicalHits0] = await Promise.all([vectorP, lexicalP]);
   const lexicalHits = opts.sealScope ? lexicalHits0.filter((h) => h.metadata.doc_number === opts.sealScope.doc_number && (!opts.sealScope.edition || h.metadata.edition === opts.sealScope.edition)) : lexicalHits0;
@@ -3201,7 +3204,7 @@ ${c.text.slice(0, 1500)}` }
         const enriched = `${context}
 
 ${original}`;
-        const vector = await embed(env.AI, MODELS.embed, enriched.slice(0, 6e3));
+        const vector = await embed(portModelRunner(env), MODELS.embed, enriched.slice(0, 6e3));
         await env.VECTORIZE.upsert([{ id: c.id, values: vector, metadata: { ...c.metadata, chunk_text: enriched, ctx: "1" } }]);
         return { id: c.id, ok: true, cached, context };
       } catch (e) {
@@ -3270,7 +3273,7 @@ ${listing}` }
         const text = `\xA7${m.clause_anchor}${m.clause_title ? " " + m.clause_title : ""} \u2014 ${summary}
 Covers: ${childAnchors}`;
         const vectorText = `${m.docidentifier ?? m.doc_id} \xA7${m.clause_anchor} ${text}`.slice(0, 2e3);
-        const vector = await embed(env.AI, MODELS.embed, vectorText);
+        const vector = await embed(portModelRunner(env), MODELS.embed, vectorText);
         await env.VECTORIZE.upsert([
           { id: u.id, values: vector, metadata: { ...m, chunk_text: text, section_summary: "1", child_anchors: childAnchors, ctx: "1" } }
         ]);
@@ -3374,7 +3377,7 @@ async function handleVectors(env, req) {
       if (!texts.length) return err(400, "invalid_input", "texts: 1-16 required");
       const vectors = [];
       for (const t of texts) {
-        const v = await embed(env.AI, MODELS.embed, t.slice(0, 6e3));
+        const v = await embed(portModelRunner(env), MODELS.embed, t.slice(0, 6e3));
         vectors.push(v);
       }
       return json({ vectors });
@@ -4287,7 +4290,7 @@ async function cacheGet(env, gen, ns, query, lang, salt) {
   return hit ? { key, value: hit } : null;
 }
 function embedWarm(env, text) {
-  return embed(env.AI, MODELS.embed, text).catch(() => null);
+  return embed(portModelRunner(env), MODELS.embed, text).catch(() => null);
 }
 async function attachFigureImages(env, messages, usedHits, query) {
   const figIntent = /\b(fig(ure)?s?|diagram|drawing|graph|chart)\b/i.test(query);
@@ -4437,7 +4440,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   }
   const budget = num(env, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
   const { kept: keptHistory, overflow } = splitHistory(history, budget);
-  const summary = overflow.length >= 2 ? await summarizeHistory(env.AI, MODELS.understand, overflow) ?? void 0 : void 0;
+  const summary = overflow.length >= 2 ? await summarizeHistory(env, MODELS.understand, overflow) ?? void 0 : void 0;
   let retrieved;
   const fresh = freshRequested(body);
   const gen = await corpusGen(env.CACHE);

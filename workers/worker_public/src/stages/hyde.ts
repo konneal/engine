@@ -4,6 +4,7 @@
 // filter would nullify the benefit).
 // Ref: arXiv 2212.10496; arXiv 2507.16754 (adaptive HyDE)
 import { embed } from "../ai.ts";
+import { portModelRunner } from "../env.ts";
 import { MODELS, THRESHOLDS } from "../config.ts";
 import type { Stage } from "./types.ts";
 
@@ -12,7 +13,7 @@ export const hyde: Stage = {
   failure: "additive",
   when: (c) => !!c.u?.hypothetical_answer && !c.filter,
   prefetch: (c) => {
-    c.lane.hyde = embed(c.env.AI, MODELS.embed, c.u!.hypothetical_answer!)
+    c.lane.hyde = embed(portModelRunner(c.env), MODELS.embed, c.u!.hypothetical_answer!)
       .then((hv) => c.env.VECTORIZE.query(hv, { topK: 20, returnMetadata: "all" }));
   },
   run: async (c) => {
