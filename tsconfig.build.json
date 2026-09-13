@@ -9,8 +9,13 @@
     "rootDir": "workers",
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
-    "types": ["@cloudflare/workers-types"]
-    "strict": false
+    "types": [
+      "@cloudflare/workers-types"
+    ],
+    "strict": true
   },
-  "include": ["workers/worker_public/src/**/*.ts", "workers/shared/**/*.ts"]
+  "include": [
+    "workers/worker_public/src/**/*.ts",
+    "workers/shared/**/*.ts"
+  ]
 }
