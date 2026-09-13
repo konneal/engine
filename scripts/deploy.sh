@@ -88,7 +88,7 @@ smoke() {
     sleep 3
     answer=$(smoke_once)
   fi
-  if echo "$answer" | grep -qi "$expect"; then
+  if echo "$answer" | grep -qiE "$expect"; then
     echo "  ✓ $label"
   else
     echo "  ✗ $label — got: $answer"
@@ -96,9 +96,16 @@ smoke() {
   fi
 }
 
-smoke "R 60 mentions load cells" "What is R 60?" "load cell"
-smoke "load cell definition" "What is a load cell?" "transducer\|measuring"
-smoke "refusal works" "How do I make lasagna?" "don't have information"
+# the smoke set is publisher data (profile/ui.yaml) — the guard runs
+# whatever this deployment declares
+while IFS='\t' read -r label query expect; do
+  [ -z "$label" ] && continue
+  smoke "$label" "$query" "$expect"
+done < <(.venv/bin/python -c "
+import yaml
+for s in yaml.safe_load(open('profile/ui.yaml'))['smoke']:
+    print('\t'.join([s['label'], s['query'], s['expect']]))
+")
 
 if [ $FAIL -eq 1 ]; then
   echo "── SMOKE FAILED — check answers; the deploy is live but quality regressed ──"

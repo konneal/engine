@@ -34,3 +34,20 @@ test("the corpora registry covers production and every lane target", () => {
     assert.ok(c.lanes[target].length > 0, `lane ${target} declares no corpora`);
   }
 });
+
+test("the site profile module is the same generation", () => {
+  const site = readFileSync("site/src/profile.gen.ts", "utf8");
+  assert.ok(site.includes('"publisher"'));
+  assert.equal(site.split("\n")[0], readFileSync("workers/worker_public/src/profile.gen.ts", "utf8").split("\n")[0]);
+});
+
+test("publisher UI data declares its surfaces", () => {
+  assert.ok(PROFILE.ui.suggestions.length >= 4);
+  assert.ok(PROFILE.ui.models_disclosure.length >= 3);
+  assert.ok(PROFILE.ui.smoke.length >= 3);
+  for (const s of PROFILE.ui.smoke) {
+    assert.ok(s.label && s.query && s.expect, "each smoke probe is complete");
+  }
+  assert.ok((PROFILE.retrieval.process_expansion ?? "").length > 50);
+  assert.ok(PROFILE.sources.models.primmel.repo);
+});

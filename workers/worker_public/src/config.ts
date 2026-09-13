@@ -115,9 +115,9 @@ export const THRESHOLDS = {
    *  compacted summary instead of starving the passages. */
   historyBudgetShare: 0.3,
   /** Process-expansion — appended to process-intent queries so the
-   *  certification-system documents surface; now includes the CASCO
-   *  vocabulary terms (B 18, ISO/IEC 17000). */
-  processExpansion: " OIML Certification System OIML-CS OIML B 18 CASCO ISO/IEC 17000 conformity assessment issuing authority application type evaluation certificate",
+   *  certification-system documents surface. Publisher vocabulary
+   *  (profile/retrieval.yaml), not engine data. */
+  processExpansion: PROFILE.retrieval.process_expansion,
 } as const;
 
 /** Per-deployment model override: <ROLE>_MODEL (e.g. UNDERSTAND_MODEL)
@@ -212,12 +212,7 @@ export function datasetsFor(session: unknown): unknown[] {
 
 /** Empty-state starter questions, served by /api/datasets — UI content
  *  comes from the API, never hardcoded in the client. */
-export const SUGGESTIONS: string[] = [
-  "What is R 60?",
-  "What is a load cell?",
-  "What is the OIML-CS?",
-  "Qu'est-ce que le OIML-CS ?",
-];
+export const SUGGESTIONS: string[] = [...PROFILE.ui.suggestions];
 
 export function num(env: Record<string, unknown>, key: string, fallback: number): number {
   const v = Number(env[key]);
