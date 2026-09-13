@@ -2,7 +2,7 @@
 
 > Status: DECIDED (2026-09-12) — Option 1, a new high-level product.
 > **The name is Konneal** (decided 2026-09-13; the GitHub org and the
-> domains are secured). The name decodes on three levels, all of them
+> domain are secured — **konneal.org**). The name decodes on three levels, all of them
 > the product's own: K = knowledge (K-onneal is knowledge annealment,
 > the methodology this system invented and published); anneal stays
 > fully legible inside the spelling, so the name carries the story in
