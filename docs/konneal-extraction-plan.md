@@ -312,6 +312,17 @@ Design rules that keep the ports honest:
   model round-trip each become suites every adapter must pass — the
   same discipline the profile drift test applies to configuration.
 
+**The reference path is zero-configuration.** A Cloudflare deployment
+declares no adapters file and no model policy of its own: the engine
+defaults to the Cloudflare reference adapters, wiring them from
+wrangler.toml's bindings exactly as today, and ships the reference
+model policy (with the `roleModel`/effort environment overrides that
+already exist). Adapter and model-policy configuration appears in a
+deployment repository only when that deployment deviates from the
+reference — which the reference deployment never does. The multi-cloud
+machinery is invisible unless invoked; ai.oimlsmart.org carries none
+of it.
+
 **Phasing stance — ports as seams, adapters on demand.** Phases A–C
 proceed Cloudflare-flavored exactly as planned; Phase B introduces the
 port boundaries as interfaces with the Cloudflare adapter as the sole
@@ -439,3 +450,32 @@ reference adapters.
 4. **Dialect and behavior drift** across relational backends is the
    conformance suites' job — an adapter ships only when the repository
    suite passes against it.
+
+## 9. Impact on the reference deployment (ai.oimlsmart.org)
+
+**At runtime: nothing changes, at any phase.** Phases A–C are
+behavior-preserving by construction — the port interfaces erase at
+runtime, the adapters call the exact same bindings, and every phase
+boundary runs the full promotion gate against production before it is
+declared done. The infrastructure, the models, the index, the caches
+and the operational loop (build, reconcile, replay, deploy guards,
+gates) are untouched.
+
+**The one-time transition cost (Phase C):** the workers directory
+shrinks to a ~10-line entry, the engine arrives as a pinned package,
+and the flip deploys behind the standing gate protocol with instant
+rollback to the previous worker version. After the flip, the
+deployment repository contains only: the profile (which is the
+publisher's own data, half-extracted already), the theme, the entire
+user plane (unchanged), wrangler configuration (unchanged), the entry,
+the whitepaper and CI. The repository gets smaller, not bigger, and
+the deploy command remains what it is today.
+
+**The new discipline — and why it is a net reduction of concern:**
+engine upgrades arrive as deliberate version bumps instead of
+entangled commits, the port-purity lint prevents infrastructure
+leakage regressions for everyone including this deployment, and the
+conformance suites hold the behavior the reference deployment depends
+on. The configuration surface that other clouds require (adapters,
+model policy, infrastructure code) never exists here, because the
+reference is the default.
