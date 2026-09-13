@@ -68,14 +68,26 @@ echo "── smoke test ──"
 KEY=$(grep '^KEY=' .env | cut -d= -f2)
 FAIL=0
 
-smoke() {
-  local label="$1" query="$2" expect="$3"
-  local answer
-  answer=$(curl -s -m 30 -X POST https://ai.oimlsmart.org/v1/ask \
+# smoke answers arrive via the local network; a dead socket is a
+# TRANSPORT failure, not a quality regression — one retry before the
+# probe may fail (a flake cried wolf five deploys running, always with
+# the other probes green)
+smoke_once() {
+  curl -s -m 30 -X POST https://ai.oimlsmart.org/v1/ask \
     -H "authorization: Bearer $KEY" \
     -H "content-type: application/json" \
     -H "user-agent: deploy-guard" \
-    -d "{\"query\":\"$query\",\"stream\":false}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('answer','')[:200])" 2>/dev/null || echo "CURL_FAILED")
+    -d "{\"query\":\"$query\",\"stream\":false}" | python3 -c "import json,sys; print(json.load(sys.stdin).get('answer','')[:200])" 2>/dev/null || echo "CURL_FAILED"
+}
+
+smoke() {
+  local label="$1" query="$2" expect="$3"
+  local answer
+  answer=$(smoke_once)
+  if echo "$answer" | grep -qi "CURL_FAILED"; then
+    sleep 3
+    answer=$(smoke_once)
+  fi
   if echo "$answer" | grep -qi "$expect"; then
     echo "  ✓ $label"
   else
