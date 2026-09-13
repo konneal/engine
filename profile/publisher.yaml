@@ -1,0 +1,17 @@
+# The engine's fixture profile — the reference matrix starts here. A
+# real deployment (e.g. oimlsmart/ai) carries its own publisher facts;
+# this fixture exists so the engine's tests and CI run against
+# declared data, never hardcoded ones.
+id: fixture
+name: Fixture
+full_name: The Fixture Publisher
+product_name: Fixture Answers
+description: >-
+  A minimal publisher profile exercising every declared surface: an
+  open dataset, a permission-gated dataset, production and lane
+  corpora, prompt vars and retrieval vocabulary.
+domains:
+  public: fixture.example.org
+identity:
+  issuer: https://id.fixture.example.org
+codec: plain-slug

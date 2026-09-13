@@ -1,0 +1,7 @@
+suggestions:
+  - What is in the fixture corpus?
+  - Which documents does the fixture publisher issue?
+models_disclosure:
+  - { role: Answers, model: fixture-answer-model }
+smoke:
+  - { label: sanity, query: What is in the fixture corpus?, expect: fixture }

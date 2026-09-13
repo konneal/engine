@@ -1,3 +1,16 @@
+# CLAUDE.md — the Konneal ENGINE repository
+
+This repository is the ENGINE: the publisher-agnostic build pipeline
+and API plane. It carries no publisher facts — those live in each
+deployment's `profile/` (the fixture profile under `profile/` exists so
+tests run against declared data). The reference deployment is
+oimlsmart/ai (OIML SMART AI): its repository holds the OIML profile,
+the frontend, deployment configuration and the operational facts below
+that concern the live service. The architecture and extraction plan:
+docs/konneal-extraction-plan.md.
+
+---
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.

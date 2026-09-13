@@ -2,66 +2,48 @@
 // (never edit; the drift test compares this file to the sources)
 export const PROFILE = {
   "publisher": {
-    "id": "oiml",
-    "name": "OIML",
-    "codec": "oiml-pubid",
-    "full_name": "International Organization of Legal Metrology",
-    "product_name": "OIML SMART AI",
-    "description": "Retrieval-augmented answering over OIML publications: Recommendations, Documents, Basic publications, Guides and Expert reports.",
+    "id": "fixture",
+    "name": "Fixture",
+    "full_name": "The Fixture Publisher",
+    "product_name": "Fixture Answers",
+    "description": "A minimal publisher profile exercising every declared surface: an open dataset, a permission-gated dataset, production and lane corpora, prompt vars and retrieval vocabulary.",
     "domains": {
-      "public": "ai.oimlsmart.org"
+      "public": "fixture.example.org"
     },
     "identity": {
-      "issuer": "https://id.oimlsmart.org"
-    }
+      "issuer": "https://id.fixture.example.org"
+    },
+    "codec": "plain-slug"
   },
   "datasets": [
     {
-      "id": "oiml",
-      "label": "OIML Publications",
-      "description": "Recommendations, Documents, Basic publications, Guides"
+      "id": "pub",
+      "label": "Fixture Publications",
+      "description": "The fixture publisher's corpus",
+      "note": "Some passages come from the fixture corpus — cite them the same way as every other passage."
     },
     {
-      "id": "smart-model",
-      "label": "OIML SMART Models",
-      "description": "The machine-readable Recommendation models (requirements' constraints, applicability rules, acceptance criteria, tests, terms) — derived from the Primmel packages",
-      "note": "Some passages are the OIML SMART model plane (labeled OIML SMART model) — the platform's machine-readable Recommendation models derived from the Primmel packages. Treat their machine limits, applicability rules and acceptance criteria as the model's own statement of them (quote machine limits verbatim); where a model passage and a prose passage disagree, say so explicitly and cite both."
-    },
-    {
-      "id": "iso",
-      "label": "ISO/IEC Conformity Assessment",
-      "description": "ISO/IEC 17xxx standards — federated with OIML results for members",
+      "id": "internal",
+      "label": "Internal corpus",
+      "description": "An access-restricted corpus proving the permission gate",
       "session": true,
-      "permission": "ai-preview",
-      "note": "Some passages come from the internal ISO/IEC corpus (labeled ISO/IEC …) — use them alongside the OIML passages and cite them the same way."
+      "permission": "preview"
     }
   ],
   "corpora": {
     "production": [
-      "oiml",
+      "pub",
       "dirty",
       "clean",
       "synthetic",
-      "smart-model"
+      "model"
     ],
     "lanes": {
-      "exp_plain": [
-        "exp_plain"
+      "exp_a": [
+        "exp_a"
       ],
-      "exp_adoc": [
-        "exp_adoc"
-      ],
-      "exp_mko": [
-        "exp_mko"
-      ],
-      "primmel": [
-        "primmel"
-      ],
-      "primmel_flat": [
-        "primmel"
-      ],
-      "exp_composed": [
-        "exp_composed"
+      "exp_b": [
+        "exp_b"
       ],
       "glossary": [
         "glossary"
@@ -71,96 +53,40 @@ export const PROFILE = {
   "sources": {
     "corpora": {
       "clean": {
-        "repo": "~/src/mn/mn-samples-oiml",
-        "note": "hand-curated Metanorma documents (29 sources) — precedence over dirty"
-      },
-      "dirty": {
-        "repo": "~/src/oimlsmart/publications-private",
-        "note": "OCR-derived Metanorma trees (880 sources)"
+        "repo": "fixtures/corpus",
+        "note": "the engine's fixture corpus"
       }
     },
-    "bibliography": {
-      "relaton": {
-        "repo": "~/src/relaton/relaton-data-oiml",
-        "note": 5,
-        "707 records": null
-      }
-    },
-    "terminology": {
-      "glossarist": {
-        "repo": "~/src/oimlsmart/vocab",
-        "note": "13 datasets; oiml-complete = 6",
-        "031 concepts": null
-      }
-    },
-    "models": {
-      "primmel": {
-        "repo": "~/src/oimlsmart/primmel-packages",
-        "note": "the Recommendation models' SSOT"
-      },
-      "retrieval_plane": {
-        "repo": "~/src/oimlsmart/smart",
-        "note": "the projection export (SMART_REPO)"
-      }
-    }
+    "bibliography": {},
+    "terminology": {},
+    "models": {}
   },
   "ui": {
     "suggestions": [
-      "What is R 60?",
-      "What is a load cell?",
-      "What is the OIML-CS?",
-      "Qu'est-ce que le OIML-CS ?"
+      "What is in the fixture corpus?",
+      "Which documents does the fixture publisher issue?"
     ],
     "models_disclosure": [
       {
-        "role": "Answers (all tiers)",
-        "model": "GLM-5.3 Flash",
-        "note": "natively multimodal"
-      },
-      {
-        "role": "Query understanding",
-        "model": "Qwen3-30B-A3B"
-      },
-      {
-        "role": "Understanding",
-        "judging": null,
-        "verification": null,
-        "model": "DeepSeek-V4-Flash"
-      },
-      {
-        "role": "Embeddings",
-        "model": "Qwen3-Embedding-0.6B"
-      },
-      {
-        "role": "Reranking",
-        "model": "bge-reranker-base"
+        "role": "Answers",
+        "model": "fixture-answer-model"
       }
     ],
     "smoke": [
       {
-        "label": "R 60 mentions load cells",
-        "query": "What is R 60?",
-        "expect": "load cell"
-      },
-      {
-        "label": "load cell definition",
-        "query": "What is a load cell?",
-        "expect": "transducer|measuring"
-      },
-      {
-        "label": "refusal works",
-        "query": "How do I make lasagna?",
-        "expect": "don't have information"
+        "label": "sanity",
+        "query": "What is in the fixture corpus?",
+        "expect": "fixture"
       }
     ]
   },
   "retrieval": {
-    "process_expansion": " OIML Certification System OIML-CS OIML B 18 CASCO ISO/IEC 17000 conformity assessment issuing authority application type evaluation certificate"
+    "process_expansion": " fixture certification system framework application evaluation"
   },
   "prompts": {
     "vars": {
-      "assistant_identity": "the OIML SMART AI assistant at ai.oimlsmart.org — a public service answering questions about OIML legal-metrology publications (Recommendations, Documents, Basic publications, Guides). You serve metrologists, regulators, manufacturers and students",
-      "refusal_sentence": "I don't have information on this in the indexed OIML publications."
+      "assistant_identity": "the fixture assistant — a public service answering questions about the fixture publisher's documents",
+      "refusal_sentence": "I don't have information on this in the indexed fixture documents."
     }
   }
 } as const;
