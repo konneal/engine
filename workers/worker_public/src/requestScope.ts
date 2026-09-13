@@ -28,13 +28,13 @@ const CORPORA_BY_DATASET: Record<string, string[]> = {
 /** Validate + intersect. Returns { error } when the request explicitly
  *  disables every dataset (a user error, not a scope). */
 export function resolveRequestScope(body: any, member: unknown): RequestScope | { error: "empty-datasets" } {
-  const allIds = DATASETS.map((d) => d.id);
+  const allIds = DATASETS().map((d) => d.id);
   const requested = Array.isArray(body?.datasets)
     ? (body.datasets as unknown[]).filter((x): x is string => typeof x === "string" && allIds.includes(x))
     : null;
   if (requested !== null && requested.length === 0) return { error: "empty-datasets" };
   const permittedIds = allIds.filter((id) => {
-    const d = DATASETS.find((x) => x.id === id)!;
+    const d = DATASETS().find((x) => x.id === id)!;
     return d.session ? datasetAllowed(d, member) : true;
   });
   // requested ∩ permitted — an explicit request NEVER widens past the

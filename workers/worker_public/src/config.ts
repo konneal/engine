@@ -1,4 +1,4 @@
-import { PROFILE } from "./profile.gen.ts";
+import { P } from "./profile.ts";
 
 export const MODELS = {
   embed: "@cf/qwen/qwen3-embedding-0.6b",  rerank: "@cf/baai/bge-reranker-base",
@@ -114,11 +114,13 @@ export const THRESHOLDS = {
    *  conversation slice may consume; older turns overflow into the
    *  compacted summary instead of starving the passages. */
   historyBudgetShare: 0.3,
-  /** Process-expansion — appended to process-intent queries so the
-   *  certification-system documents surface. Publisher vocabulary
-   *  (profile/retrieval.yaml), not engine data. */
-  processExpansion: PROFILE.retrieval.process_expansion,
 } as const;
+
+/** Process-expansion — appended to process-intent queries; publisher
+ *  vocabulary from the profile (read at request time — see profile.ts). */
+export function processExpansion(): string {
+  return P().retrieval.process_expansion;
+}
 
 /** Per-deployment model override: <ROLE>_MODEL (e.g. UNDERSTAND_MODEL)
  *  replaces the pinned default for that role. Ops lever for A/B-ing a
@@ -181,7 +183,9 @@ export interface Dataset {
 
 // The catalog is publisher data (profile/datasets.yaml, codegen into
 // profile.gen.ts) — the engine ships no publisher facts
-export const DATASETS: readonly Dataset[] = PROFILE.datasets;
+export function DATASETS(): readonly Dataset[] {
+  return P().datasets;
+}
 
 /** The estate permission gate: a session-gated dataset requires BOTH
  *  membership and the named permission (a role code the account carries
@@ -199,7 +203,7 @@ export function datasetAllowed(d: Dataset, session: unknown): boolean {
 }
 
 export function datasetsFor(session: unknown): unknown[] {
-  return DATASETS.map((d) => ({
+  return DATASETS().map((d) => ({
     id: d.id,
     label: d.label,
     description: d.description,
@@ -212,7 +216,9 @@ export function datasetsFor(session: unknown): unknown[] {
 
 /** Empty-state starter questions, served by /api/datasets — UI content
  *  comes from the API, never hardcoded in the client. */
-export const SUGGESTIONS: string[] = [...PROFILE.ui.suggestions];
+export function SUGGESTIONS(): string[] {
+  return [...P().ui.suggestions];
+}
 
 export function num(env: Record<string, unknown>, key: string, fallback: number): number {
   const v = Number(env[key]);

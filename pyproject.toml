@@ -1,0 +1,14 @@
+[project]
+name = "konneal-ingest"
+version = "0.1.0"
+description = "The Konneal engine's build pipeline: corpora to serving indexes"
+requires-python = ">=3.10"
+dependencies = ["pydantic>=2.7", "httpx>=0.27", "beautifulsoup4>=4.12", "pyyaml>=6.0", "git-filter-repo; python_version < '0'"]
+
+[tool.setuptools]
+packages = ["ingest"]
+include-package-data = true
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
