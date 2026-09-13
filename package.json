@@ -15,7 +15,7 @@
     "test:ui": "node tests/ui.mjs",
     "test:bridge": "node --test tests/bridge.test.mjs",
     "test:units": "node --test --experimental-strip-types tests/*.test.ts",
-    "build": "rm -rf dist dist-types && esbuild workers/worker_public/src/index.ts workers/worker_public/src/config.ts workers/worker_public/src/refusal.ts workers/worker_public/src/profile.ts --bundle --format=esm --splitting --platform=neutral --outdir=dist --loader:.md=text && (tsc -p tsconfig.build.json || true) && cp dist-types/worker_public/src/*.d.ts dist/ && mkdir -p dist/prompts && cp workers/worker_public/prompts/*.md dist/prompts/",
+    "build": "rm -rf dist dist-types && esbuild workers/worker_public/src/index.ts workers/worker_public/src/config.ts workers/worker_public/src/refusal.ts workers/worker_public/src/profile.ts workers/worker_public/src/requestScope.ts --bundle --format=esm --splitting --platform=neutral --outdir=dist --loader:.md=text && (tsc -p tsconfig.build.json || true) && cp dist-types/worker_public/src/*.d.ts dist/ && mkdir -p dist/prompts && cp workers/worker_public/prompts/*.md dist/prompts/",
     "prepare": "npm run build"
   },
   "devDependencies": {
@@ -50,6 +50,10 @@
     "./refusal": {
       "types": "./dist/refusal.d.ts",
       "default": "./dist/refusal.js"
+    },
+    "./requestScope": {
+      "types": "./dist/requestScope.d.ts",
+      "default": "./dist/requestScope.js"
     }
   },
   "files": [
