@@ -9,7 +9,7 @@ export function refusalAnswer(): string {
 // the model occasionally paraphrases the refusal sentence ("...information
 // on how to make lasagna in the indexed..."); the API contract is the
 // exact canonical sentence — normalize variants, keep the redirect tail
-const REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the indexed OIML (?:publications|passages|documents|corpus)\.?/i;
+const REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the indexed OIML(?: \w+){0,2} (?:publications|passages|documents|corpus)\.?/i;
 
 // Upstream wording drift (rag#88, the golden refusal pin recalibrated
 // 2026-09-01): the model now also refuses with no pinned sentence at all —
@@ -19,7 +19,7 @@ const REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the 
 // family: every shape the tests accept canonicalizes to the pinned
 // sentence here, and nothing else does.
 const REFUSAL_DRIFT: RegExp[] = [
-  /\b(can'?t|cannot|couldn'?t|unable)\b[^.]{0,120}?\b(indexed )?OIML publications\b/i,
+  /\b(can'?t|cannot|couldn'?t|unable)\b[^.]{0,120}?\b(indexed )?OIML(?: \w+){0,2} publications\b/i,
   /\bno real answer to give\b[^.]{0,120}?\bOIML\b/i,
   /\b(?:falls|well) outside\b[^.]{0,120}?\b(?:what I can answer|my scope|the scope of)\b/i,
   /\boutside (?:of )?what (?:I|this service) can answer\b/i,

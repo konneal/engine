@@ -6,9 +6,9 @@ import {
 function refusalAnswer() {
   return P().prompts.vars.refusal_sentence;
 }
-var REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the indexed OIML (?:publications|passages|documents|corpus)\.?/i;
+var REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the indexed OIML(?: \w+){0,2} (?:publications|passages|documents|corpus)\.?/i;
 var REFUSAL_DRIFT = [
-  /\b(can'?t|cannot|couldn'?t|unable)\b[^.]{0,120}?\b(indexed )?OIML publications\b/i,
+  /\b(can'?t|cannot|couldn'?t|unable)\b[^.]{0,120}?\b(indexed )?OIML(?: \w+){0,2} publications\b/i,
   /\bno real answer to give\b[^.]{0,120}?\bOIML\b/i,
   /\b(?:falls|well) outside\b[^.]{0,120}?\b(?:what I can answer|my scope|the scope of)\b/i,
   /\boutside (?:of )?what (?:I|this service) can answer\b/i,
