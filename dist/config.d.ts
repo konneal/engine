@@ -129,10 +129,13 @@ export interface Dataset {
     description: string;
     /** member-session gated (federated via the internal service binding) */
     session?: boolean;
-    /** the estate permission (a role code set in id.oimlsmart.org) the
-     *  session must carry for a session-gated dataset — membership alone
-     *  is not the bar */
+    /** the estate permission (a role code set in the publisher's
+     *  identity provider) the session must carry for a session-gated
+     *  dataset — membership alone is not the bar */
     permission?: string;
+    /** the corpora this dataset searches (profile datasets.yaml) — the
+     *  engine maps no publisher names */
+    corpora?: string[];
     note?: string;
 }
 export declare function DATASETS(): readonly Dataset[];

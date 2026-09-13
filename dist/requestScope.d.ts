@@ -12,7 +12,9 @@ export interface RequestScope {
     memoryIds: string[];
 }
 /** Validate + intersect. Returns { error } when the request explicitly
- *  disables every dataset (a user error, not a scope). */
+ *  disables every dataset (a user error, not a scope). The corpora a
+ *  dataset searches travel WITH the declaration (profile datasets.yaml,
+ *  `corpora:`) — the engine maps no publisher names. */
 export declare function resolveRequestScope(body: any, member: unknown): RequestScope | {
     error: "empty-datasets";
 };
