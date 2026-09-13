@@ -10,6 +10,7 @@
 // gets that family's passages merged like the graph lane does — the
 // concept link is a family router, not just a note.
 import { rerank } from "../ai.ts";
+import { portModelRunner, portIndex, hasLane } from "../env.ts";
 import { MODELS, THRESHOLDS } from "../config.ts";
 import type { Stage } from "./types.ts";
 
@@ -24,14 +25,14 @@ interface GlossaryCand {
 export const glossary: Stage = {
   name: "glossary",
   failure: "additive",
-  when: (c) => !!c.env.GLOSSARY && c.vector.length > 0,
+  when: (c) => hasLane(c.env, "glossary") && c.vector.length > 0,
   prefetch: (c) => {
     c.lane.glossary = (async () => {
-      const g = await c.env.GLOSSARY.query(c.vector, { topK: 5, returnMetadata: "all" });
-      const cands = (g.matches ?? []).filter((m: any) => m.score >= THRESHOLDS.glossaryCosineFloor);
+      const g = await portIndex(c.env, "glossary").query({ vector: c.vector, topK: 5 });
+      const cands = g.filter((m) => m.score >= THRESHOLDS.glossaryCosineFloor);
       if (!cands.length) return [] as GlossaryCand[];
       const texts = cands.map((m: any) => String(m.metadata?.chunk_text ?? ""));
-      const rs = await rerank(c.env.AI, MODELS.rerank, c.query, texts);
+      const rs = await rerank(portModelRunner(c.env), MODELS.rerank, c.query, texts);
       return cands
         .map((m: any, i: number) => ({
           term: String(m.metadata?.clause_title ?? "").trim(),

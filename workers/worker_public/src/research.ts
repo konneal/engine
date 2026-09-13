@@ -1,6 +1,7 @@
 // Deep-research dossier loop (G10): bounded agentic iterations,
 // members-only — the workflow-shaped research spend (TODO.impl/23).
 import { err, json, corsHeaders, readJson, validateQuery } from "./lib/http";
+import { portModelRunner } from "./env.ts";
 import { telemetry } from "./quota";
 import { LIMITS, MODELS, sha256Hex } from "./config";
 import { retrieve, buildMessages, citations } from "./pipeline";
@@ -30,7 +31,7 @@ export async function handleResearch(env: Env, ctx: ExecutionContext, req: Reque
 
   const started = Date.now();
   const queryHash = await sha256Hex(q.query);
-  const understanding = await understandQuery(env.AI, MODELS.understand, q.query, [], []);
+  const understanding = await understandQuery(portModelRunner(env), MODELS.understand, q.query, [], []);
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);
 

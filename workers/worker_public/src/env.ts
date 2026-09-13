@@ -35,3 +35,49 @@ export interface Env {
   SMART_PLATFORM_CLIENT_ID?: string;
   INTERNAL_SERVICE?: { fetch(input: RequestInfo, init?: RequestInit): Promise<Response> };
 }
+
+// ── The port view of the deployment (konneal extraction §5) ──────────
+// Compose the port interfaces over the raw bindings ONCE, at the edges.
+// Domain modules import `portModelRunner(env)` etc. — never env.AI
+// directly; the purity lint enforces it. Zero runtime change: the
+// adapters forward to the same bindings the call sites used before.
+import { cfModelRunner, cfVectorIndex, cfKv, cfBlobs, cfRuntime } from "./ports/cloudflare/adapters.ts";
+import type { ModelRunner } from "./ports/model.ts";
+import type { VectorIndex } from "./ports/vector.ts";
+import type { Kv } from "./ports/kv.ts";
+import type { Blobs } from "./ports/blobs.ts";
+import type { Runtime } from "./ports/runtime.ts";
+
+export function portModelRunner(env: Env): ModelRunner {
+  return cfModelRunner(env.AI);
+}
+export function portIndex(env: Env, which: "public" | "primmel" | "composed" | "plain" | "adoc" | "mko" | "pflat" | "glossary" = "public"): VectorIndex {
+  const b: unknown =
+    which === "public" ? env.VECTORIZE
+    : which === "primmel" ? env.EXP_PRIMMEL
+    : which === "composed" ? env.EXP_COMPOSED
+    : which === "plain" ? env.EXP_PLAIN
+    : which === "adoc" ? env.EXP_ADC
+    : which === "mko" ? env.EXP_MKO
+    : which === "pflat" ? env.EXP_PFLAT
+    : env.GLOSSARY;
+  return cfVectorIndex(b);
+}
+export function portKv(env: Env): Kv {
+  return cfKv(env.CACHE);
+}
+export function portBlobs(env: Env): Blobs {
+  return cfBlobs(env.UNIT_ASSETS);
+}
+/** Does the deployment bind this lane index? Presence wiring stays in
+ *  the ports layer so domain stages never touch raw bindings. */
+export function hasLane(env: Env, which: "glossary"): boolean {
+  switch (which) {
+    case "glossary":
+      return !!env.GLOSSARY;
+  }
+}
+
+export function portRuntime(ctx: ExecutionContext | undefined): Runtime {
+  return cfRuntime(ctx);
+}

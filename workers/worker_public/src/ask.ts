@@ -4,6 +4,7 @@
 // index.ts routes here; this module owns the answer contract.
 
 import { LIMITS, MODELS, num, sha256Hex, roleModel, answerEffort, requestEffort, effortBudget } from "./config";
+import { portModelRunner } from "./env.ts";
 import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, refusalAnswer, Hit } from "./pipeline";
 import { sessionFrom } from "./auth";
 import { retrieveInternal } from "./internal_gateway";
@@ -376,7 +377,7 @@ async function handleAsk(
   let optimisticHits: Hit[] = [];
   const t0 = Date.now();
   if (!cached) {
-    const understandingP = understandQuery(env.AI, roleModel(env, "understand"), q.query, history, convEntities);
+    const understandingP = understandQuery(portModelRunner(env), roleModel(env, "understand"), q.query, history, convEntities);
     try {
       optimisticVec = (await warmEmbed) ?? null;
       if (optimisticVec) {

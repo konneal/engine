@@ -1,9 +1,10 @@
+import type { Kv } from "./ports/kv.ts";
 /** KV key carrying the corpus-generation stamp (the house sys:
  *  convention, cf. sys:generation). Absent = "0". */
 export declare const CORPUS_GEN_KEY = "sys:corpus_gen";
 /** Read the corpus-generation stamp; a KV failure fails open to "0"
  *  (the cache keeps working, generation pinning degrades to deploy-only). */
-export declare function corpusGen(cache: KVNamespace): Promise<string>;
+export declare function corpusGen(cache: Pick<Kv, "get">): Promise<string>;
 /** The fresh (regenerate) flag: the JSON boolean, plus the string/1
  *  forms a caller may serialize. Anything else is not a bypass request. */
 export declare function freshRequested(body: any): boolean;

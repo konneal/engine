@@ -2,6 +2,7 @@
 // queries/spend ledger writes (TODO.impl/23).
 import { sha256Hex, today } from "./config";
 import type { Env } from "./env";
+import type { Background } from "./ports/runtime.ts";
 
 export async function kvIncr(cache: KVNamespace, key: string, step = 1): Promise<number> {
   const cur = Number((await cache.get(key)) ?? "0");
@@ -30,7 +31,7 @@ export async function checkQuota(
 
 export function telemetry(
   env: Env,
-  ctx: ExecutionContext,
+  ctx: Background,
   tier: string,
   route: string,
   model: string | null,

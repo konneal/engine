@@ -6,6 +6,7 @@
 // data itself never passes through the LLM — blocks are resolved from
 // the producer-validated D1 unit_payloads table.
 
+import type { StoreQuery } from "./ports/store.ts";
 export interface ResolvedBlock {
   unit_id: string;
   type: string;
@@ -47,7 +48,7 @@ export function sanitizeRefs(text: string, available: ReadonlySet<string>): { te
  *  Unknown-to-D1 ids are skipped — a ref without a payload renders as a
  *  plain token, never as fabricated data. */
 export async function resolveBlocks(
-  db: D1Database,
+  db: StoreQuery,
   refs: string[],
 ): Promise<ResolvedBlock[]> {
   if (!refs.length) return [];
@@ -60,8 +61,8 @@ export async function resolveBlocks(
       const res = await db
         .prepare(`SELECT unit_id, type, docidentifier, edition, payload FROM unit_payloads WHERE unit_id IN (${placeholders})`)
         .bind(...batch)
-        .all();
-      for (const r of res.results ?? []) {
+        .all<{ unit_id: string; type: string; docidentifier: string | null; edition: string | null; payload: string }>();
+      for (const r of res.results) {
         let payload: Record<string, unknown> = {};
         try {
           payload = JSON.parse(String(r.payload));
@@ -85,7 +86,7 @@ export async function resolveBlocks(
 
 /** One pass: validate + resolve + strip invalid tokens. */
 export async function contractV2(
-  db: D1Database,
+  db: StoreQuery,
   answer: string,
   usedHits: ReadonlyArray<{ metadata: { unit_id?: string | undefined } }>,
 ): Promise<{ text: string; blocks: ResolvedBlock[]; dropped: string[] }> {

@@ -12,6 +12,7 @@
 // after rerank even when rerank failed (the monolith's try/catch left
 // the fuse outside it — preserved by the runner's additive semantics).
 import { rerank } from "../ai.ts";
+import { portModelRunner } from "../env.ts";
 import { LIMITS, MODELS } from "../config.ts";
 import { rrfFuse } from "../hybrid.ts";
 import type { Stage } from "./types.ts";
@@ -22,7 +23,7 @@ export const rerankStage: Stage = {
   when: (c) => c.hits.length > 1,
   run: async (c) => {
     const tRerank = Date.now();
-    const scores = await rerank(c.env.AI, MODELS.rerank, c.query, c.hits.map((h) => h.text));
+    const scores = await rerank(portModelRunner(c.env), MODELS.rerank, c.query, c.hits.map((h) => h.text));
     console.log("stage: rerank", Date.now() - tRerank, "ms over", c.hits.length, "candidates");
     if (scores) {
       c.hits.forEach((h, i) => (h.rerank_score = scores[i]));

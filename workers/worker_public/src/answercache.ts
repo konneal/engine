@@ -28,13 +28,14 @@
 // Self-contained (no imports) so the unit tests run on plain node type
 // stripping, like anchors/refusal/verdict.
 
+import type { Kv } from "./ports/kv.ts";
 /** KV key carrying the corpus-generation stamp (the house sys:
  *  convention, cf. sys:generation). Absent = "0". */
 export const CORPUS_GEN_KEY = "sys:corpus_gen";
 
 /** Read the corpus-generation stamp; a KV failure fails open to "0"
  *  (the cache keeps working, generation pinning degrades to deploy-only). */
-export async function corpusGen(cache: KVNamespace): Promise<string> {
+export async function corpusGen(cache: Pick<Kv, "get">): Promise<string> {
   try {
     return (await cache.get(CORPUS_GEN_KEY)) ?? "0";
   } catch {
