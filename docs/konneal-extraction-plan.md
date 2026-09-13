@@ -1,7 +1,10 @@
 # The Konneal extraction plan — packages, phases, end-state
 
-> Status: PLAN (2026-09-13) — presented for approval before
-> implementation. Extends docs/multi-sdo-architecture.md §7 (whose
+> Status: PLAN v2 (2026-09-13) — presented for approval before
+> implementation. v2 deepens three guarantees the extraction must make
+> for the reference deployment: the Metanorma/Primmel content build
+> stays first-class (§2.1), the interface is genuinely custom-able (§2.2),
+> and the Cloudflare deployment topology stays the publisher's (§2.3). Extends docs/multi-sdo-architecture.md §7 (whose
 > step 1, the profile extraction, is shipped) into the full package
 > topology and the phased extraction. The discipline is the one this
 > codebase already keeps: every phase lands with zero behavior change,
@@ -68,6 +71,87 @@ oimlsmart/ai                        becomes publisher-oiml (reference)
 ├── .github/        CI: profile validation + engine-pinned gates
 └── workers/src/    ENTRY ONLY (~10 lines: createWorker({ profile }))
 ```
+
+### 2.1 The content build path (Metanorma and Primmel stay first-class)
+
+The build that turns a publisher's Metanorma corpus and Primmel
+packages into a serving index is engine machinery driven by
+profile-declared sources. The engine CLI gains one orchestration
+command:
+
+```
+konneal build --profile profile/
+```
+
+It reads `profile/sources.yaml` — the pinned references to the
+publisher's Metanorma corpora (clean and recovered), relaton
+bibliography, Glossarist terminology, and Primmel packages checkout —
+and runs the derivation in the order the incidents taught, as
+structure rather than memory: parse (clean-beats-dirty precedence,
+shell flagging, language policy from the profile) → typed units from
+the Metanorma documents → the model plane from the Primmel projection
+(the freshness gate: a package's source hash moves, the build fails
+until re-indexed) → terminology and graph ingestion → embed → upsert →
+restore gaps → enrichment replay → reconcile against the canonical
+declaration → unit assets → rendered documents → the answer-cache
+generation stamp. The sequence mistakes that caused the 2026-09-09/10/11
+incidents become impossible for every SDO, not just this one.
+
+The build stamps the index with a wire version alongside the existing
+index version, so a deployment never serves an index built by an
+ingest version its serving engine cannot read — the freshness
+mechanism extended from content drift to engine drift.
+
+### 2.2 The custom interface (three layers, not two)
+
+`@konneal/ui` is a template with real extension points, because a
+publisher's site is never only theming:
+
+1. **Theme** — logo, colors, fonts, nav labels from `theme/`.
+2. **Data-fed components** — the datasets sidebar already reads the
+   API; the annealment panel, the composer suggestions and the
+   disclosed model policy all become profile-fed (they are publisher
+   content), so they update with the profile, not the engine.
+3. **Shadowing and extension** — the deployment's
+   `site/src/overrides/` shadows any component by name (resolution
+   order puts the deployment first), and new pages, components and
+   MDX articles are added freely. OIML's articles, whitepaper page and
+   any bespoke surface live entirely in the deployment repo.
+
+The worker side is extensible the same way, because OIML has real
+custom logic: the application-draft acts are an OIML-CS concept. The
+entry composes rather than configures:
+
+```ts
+createWorker({ profile, hooks: { acts: oimlDraftActs }, extraRoutes })
+```
+
+Custom routes reuse the engine's handlers and auth; the draft-act
+branch moves out of the engine's ask path into the deployment's hook.
+Publisher prompt voice already travels with datasets; the hook is the
+same doctrine for publisher behavior.
+
+### 2.3 The Cloudflare topology (bindings are the publisher's facts)
+
+Wrangler configuration, bindings, secrets and accounts stay in the
+deployment repository untouched — Vectorize indexes, D1, KV, R2,
+Queues, the OIDC issuer are per-publisher facts declared by the
+profile's audiences (the two-index isolation pattern generalizes: one
+index per audience, and the binding lint enforces it against the
+profile's declarations, not a hardcoded list). The engine provides two
+thin commands the deployment wraps: `konneal bootstrap` (create the
+declared indexes/buckets/namespaces, patch ids into wrangler) and
+`konneal deploy` (today's guarded deploy — branch and tree checks,
+version bump, settle, profile-sourced smoke) so the operational
+discipline ships with the engine instead of being re-implemented per
+SDO.
+
+**The development loop while both repos live:** the deployment pins
+exact engine versions in its lockfile, with a `file:` override for
+local engine work — the same pattern this repo already uses for the
+site shell. Engine PRs run the engine's fixture matrix; the deployment
+CI runs its own gates on the pinned version; neither blocks the other
+until a release is deliberately adopted.
 
 **Versioning.** The engine releases semver from `konneal/engine`; a
 deployment pins exact versions (the same deliberateness as any
