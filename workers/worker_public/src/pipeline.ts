@@ -1,4 +1,5 @@
 import { embed } from "./ai";
+import { PROFILE } from "./profile.gen.ts";
 import { LIMITS, MODELS, DATASETS, THRESHOLDS } from "./config";
 import systemPromptText from "../prompts/system.md";
 import conversationalPromptText from "../prompts/conversational.md";
@@ -259,6 +260,7 @@ export function buildMessages(
   // the prompt itself is data (prompts/system.md); one rule per line,
   // joined with spaces exactly as the original array form
   const system = fill(systemPromptText, {
+    ...PROFILE.prompts.vars,
     HISTORY_CONTEXT: history.length
       ? " Earlier turns of this conversation are provided for context — answer the LATEST question, treating the passages below as the source of truth for facts and citations."
       : "",

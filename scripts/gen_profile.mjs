@@ -17,7 +17,8 @@ const render = (profileDir = "profile") => {
   const sources = read("sources.yaml");
   const ui = read("ui.yaml");
   const retrieval = read("retrieval.yaml");
-  const body = JSON.stringify({ publisher, datasets, corpora, sources, ui, retrieval }, null, 2);
+  const prompts = read("prompts.yaml");
+  const body = JSON.stringify({ publisher, datasets, corpora, sources, ui, retrieval, prompts }, null, 2);
   return `${HEADER}export const PROFILE = ${body} as const;\n`;
 };
 

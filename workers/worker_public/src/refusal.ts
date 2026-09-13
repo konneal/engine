@@ -1,7 +1,8 @@
+import { PROFILE } from "./profile.gen.ts";
 /** The one sanctioned refusal sentence (also in prompts/system.md).
  *  Refusals are never cached: a refusal says "retrieval found nothing",
  *  which is a property of the moment, not of the question. */
-export const REFUSAL_ANSWER = "I don't have information on this in the indexed OIML publications.";
+export const REFUSAL_ANSWER: string = PROFILE.prompts.vars.refusal_sentence;
 
 // the model occasionally paraphrases the refusal sentence ("...information
 // on how to make lasagna in the indexed..."); the API contract is the

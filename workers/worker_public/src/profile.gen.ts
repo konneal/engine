@@ -155,5 +155,11 @@ export const PROFILE = {
   },
   "retrieval": {
     "process_expansion": " OIML Certification System OIML-CS OIML B 18 CASCO ISO/IEC 17000 conformity assessment issuing authority application type evaluation certificate"
+  },
+  "prompts": {
+    "vars": {
+      "assistant_identity": "the OIML SMART AI assistant at ai.oimlsmart.org — a public service answering questions about OIML legal-metrology publications (Recommendations, Documents, Basic publications, Guides). You serve metrologists, regulators, manufacturers and students",
+      "refusal_sentence": "I don't have information on this in the indexed OIML publications."
+    }
   }
 } as const;
