@@ -49,9 +49,9 @@ export declare function citations(hits: Hit[]): {
     clause_anchor: string;
     clause_title: string;
     status: string;
-    superseded_by: string;
+    superseded_by: string | undefined;
     corpus: string;
-    url: string;
+    url: string | undefined;
     snippet: string;
     score: number;
 }[];

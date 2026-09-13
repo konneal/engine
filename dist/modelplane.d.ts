@@ -44,14 +44,14 @@ export declare function modelCitation(node: BoundModelNode): {
     clause_title: string;
     status: string;
     corpus: string;
-    url: any;
+    url: undefined;
     snippet: string;
     score: number;
 };
 /** The context_applied echo's model block — the honest context line's
  *  grounding record. */
 export declare function modelEcho(node: BoundModelNode): {
-    clause?: string;
+    clause?: string | undefined;
     node_id: string;
     kind: string;
     standard: string;
