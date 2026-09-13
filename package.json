@@ -14,9 +14,12 @@
     "lint:wrangler": "python3 scripts/lint_wrangler.py",
     "test:ui": "node tests/ui.mjs",
     "test:bridge": "node --test tests/bridge.test.mjs",
-    "test:units": "node --test --experimental-strip-types tests/*.test.ts"
+    "test:units": "node --test --experimental-strip-types tests/*.test.ts",
+    "build": "rm -rf dist dist-types && esbuild workers/worker_public/src/index.ts workers/worker_public/src/config.ts workers/worker_public/src/refusal.ts workers/worker_public/src/profile.ts --bundle --format=esm --platform=neutral --outdir=dist --loader:.md=text && (tsc -p tsconfig.build.json || true) && cp dist-types/worker_public/src/*.d.ts dist/ && mkdir -p dist/prompts && cp workers/worker_public/prompts/*.md dist/prompts/"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260911.1",
+    "esbuild": "^0.28.2",
     "jsdom": "^29.1.1",
     "playwright": "^1.62.1",
     "yaml": "^2.9.1"
@@ -29,12 +32,24 @@
   "description": "The Konneal engine: the publisher-agnostic build pipeline and API plane for standards intelligence (retrieval, answer contract, verdicts, evaluation).",
   "license": "UNLICENSED",
   "type": "module",
-  "main": "./workers/worker_public/src/index.ts",
+  "main": "./dist/index.js",
   "exports": {
-    ".": "./workers/worker_public/src/index.ts",
-    "./setProfile": "./workers/worker_public/src/profile.ts",
-    "./config": "./workers/worker_public/src/config.ts",
-    "./refusal": "./workers/worker_public/src/refusal.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./setProfile": {
+      "types": "./dist/setProfile.d.ts",
+      "default": "./dist/setProfile.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
+    "./refusal": {
+      "types": "./dist/refusal.d.ts",
+      "default": "./dist/refusal.js"
+    }
   },
   "files": [
     "workers",
