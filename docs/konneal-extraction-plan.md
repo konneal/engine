@@ -1,6 +1,9 @@
 # The Konneal extraction plan — packages, phases, end-state
 
-> Status: PLAN v3 (2026-09-13) — the boundary is redrawn: **Konneal is
+> Status: PLAN v4 (2026-09-13) — adds the multi-cloud posture (§5
+> ports and adapters, §6 state management, §7 the software/infrastructure
+> split). v3's boundary — Konneal is the backend: build pipeline + API
+> plane — is redrawn: **Konneal is
 > the backend** — the build pipeline and the API plane — and nothing
 > else. The user plane (interface, site shell, articles, branding)
 > belongs wholly to the publisher. The shareable surface between them
@@ -270,3 +273,87 @@ already exercise over HTTP.
   never this publisher.
 - **Trademark screening** remains the gating step before any public
   Konneal marketing; the repos stay private until it clears.
+
+## 5. Ports and adapters — the multi-cloud posture
+
+The engine's domain logic is portable software; infrastructure appears
+only behind narrow ports, each with one reference adapter (Cloudflare,
+because it is proven in production) and a conformance suite. Additional
+adapters are contributed against the suite when a real deployment
+demands them — never speculatively.
+
+| Port | Semantics the engine requires | Reference adapter | Other adapters (on demand) |
+|---|---|---|---|
+| `ModelRunner` | run(role, kind, payload, {effort, budget, sampling}); streaming for answers | Workers AI binding | any OpenAI-compatible HTTP endpoint (covers most clouds, gateways and self-hosting; the z.ai vision lane already runs over HTTP — the precedent), Ollama/local |
+| `VectorIndex` | dense query with metadata filters, upsert, getByIds, delete; the scalar-or-string-array metadata law is the PORT contract | Vectorize | pgvector (the universal default), Qdrant, Weaviate, OpenSearch |
+| `Store` | the repositories: documents registry, model plane, unit payloads, sessions, conversations, projects, memory files, API keys, telemetry | D1 (SQLite) | libsql/Turso, Postgres, MySQL |
+| `Kv` | get/put with TTL on the hot read path | Workers KV | Redis (ubiquitous), DynamoDB, in-memory |
+| `Blobs` | put/get/delete immutable objects | R2 | any S3-compatible endpoint — R2 already speaks S3 |
+| `Runtime` | background work after response (waitUntil) | Workers | the Node/Bun equivalents |
+| Optional: `BotCheck` | human verification for the anonymous tier | Turnstile | hCaptcha, none |
+
+Design rules that keep the ports honest:
+
+- **Lexical search stays in the engine.** Vectorize has no sparse
+  vectors, so the lexical lane already runs engine-side over the
+  relational store. Adapters therefore need only dense search plus
+  filters — the weakest common denominator — and richer backends are a
+  superset, never a requirement.
+- **Model policy is deployment data, quirks are adapter facts.** Which
+  model serves which role is already configuration (`MODELS` +
+  `roleModel` overrides); provider-specific call shaping (the GLM
+  effort-budget rule, provider message-shape limits) lives inside the
+  adapter and is documented with it.
+- **Port purity is linted.** Domain modules import ports, never
+  adapters; the binding lint grows into this check, so an
+  infrastructure API cannot leak back into the stages.
+- **The conformance suites are the contract.** The wire law (already
+  tested TS↔Python), repository behavior, KV semantics and a
+  model round-trip each become suites every adapter must pass — the
+  same discipline the profile drift test applies to configuration.
+
+**Phasing stance — ports as seams, adapters on demand.** Phases A–C
+proceed Cloudflare-flavored exactly as planned; Phase B introduces the
+port boundaries as interfaces with the Cloudflare adapter as the sole
+implementation. The engine becomes adapter-shaped without paying for a
+second adapter. When a concrete SDO requires another cloud, the work
+is implementing adapters against existing conformance suites plus
+their infrastructure configuration — a focused contribution, not a
+rewrite, because the seams already exist.
+
+## 6. State management — the taxonomy that answers migration
+
+Every piece of state is classified, and the class determines its
+multi-cloud story:
+
+| Class | Contents | Multi-cloud story |
+|---|---|---|
+| **Rebuildable** (derived corpus) | vector indexes, unit payloads, model-plane nodes, rendered documents, unit assets | **Rebuild, never migrate.** The derivation pipeline is the chain of custody: pinned sources → `konneal build` → state. Moving clouds is re-running the build against the new target; the canonical-set declaration and reconciliation verify the result. This is the dividend of "data elsewhere". |
+| **Live** (user and tenant state) | sessions, conversations, projects, memory files, API keys | **Export/import through the ports.** `konneal state export|import` walks the repositories; portable precisely because the repositories are ported. |
+| **Ephemeral** (by design) | answer caches (exact + semantic), enrichment contexts, quota counters | **No migration.** TTLs and the corpus-generation stamp already treat this state as disposable; a new deployment cold-starts and converges within the TTL window (quota counters accept a day-boundary reset — documented, not hidden). |
+| **Analytics** | query and spend telemetry | **Export or cut over** — append-only rows; the deployment chooses import-for-continuity or a clean cutover. |
+
+Secrets, bindings and domains are infrastructure configuration in the
+deployment repository and never migrate through the engine at all.
+
+## 7. Software versus infrastructure — the split, stated as law
+
+- **Software (the engine ships it):** the retrieval stages and scoring,
+  the answer contract and its enforcement, the verdict engine, the
+  build derivation and its invariants, the evaluation harness, the
+  profile system, the HTTP route table and API surface, the OIDC
+  relying-party logic, quota and cache semantics, the port definitions,
+  the Cloudflare adapters, and the conformance suites. None of it knows
+  an account id, a binding name or a provider catalog.
+- **Infrastructure (the deployment declares it):** the choice and
+  configuration of adapters, bindings, accounts and credentials, the
+  model policy (which concrete models serve which roles, at what
+  pricing), capacity and limits, scheduling, domains and CDN.
+- **The law:** infrastructure appears in the engine only behind a
+  port, one reference adapter per port, conformance-tested. The
+  current codebase is already close: the ingest CLI speaks provider
+  REST through one class, the restore/replay tools proved both binding
+  and HTTP lanes for the same operations, and every provider gotcha
+  (getByIds above twenty, the metadata law, the effort-budget rule) is
+  already documented as a fact rather than scattered as folklore. The
+  extraction formalizes what the incidents already taught.
