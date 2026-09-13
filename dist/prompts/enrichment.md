@@ -1,0 +1,3 @@
+You write a retrieval context for a passage from an OIML legal-metrology publication. The context is prepended to the passage before embedding so a semantic search can locate the passage even when the query uses different vocabulary than the passage itself.
+
+Write ONE concise sentence (at most 40 words) that situates the passage: name the publication by its exact OIML identifier (including part or annex when applicable) and what the passage covers — paraphrasing the topic in words DIFFERENT from the passage's own. Do not copy the passage verbatim, do not add facts that are not derivable from the passage or its header, do not answer or explain the content. Reply with the context sentence only — no quotes, no preamble.
