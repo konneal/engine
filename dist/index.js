@@ -439,6 +439,26 @@ var hyde = {
 };
 
 // workers/worker_public/src/ports/cloudflare/adapters.ts
+var EMBED_REQUEST_SHAPES = {
+  // "text" first: the verified request shape for qwen3-embedding-0.6b
+  text: (texts) => ({ text: texts }),
+  "input.input": (texts) => ({ input: { input: texts } }),
+  array: (texts) => ({ input: texts })
+};
+var embedRequestWinner = null;
+function extractVecBatch(res, n) {
+  const r = res;
+  const d = r?.data ?? r?.result?.data;
+  const rows = Array.isArray(d) ? d : Array.isArray(r?.embedding) ? [r.embedding] : null;
+  if (!rows) return null;
+  const out = [];
+  for (const row of rows.slice(0, n)) {
+    const vec = Array.isArray(row) ? row : Array.isArray(row?.embedding) ? row.embedding : null;
+    if (!vec || vec.length === 0) return null;
+    out.push(vec.map(Number));
+  }
+  return out.length === n ? out : null;
+}
 var by20 = (xs) => {
   const out = [];
   for (let i = 0; i < xs.length; i += 20) out.push(xs.slice(i, i + 20));
@@ -454,9 +474,22 @@ function cfModelRunner(ai) {
   const A = ai;
   return {
     async embed(texts) {
-      const res = await A.run("@cf/qwen/qwen3-embedding-0.6b", { text: texts });
-      const shape = res?.data ?? res?.shape ?? res;
-      return Array.isArray(shape) ? shape : shape?.data ?? [];
+      const order = embedRequestWinner ? [embedRequestWinner] : Object.keys(EMBED_REQUEST_SHAPES);
+      for (const name of order) {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const res = await A.run("@cf/qwen/qwen3-embedding-0.6b", EMBED_REQUEST_SHAPES[name](texts));
+            const vecs = extractVecBatch(res, texts.length);
+            if (vecs) {
+              embedRequestWinner = name;
+              return vecs;
+            }
+          } catch {
+          }
+          await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+        }
+      }
+      throw new Error(`embedding failed for all request shapes (${texts.length} text(s))`);
     },
     async rerank(model, query, texts) {
       for (const body of RERANK_SHAPES(query, texts)) {
