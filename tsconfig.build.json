@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "outDir": "dist-types",
+    "rootDir": "workers",
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "types": ["@cloudflare/workers-types"]
+    "strict": false
+  },
+  "include": ["workers/worker_public/src/**/*.ts", "workers/shared/**/*.ts"]
+}

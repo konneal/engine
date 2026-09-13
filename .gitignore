@@ -10,3 +10,6 @@ artifacts/
 .DS_Store
 
 .astro/
+dist/
+dist-types/
+dist-types/
