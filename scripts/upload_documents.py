@@ -25,6 +25,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from ingest.codecs import codec_for_profile  # noqa: E402
 from ingest.config import ACCOUNT_ID  # noqa: E402
 
 CLEAN_SOURCES = Path(os.environ.get("OIML_CLEAN_DIR", str(Path.home() / "src/mn/mn-samples-oiml/sources")))
@@ -67,21 +68,20 @@ class HeadingMap(HTMLParser):
             self._id = None
 
 
+_CODEC = codec_for_profile(Path(__file__).resolve().parents[1] / "profile")
+
+
 def doc_slug(html: str) -> tuple[str, str]:
-    """(slug, docidentifier) from the rendered cover. The docidentifier is
-    preferred — its slug matches the citation doc_id's suffix exactly
-    (mko:oiml-r60-2 → oiml-r60-2), so no mapping layer exists."""
-    d = re.search(r"reference\s+(OIML\s+(?:R|D|B|G|E)\s*[\d]+(?:-[\d]+)?):\d{4}", html[:60000]) or re.search(
-        r"(OIML\s+(?:R|D|B|G|E)\s*[\d]+(?:-[\d]+)?):\d{4}", html[:60000]
-    )
-    ident = d.group(1) if d else ""
+    """(slug, docidentifier) via the profile-declared codec — the same
+    grammar the publisher's identifiers use everywhere, so the slug
+    matches the site's docSlug() with no mapping layer."""
+    ident = _CODEC.extract_identifier(html)
     if not ident:
         t = re.search(r"<title>([^<]+)</title>", html)
         title = t.group(1).strip() if t else ""
         d2 = re.search(r"(OIML\s+(?:R|D|B|G|E)\s*[\d/-]+[^\s<]*)", title)
         ident = d2.group(1).strip() if d2 else title or ""
-    slug = re.sub(r"[^a-z0-9]+", "-", ident.lower()).strip("-")
-    return slug, ident
+    return _CODEC.slug(ident), ident
 
 
 def r2_put(key: str, data: bytes, content_type: str) -> None:
