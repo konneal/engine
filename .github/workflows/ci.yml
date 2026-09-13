@@ -10,6 +10,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: dist freshness (committed build output must match source)
+        run: |
+          npm install --silent
+          npm run build >/dev/null 2>&1
+          git diff --exit-code dist || (echo "dist/ is stale — rebuild and commit (npm run build)"; exit 1)
       - uses: actions/setup-node@v4
         with:
           node-version: 24
