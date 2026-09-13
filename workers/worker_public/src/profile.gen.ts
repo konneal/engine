@@ -4,6 +4,7 @@ export const PROFILE = {
   "publisher": {
     "id": "oiml",
     "name": "OIML",
+    "codec": "oiml-pubid",
     "full_name": "International Organization of Legal Metrology",
     "product_name": "OIML SMART AI",
     "description": "Retrieval-augmented answering over OIML publications: Recommendations, Documents, Basic publications, Guides and Expert reports.",
