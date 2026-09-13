@@ -357,3 +357,85 @@ deployment repository and never migrate through the engine at all.
   (getByIds above twenty, the metadata law, the effort-budget rule) is
   already documented as a fact rather than scattered as folklore. The
   extraction formalizes what the incidents already taught.
+
+## 8. Worked examples — the full stack on AWS or Azure
+
+What follows is what a deployment actually configures on a full-stack
+hyperscaler, and what stays untouched in the engine. The profile is
+identical on every cloud; only the adapter wiring and infrastructure
+configuration differ.
+
+### 8.1 The per-port mapping
+
+| Port | AWS | Azure |
+|---|---|---|
+| Compute for the API plane | containers (ECS Fargate / App Runner) behind ALB or API Gateway | Container Apps / App Service / Functions |
+| `ModelRunner` | Bedrock models, or self-hosted open-weight models on EC2/SageMaker behind an OpenAI-compatible endpoint (vLLM) | Azure AI Foundry endpoints (OpenAI-compatible), or the same self-hosted lane |
+| `VectorIndex` | pgvector on Aurora/RDS Postgres (or OpenSearch) | pgvector on Azure Database for PostgreSQL (or Azure AI Search — a superset: vectors, filters and BM25) |
+| `Store` | Aurora/RDS Postgres | Azure Database for PostgreSQL |
+| `Kv` | ElastiCache Redis | Azure Cache for Redis |
+| `Blobs` | S3 | Azure Blob Storage (S3-interop or a thin adapter) |
+| `Runtime` (waitUntil) | the container adapter (no isolate limits) | same |
+| Scheduling | EventBridge Scheduler → the engine's `/admin/tick` route | a scheduled job → the same route |
+| `BotCheck` | Turnstile — a cloud-neutral web service, unchanged | unchanged |
+
+### 8.2 What the SDO configures (the deployment repository)
+
+```
+publisher-deployment/
+├── profile/            # IDENTICAL on every cloud: publisher, datasets,
+│                       # corpora, evals, sources.yaml (pinned content
+│                       # refs), prompts, codec
+├── adapters.yaml       # the port→implementation choice + endpoints:
+│                       # vector: pgvector(postgres-url), store: postgres,
+│                       # kv: redis, blobs: s3, models: openai-compatible(base-url)
+├── model-policy.yaml   # role→model mapping over THIS cloud's catalog,
+│                       # with pricing and the per-family call rules
+├── infra/              # Terraform/CDK/Bicep: the database, Redis, the
+│                       # bucket, DNS/CDN, secrets, the container service,
+│                       # the scheduler — the cloud's own language
+├── deploy/             # pipeline: build the container, deploy,
+│                       # konneal bootstrap (schema + index declaration),
+│                       # konneal build, konneal deploy (guards + smoke)
+└── CI                  # profile validation + engine-pinned gates,
+                        # exactly as on Cloudflare
+```
+
+`konneal bootstrap` and `konneal build` run the same code everywhere:
+bootstrap applies the repository schema and the index declaration
+through the chosen adapters; build reads `profile/sources.yaml` and
+runs the derivation into the declared state.
+
+### 8.3 What remains platform-independent (in Konneal)
+
+All of the domain, unchanged and untested-differently per cloud: the
+retrieval stages and scoring, the answer contract and its enforcement,
+the verdict engine, provable absence, verification, the research loop,
+sessions/projects/memory-file logic, quota and cache semantics, the
+build derivation and its invariants (canonical set, wire law, replay),
+the evaluation harness and grading semantics, the profile system, the
+HTTP route table and API surface, the MCP servers, `@konneal/client`,
+the port definitions, the conformance suites, and the Cloudflare
+reference adapters.
+
+### 8.4 The honest deltas
+
+1. **Model catalogs differ — the one real delta.** The reference cost
+   policy rides Cloudflare's open-weight catalog. A hyperscaler
+   deployment either maps roles onto that cloud's catalog in
+   `model-policy.yaml`, or keeps the exact policy by serving the same
+   open-weight models itself behind an OpenAI-compatible endpoint —
+   the adapter makes self-hosting a first-class lane, which is the
+   documented fallback posture already.
+2. **The execution model loosens, not tightens.** Containers have none
+   of the isolate limits (subrequest counts, topK caps) the engine
+   already respects; the engine asks every adapter for the weakest
+   common denominator, so nothing breaks and richer backends are a
+   bonus.
+3. **Deploy tooling is the cloud's own.** Wrangler is Cloudflare's;
+   AWS and Azure deployments carry Terraform/CDK/Bicep in `infra/`.
+   The guarded deploy semantics (version discipline, smoke, gates) are
+   engine commands and travel intact.
+4. **Dialect and behavior drift** across relational backends is the
+   conformance suites' job — an adapter ships only when the repository
+   suite passes against it.
