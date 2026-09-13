@@ -17,6 +17,7 @@ export declare const PROFILE: {
         readonly id: "pub";
         readonly label: "Fixture Publications";
         readonly description: "The fixture publisher's corpus";
+        readonly corpora: readonly ["pub", "dirty", "clean", "synthetic"];
         readonly note: "Some passages come from the fixture corpus — cite them the same way as every other passage.";
     }, {
         readonly id: "internal";
@@ -24,6 +25,7 @@ export declare const PROFILE: {
         readonly description: "An access-restricted corpus proving the permission gate";
         readonly session: true;
         readonly permission: "preview";
+        readonly corpora: readonly ["internal"];
     }];
     readonly corpora: {
         readonly production: readonly ["pub", "dirty", "clean", "synthetic", "model"];

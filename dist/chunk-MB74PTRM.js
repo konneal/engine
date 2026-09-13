@@ -19,6 +19,12 @@ var PROFILE = {
       "id": "pub",
       "label": "Fixture Publications",
       "description": "The fixture publisher's corpus",
+      "corpora": [
+        "pub",
+        "dirty",
+        "clean",
+        "synthetic"
+      ],
       "note": "Some passages come from the fixture corpus \u2014 cite them the same way as every other passage."
     },
     {
@@ -26,7 +32,10 @@ var PROFILE = {
       "label": "Internal corpus",
       "description": "An access-restricted corpus proving the permission gate",
       "session": true,
-      "permission": "preview"
+      "permission": "preview",
+      "corpora": [
+        "internal"
+      ]
     }
   ],
   "corpora": {

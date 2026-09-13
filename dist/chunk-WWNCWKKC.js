@@ -1,13 +1,9 @@
 import {
   DATASETS,
   datasetAllowed
-} from "./chunk-3E4LR3CH.js";
+} from "./chunk-WOGQM7DJ.js";
 
 // workers/worker_public/src/requestScope.ts
-var CORPORA_BY_DATASET = {
-  oiml: ["oiml", "dirty", "clean", "synthetic"],
-  iso: ["iso-internal"]
-};
 function resolveRequestScope(body, member) {
   const allIds = DATASETS().map((d) => d.id);
   const requested = Array.isArray(body?.datasets) ? body.datasets.filter((x) => typeof x === "string" && allIds.includes(x)) : null;
@@ -19,14 +15,16 @@ function resolveRequestScope(body, member) {
   const scopeIds = (requested ?? permittedIds).filter((id) => permittedIds.includes(id));
   const corpora = /* @__PURE__ */ new Set();
   for (const id of scopeIds) {
-    for (const v of CORPORA_BY_DATASET[id] ?? [id]) corpora.add(v);
+    const d = DATASETS().find((x) => x.id === id);
+    for (const v of d?.corpora ?? [id]) corpora.add(v);
   }
   const memoryIds = member && Array.isArray(body?.memories) ? body.memories.filter((x) => typeof x === "string").slice(0, 4) : [];
   return {
     scopeIds,
     corpora,
     narrowed: scopeIds.length < permittedIds.length,
-    isoOn: scopeIds.includes("iso"),
+    // federation flag: any session-gated (federated) dataset in scope
+    isoOn: scopeIds.some((id) => DATASETS().find((x) => x.id === id)?.session === true),
     memoryIds
   };
 }

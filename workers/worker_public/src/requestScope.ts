@@ -20,13 +20,10 @@ export interface RequestScope {
   memoryIds: string[];
 }
 
-const CORPORA_BY_DATASET: Record<string, string[]> = {
-  oiml: ["oiml", "dirty", "clean", "synthetic"],
-  iso: ["iso-internal"],
-};
-
 /** Validate + intersect. Returns { error } when the request explicitly
- *  disables every dataset (a user error, not a scope). */
+ *  disables every dataset (a user error, not a scope). The corpora a
+ *  dataset searches travel WITH the declaration (profile datasets.yaml,
+ *  `corpora:`) — the engine maps no publisher names. */
 export function resolveRequestScope(body: any, member: unknown): RequestScope | { error: "empty-datasets" } {
   const allIds = DATASETS().map((d) => d.id);
   const requested = Array.isArray(body?.datasets)
@@ -44,7 +41,8 @@ export function resolveRequestScope(body: any, member: unknown): RequestScope | 
   const scopeIds = (requested ?? permittedIds).filter((id) => permittedIds.includes(id));
   const corpora = new Set<string>();
   for (const id of scopeIds) {
-    for (const v of CORPORA_BY_DATASET[id] ?? [id]) corpora.add(v);
+    const d = DATASETS().find((x) => x.id === id);
+    for (const v of d?.corpora ?? [id]) corpora.add(v);
   }
   const memoryIds = member && Array.isArray(body?.memories)
     ? (body.memories as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 4)
@@ -53,7 +51,8 @@ export function resolveRequestScope(body: any, member: unknown): RequestScope | 
     scopeIds,
     corpora,
     narrowed: scopeIds.length < permittedIds.length,
-    isoOn: scopeIds.includes("iso"),
+    // federation flag: any session-gated (federated) dataset in scope
+    isoOn: scopeIds.some((id) => DATASETS().find((x) => x.id === id)?.session === true),
     memoryIds,
   };
 }
