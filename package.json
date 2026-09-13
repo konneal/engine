@@ -32,7 +32,9 @@
   "main": "./workers/worker_public/src/index.ts",
   "exports": {
     ".": "./workers/worker_public/src/index.ts",
-    "./setProfile": "./workers/worker_public/src/profile.ts"
+    "./setProfile": "./workers/worker_public/src/profile.ts",
+    "./config": "./workers/worker_public/src/config.ts",
+    "./refusal": "./workers/worker_public/src/refusal.ts"
   },
   "files": [
     "workers",
