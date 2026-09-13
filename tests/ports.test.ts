@@ -127,15 +127,42 @@ test("cfVectorIndex accepts a flat match array too", async () => {
   assert.equal(out[0].metadata, null);
 });
 
-test("cfModelRunner.embed flattens the {data} envelope", async () => {
-  const calls: unknown[][] = [];
-  const ai = { run: async (model: string, body: unknown) => {
-    calls.push([model, body]);
-    return { data: [[0.1], [0.2]] };
+// The live Workers AI binding returns embeddings in at least three
+// envelope generations — the 2026-09-14 regression shipped an adapter
+// that only knew the first, returned [], and the index rejected the
+// 0-dimension query with an opaque 40006. Every envelope the original
+// seam code handled is pinned here.
+test("cfModelRunner.embed reads every known response envelope", async () => {
+  const cases: { res: unknown; want: number[][] }[] = [
+    { res: { data: [[0.1, 0.2]] }, want: [[0.1, 0.2]] },
+    { res: { result: { data: [[0.3, 0.4]] } }, want: [[0.3, 0.4]] },
+    { res: { embedding: [0.5, 0.6] }, want: [[0.5, 0.6]] },
+    { res: { data: [{ embedding: [0.7, 0.8] }] }, want: [[0.7, 0.8]] },
+  ];
+  for (const { res, want } of cases) {
+    const ai = { run: async () => res };
+    assert.deepEqual(await cfModelRunner(ai).embed(["a"]), want, JSON.stringify(res));
+  }
+});
+
+test("cfModelRunner.embed probes request shapes until one answers, and batches", async () => {
+  const bodies: unknown[] = [];
+  let attempt = 0;
+  const ai = { run: async (_m: string, body: unknown) => {
+    bodies.push(body);
+    attempt++;
+    if (attempt === 1) return { result: { shape: [1, 1024] } }; // no data — wrong envelope
+    return { result: { data: [[0.1], [0.2]] } };
   } };
   const out = await cfModelRunner(ai).embed(["a", "b"]);
   assert.deepEqual(out, [[0.1], [0.2]]);
-  assert.deepEqual((calls[0][1] as { text: string[] }).text, ["a", "b"]);
+  assert.deepEqual((bodies[0] as { text: string[] }).text, ["a", "b"]);
+  assert.deepEqual((bodies[1] as { text: string[] }).text, ["a", "b"]);
+});
+
+test("cfModelRunner.embed throws when every shape fails — never an empty vector", async () => {
+  const ai = { run: async () => ({ result: { shape: [1, 1024] } }) };
+  await assert.rejects(() => cfModelRunner(ai).embed(["a"]));
 });
 
 test("cfModelRunner.rerank probes shapes and places scores by id", async () => {
