@@ -14,6 +14,7 @@ import researchPromptText from "../prompts/research.md";
 import type { Env } from "./env";
 import type { Hit } from "../../shared/chunk.ts";
 import { P } from "./profile.ts";
+import { fill, promptVars } from "./pipeline.ts";
 
 /** Deep-research mode (G10 v1): bounded agentic loop for members —
  *  retrieve → sufficiency judge → re-retrieve targeting the gap → answer
@@ -72,7 +73,7 @@ export async function handleResearch(env: Env, ctx: ExecutionContext, req: Reque
       try {
         const res: any = await env.AI.run(MODELS.grader, {
           messages: [
-            { role: "system", content: researchPromptText.trimEnd() },
+            { role: "system", content: fill(researchPromptText, promptVars()).trimEnd() },
             { role: "user", content: `Research question: ${q.query}\n\n${digest}Collected passages (${recent.length}):\n${recent.map((h, n) => `[${n + 1}] ${h.metadata.docidentifier ?? ""} §${h.metadata.clause_anchor ?? ""}: ${h.text.slice(0, 700)}`).join("\n")}` },
           ],
           max_tokens: 3072,

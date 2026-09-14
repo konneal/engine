@@ -105,7 +105,15 @@ var PROFILE = {
     "vars": {
       "assistant_identity": "the fixture assistant \u2014 a public service answering questions about the fixture publisher's documents",
       "refusal_sentence": "I don't have information on this in the indexed fixture documents.",
-      "account_note_source": "the user's own fixture account"
+      "account_note_source": "the user's own fixture account",
+      "corpus_kind": "a fixture corpus publication",
+      "corpus_kind_plural": "fixture corpus publications",
+      "cite_example": "FIXTURE 1:2024 \xA72.1",
+      "cite_quote_example": 'FIXTURE 1:2024 \xA72.1: "the limit shall not exceed one interval"',
+      "parts_example": "FIXTURE 1-1, FIXTURE 1-A",
+      "docid_example": "FIXTURE 1-2",
+      "spelling_examples": '"f1", "FIXTURE 1"',
+      "process_vocab": "the fixture certification system framework"
     }
   }
 };

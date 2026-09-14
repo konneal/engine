@@ -10,6 +10,7 @@ export type { QueryUnderstanding };
 
 // The prompt is data (prompts/understanding.md), bundled as text.
 import SYSTEM from "../prompts/understanding.md";
+import { fill, promptVars } from "./pipeline.ts";
 
 /** Understand the query with the cheap model. Null = use the regex fallback. */
 export async function understandQuery(
@@ -29,7 +30,7 @@ export async function understandQuery(
   const user = `${convo ? "Conversation so far:\n" + convo + "\n\n" : ""}${entityLine}Question: ${query}`;
   const body = {
     messages: [
-      { role: "system", content: SYSTEM },
+      { role: "system", content: fill(SYSTEM, promptVars()) },
       { role: "user", content: user },
     ],
     // the model always reasons; reasoning tokens share this budget — too

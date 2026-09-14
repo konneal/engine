@@ -8,8 +8,6 @@
 //   ingest/codecs.py, src/codecs.ts — the codec registry (an id like
 //     "oiml-pubid" names the codec, and the codec's own grammar is
 //     publisher-shaped by definition)
-//   prompts/*.md — prompt templates still carry OIML example wording
-//     (PR: varianlize like ASSISTANT_IDENTITY; then delist)
 //   drafts.ts — the OIML-CS application-drafting feature, gated behind
 //     features.drafts (off by default); its home is an extension
 //     package, not more profile vars
@@ -20,7 +18,7 @@ const ALLOW = new Set([
   "workers/worker_public/src/codecs.ts",
   "workers/worker_public/src/drafts.ts",
 ]);
-const ALLOW_DIR = ["workers/worker_public/prompts/"];
+const ALLOW_DIR = [];
 // scope for now: the SERVING engine (workers/). The producer-side trees
 // (ingest/, scripts/, tests/) still carry publisher defaults from the
 // extraction; each gets its own pass and then joins this lint's walk.

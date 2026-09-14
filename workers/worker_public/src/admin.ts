@@ -13,6 +13,7 @@ import { scoreFaithfulness } from "./faithfulness";
 import { scoreJudge } from "./grader";
 import { portModelRunner } from "./env.ts";
 import { P } from "./profile.ts";
+import { fill, promptVars } from "./pipeline.ts";
 
 /** Contextual enrichment (quality-first lane): for each chunk, write a
  *  situating context (KV-cached per chunk id), embed context+text, and
@@ -59,7 +60,7 @@ export async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request
           const head = `${m.docidentifier ?? m.doc_id}${m.clause_anchor ? " §" + m.clause_anchor : ""}${m.clause_title ? " — " + m.clause_title : ""}`;
           const res: any = await env.AI.run(model, {
             messages: [
-              { role: "system", content: (abMode && abPrompt) || enrichmentPrompt.trimEnd() },
+              { role: "system", content: (abMode && abPrompt) || fill(enrichmentPrompt, promptVars()).trimEnd() },
               { role: "user", content: abMode && abPrompt ? String(body?.user_text ?? "").slice(0, 4000) : `${head}\n\n${c.text.slice(0, 1500)}` },
             ],
             max_tokens: 1600,
@@ -320,7 +321,7 @@ export async function handleJudge(env: Env, req: Request): Promise<Response> {
   const [faith, relevancy, precision] = await Promise.all([
     passages.length ? scoreFaithfulness(env.AI, MODELS.grader, answer, passages) : Promise.resolve(null),
     scoreJudge(env.AI, MODELS.grader, relevancyPrompt, `Question: ${question}\n\nAnswer:\n${answer}`),
-    passages.length ? scoreJudge(env.AI, MODELS.grader, precisionPrompt, `Question: ${question}\n\nPassages:\n${passagesText}`) : Promise.resolve(null),
+    passages.length ? scoreJudge(env.AI, MODELS.grader, fill(precisionPrompt, promptVars()), `Question: ${question}\n\nPassages:\n${passagesText}`) : Promise.resolve(null),
   ]);
   return json({
     question_hash: await sha256Hex(question),

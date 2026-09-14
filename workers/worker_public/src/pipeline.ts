@@ -12,9 +12,24 @@ import { tableContext } from "./tablecontext";
 // here so the existing import surface keeps working
 export { refusalAnswer } from "./refusal";
 
+/** The interpolation source for every prompt: the profile's declared
+ *  vars plus the derived publisher tokens. Call sites never build
+ *  their own var map. */
+export function promptVars(extra: Record<string, string> = {}): Record<string, string> {
+  // profile vars are snake_case keys; template tokens are UPPER_SNAKE —
+  // the map is built here, once, so no call site can spread the raw
+  // keys again (the pre-varianlization bug: the identity token sat
+  // unmatched and rendered empty in the system prompt)
+  const out: Record<string, string> = { PUBLISHER_NAME: P().publisher.name };
+  for (const [k, v] of Object.entries(P().prompts?.vars ?? {})) {
+    if (typeof v === "string") out[k.toUpperCase()] = v;
+  }
+  return { ...out, ...extra };
+}
+
 /** Fill {{TOKEN}} placeholders in a prompt data file. Unknown/empty tokens
  *  resolve to "" so optional lines vanish cleanly. */
-function fill(template: string, vars: Record<string, string>): string {
+export function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => (k in vars ? vars[k] : ""));
 }
 import { QueryFilters, toVectorizeFilter } from "./selfquery";
@@ -168,7 +183,7 @@ export function identityNote(member: boolean): string {
   const upsell = locked.length
     ? `Signed-in members additionally search: ${locked.map((d) => `${d.label} (${d.description})`).join("; ")}.`
     : "";
-  return fill(conversationalPromptText, { CORPORA: corpora, UPSELL: upsell })
+  return fill(conversationalPromptText, promptVars({ CORPORA: corpora, UPSELL: upsell }))
     .split("\n")
     .filter((l) => l.trim())
     .join("\n");
@@ -260,14 +275,13 @@ export function buildMessages(
 
   // the prompt itself is data (prompts/system.md); one rule per line,
   // joined with spaces exactly as the original array form
-  const system = fill(systemPromptText, {
-    ...P().prompts.vars,
+  const system = fill(systemPromptText, promptVars({
     HISTORY_CONTEXT: history.length
       ? " Earlier turns of this conversation are provided for context — answer the LATEST question, treating the passages below as the source of truth for facts and citations."
       : "",
     CORPUS_NOTES: corpusNotes,
     LANG_CLAUSE: lang ? ` (explicitly requested: ${lang})` : "",
-  })
+  }))
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean)
