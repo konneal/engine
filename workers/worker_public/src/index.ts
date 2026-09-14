@@ -31,6 +31,7 @@ import { handleAsk } from "./ask";
 // handler's, derived from the path. Mirrored in docs/spec-api.md.
 
 import { matchRoute, type RouteContext, type Route } from "./lib/router";
+import { P } from "./profile.ts";
 
 async function serveIndexPage(c: RouteContext): Promise<Response> {
   // HTML pages are served through the worker with must-revalidate so a
@@ -112,7 +113,7 @@ async function tierFor(c: RouteContext): Promise<{ tier: "anon" | "key" | "membe
   let key: ApiKey | null = null;
   if (isApi) {
     key = await authenticate(c.env, c.req);
-    if (!key) return err(401, "unauthorized", "Provide a valid API key: Authorization: Bearer oiml_...");
+    if (!key) return err(401, "unauthorized", `Provide a valid API key: Authorization: Bearer ${P().publisher.id}_...`);
   }
   let tier: "anon" | "key" | "member" = isApi ? "key" : "anon";
   if (!isApi && c.env.SESSION_SECRET && (await sessionFrom(c.req, c.env as any))) tier = "member";
@@ -215,7 +216,7 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
     const checks = [
       { name: "quote_anchors", deterministic: true, pass: anchors.violations.length === 0, detail: `${anchors.violations.length} of ${anchors.total} quoted spans absent from the retrieved passages` },
       { name: "unit_references", deterministic: true, pass: refs.length === validRefs.length, detail: refs.length ? `${validRefs.length}/${refs.length} unit references resolve to served units` : "no unit references" },
-      { name: "citations_present", deterministic: true, pass: /\[[^\]]*(OIML|ISO)[^\]]*\]/.test(answer), detail: "normative claims should carry a passage citation" },
+      { name: "citations_present", deterministic: true, pass: new RegExp(`\\[[^\\]]*(${P().publisher.name})[^\\]]*\\]`).test(answer), detail: "normative claims should carry a passage citation" },
     ];
     const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h: Hit) => h.text));
     return json({

@@ -7,11 +7,16 @@ export declare const PROFILE: {
         readonly description: "A minimal publisher profile exercising every declared surface: an open dataset, a permission-gated dataset, production and lane corpora, prompt vars and retrieval vocabulary.";
         readonly domains: {
             readonly public: "fixture.example.org";
+            readonly origin_suffix: "fixture.example.org";
         };
         readonly identity: {
             readonly issuer: "https://id.fixture.example.org";
         };
         readonly codec: "plain-slug";
+        readonly session_cookie: "fixture-session";
+        readonly references: {
+            readonly label_prefix: "";
+        };
     };
     readonly datasets: readonly [{
         readonly id: "pub";
@@ -60,11 +65,13 @@ export declare const PROFILE: {
     };
     readonly retrieval: {
         readonly process_expansion: " fixture certification system framework application evaluation";
+        readonly process_note: "Retrieval note: these passages come from the fixture certification system documents because they govern application procedures for fixture publications.";
     };
     readonly prompts: {
         readonly vars: {
             readonly assistant_identity: "the fixture assistant — a public service answering questions about the fixture publisher's documents";
             readonly refusal_sentence: "I don't have information on this in the indexed fixture documents.";
+            readonly account_note_source: "the user's own fixture account";
         };
     };
 };

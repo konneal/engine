@@ -31,6 +31,7 @@ export type { Env };
 import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
 import { clientIp, checkQuota, telemetry } from "./quota";
 import { graphExpand, editionNote } from "./graph";
+import { P } from "./profile.ts";
 
 /** User-uploaded image for multimodal questions: a data URL
  *  (data:image/(png|jpeg|webp|gif);base64,…) up to 6 MB of payload. The
@@ -596,7 +597,7 @@ async function handleAsk(
       model: roleModel(env, "understand"),
     });
     console.log("draft act:", draftAct, "→", verdict.status === "draft" ? `draft (${Object.keys(verdict.draft.fields).length} fields)` : `refused (${verdict.reason})`);
-    const citations = verdict.citation ? [{ ...verdict.citation, corpus: "oiml" }] : [];
+    const citations = verdict.citation ? [{ ...verdict.citation, corpus: P().publisher.id }] : [];
     const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
     telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash, q.lang);
     if (wantsStream) {
@@ -649,7 +650,7 @@ async function handleAsk(
     ? {
         unit_id: boundModel!.node_id,
         type: "verdict",
-        docidentifier: `OIML SMART model (${boundModel!.standard})`,
+        docidentifier: `${P().publisher.name} SMART model (${boundModel!.standard})`,
         payload: {
           verdict: machineVerdict.verdict,
           on_violation: machineVerdict.on_violation,
@@ -685,7 +686,7 @@ async function handleAsk(
           (r) => `- ${r.label} [${[r.status, r.detail].filter(Boolean).join("; ")}] ${r.url}`,
         );
         accountNote =
-          `Live account data (read ${live.readAt} from the user's own OIML SMART account — exactly what they may see, never more):\n` +
+          `Live account data (read ${live.readAt} from ${P().prompts.vars.account_note_source ?? `the user's own ${P().publisher.product_name} account`} — exactly what they may see, never more):\n` +
           (lines.length ? lines.join("\n") : "(the account surfaces answered empty)") +
           `\nAnswer account questions from these records ONLY: name the record when you use it, never invent one, and say honestly when they do not hold the answer. The corpus passages still ground the regulatory claims (the requirements, the procedures); the records are the user's own work.`;
         console.log("live data:", live.records.length, "records from", live.stores.join("+") || "none");
@@ -755,7 +756,7 @@ async function handleAsk(
   }
 
   const processNote = understanding?.process_intent
-    ? "Retrieval note: these passages come from the OIML Certification System documents because they govern certification/application procedures for OIML publications."
+    ? P().retrieval.process_note
     : undefined;
   // the vocabulary binding (L2): the corpus's defined-term candidates for
   // the question's subject — the model adjudicates among them and uses

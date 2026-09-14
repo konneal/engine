@@ -5,7 +5,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { canonicalRefusal, refusalAnswer } from "../workers/worker_public/src/refusal.ts";
-const REFUSAL_ANSWER = refusalAnswer(); // the fixture profile's sentence
+import { setProfile } from "../workers/worker_public/src/profile.ts";
+import { PROFILE } from "../workers/worker_public/src/profile.gen.ts";
+
+// the pinned-sentence family is publisher data; these tests pin the
+// OIML shape (the reference deployment's), so the profile declares it
+setProfile({
+  ...PROFILE,
+  publisher: { ...PROFILE.publisher, name: "OIML" },
+  prompts: { ...PROFILE.prompts, vars: { ...PROFILE.prompts.vars, refusal_sentence: "I don't have information on this in the indexed OIML publications." } },
+});
+const REFUSAL_ANSWER = refusalAnswer();
 
 test("the pinned sentence passes through untouched", () => {
   assert.equal(canonicalRefusal(REFUSAL_ANSWER), REFUSAL_ANSWER);

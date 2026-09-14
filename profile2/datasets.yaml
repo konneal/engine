@@ -1,0 +1,14 @@
+datasets:
+  - id: spec
+    label: Atlas Specifications
+    description: The institute's published specifications and errata
+    corpora: [spec, errata]
+    note: >-
+      Some passages come from the Atlas errata corpus — cite them the
+      same way as every other passage.
+  - id: wg
+    label: Working-group corpus
+    description: An access-restricted corpus proving the permission gate
+    session: true
+    permission: committee
+    corpora: [wg]

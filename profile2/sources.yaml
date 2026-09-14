@@ -1,0 +1,5 @@
+# upstream sources the engine's tooling reads (declared, never hardcoded)
+corpora: {}
+bibliography: {}
+terminology: {}
+models: {}

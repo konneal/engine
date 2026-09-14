@@ -1,0 +1,6 @@
+vars:
+  assistant_identity: >-
+    the Atlas Answers assistant — a public service answering questions
+    about the Atlas Standards Institute's specifications
+  refusal_sentence: I don't have information on this in the indexed Atlas specifications.
+  account_note_source: the user's own Atlas Answers account

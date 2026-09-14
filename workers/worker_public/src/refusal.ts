@@ -8,27 +8,24 @@ export function refusalAnswer(): string {
 
 // the model occasionally paraphrases the refusal sentence ("...information
 // on how to make lasagna in the indexed..."); the API contract is the
-// exact canonical sentence — normalize variants, keep the redirect tail
-const REFUSAL_VARIANT = /^\s*I don[’']?t have information on .{1,120}? in the indexed OIML(?: \w+){0,2} (?:publications|passages|documents|corpus)\.?/i;
-
-// Upstream wording drift (rag#88, the golden refusal pin recalibrated
-// 2026-09-01): the model now also refuses with no pinned sentence at all —
-// a "can't help" redirect naming the OIML publications, or a "no real
-// answer to give" paraphrase. The runtime and the harness pins
-// (scripts/eval.mjs, tests/e2e.mjs, tests/eval-suite.mjs) carry the SAME
-// family: every shape the tests accept canonicalizes to the pinned
-// sentence here, and nothing else does.
-const REFUSAL_DRIFT: RegExp[] = [
-  /\b(can'?t|cannot|couldn'?t|unable)\b[^.]{0,120}?\b(indexed )?OIML(?: \w+){0,2} publications\b/i,
-  /\bno real answer to give\b[^.]{0,120}?\bOIML\b/i,
-  /\b(?:falls|well) outside\b[^.]{0,120}?\b(?:what I can answer|my scope|the scope of)\b/i,
-  /\boutside (?:of )?what (?:I|this service) can answer\b/i,
-  // "I can't answer that — weather forecasting is outside my scope":
-  // requires the refusal verb, so a scope DISCUSSION inside a real answer
-  // ("this exemption is outside the scope of R 60") never matches
-  /\bI can[’']?t answer\b[^.]{0,100}?\bscope\b/i,
-  /^\s*I don[’']?t have any indexed OIML \w+(?:s)? (?:covering|about|on)\b/im,
-];
+// exact canonical sentence — normalize variants, keep the redirect tail.
+// The patterns are built per call: the publisher token is profile data.
+function refusalPatterns(publisher: string): { variant: RegExp; drift: RegExp[] } {
+  return {
+    variant: new RegExp(`^\\s*I don[’']?t have information on .{1,120}? in the indexed ${publisher}(?: \\w+){0,2} (?:publications|passages|documents|corpus)\\.?`, "i"),
+    drift: [
+      new RegExp(`\\b(can'?t|cannot|couldn'?t|unable)\\b[^.]{0,120}?\\b(indexed )?${publisher}(?: \\w+){0,2} publications\\b`, "i"),
+      new RegExp(`\\bno real answer to give\\b[^.]{0,120}?\\b${publisher}\\b`, "i"),
+      /\b(?:falls|well) outside\b[^.]{0,120}?\b(?:what I can answer|my scope|the scope of)\b/i,
+      /\boutside (?:of )?what (?:I|this service) can answer\b/i,
+      // "I can't answer that — weather forecasting is outside my scope":
+      // requires the refusal verb, so a scope DISCUSSION inside a real answer
+      // ("this exemption is outside the scope of R 60") never matches
+      /\bI can[’']?t answer\b[^.]{0,100}?\bscope\b/i,
+      new RegExp(`^\\s*I don[’']?t have any indexed ${publisher} \\w+(?:s)? (?:covering|about|on)\b`, "im"),
+    ],
+  };
+}
 
 /** Start of the sentence containing offset `i` (after the nearest ". ",
  *  "! ", "? ", or newline before it, else the string start). */
@@ -54,6 +51,7 @@ function sentenceEnd(answer: string, i: number): number {
 export function canonicalRefusal(answer: string): string {
   const CANON = refusalAnswer();
   if (answer.includes(CANON)) return answer;
+  const { variant: REFUSAL_VARIANT, drift: REFUSAL_DRIFT } = refusalPatterns(P().publisher.name);
   const variant = answer.match(REFUSAL_VARIANT);
   if (variant) return answer.replace(variant[0], CANON);
   for (const drift of REFUSAL_DRIFT) {

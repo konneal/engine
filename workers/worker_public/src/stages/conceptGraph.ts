@@ -19,6 +19,7 @@
 // family's content reaches it).
 import { THRESHOLDS } from "../config.ts";
 import type { Stage } from "./types.ts";
+import { refCodec } from "../codecs.ts";
 
 export const conceptGraph: Stage = {
   name: "concept-graph",
@@ -43,8 +44,8 @@ export const conceptGraph: Stage = {
     );
     for (const rows of termRows) {
       for (const r of rows.results ?? []) {
-        const m = String(r.doc ?? "").match(/^doc:OIML-[A-Z]-(\d+)-/);
-        if (m) numbers.add(m[1]!);
+        const mNum = refCodec().graphDocNumber(String(r.doc ?? ""));
+        if (mNum) numbers.add(mNum);
       }
     }
     if (numbers.size) {

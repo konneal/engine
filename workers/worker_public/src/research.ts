@@ -13,6 +13,7 @@ import { graphExpand, editionNote } from "./graph";
 import researchPromptText from "../prompts/research.md";
 import type { Env } from "./env";
 import type { Hit } from "../../shared/chunk.ts";
+import { P } from "./profile.ts";
 
 /** Deep-research mode (G10 v1): bounded agentic loop for members —
  *  retrieve → sufficiency judge → re-retrieve targeting the gap → answer
@@ -22,7 +23,7 @@ import type { Hit } from "../../shared/chunk.ts";
  *  path when runs outgrow a single request. */
 export async function handleResearch(env: Env, ctx: ExecutionContext, req: Request, session: any): Promise<Response> {
   if (!session) {
-    return err(403, "forbidden", "Deep research is a member feature — sign in with your OIML SMART account.");
+    return err(403, "forbidden", `Deep research is a member feature — sign in with your ${P().publisher.product_name} account.`);
   }
   const body = await readJson(req);
   const q = validateQuery(body);

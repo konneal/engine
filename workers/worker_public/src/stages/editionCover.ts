@@ -11,10 +11,8 @@ import { toHits, type Stage } from "./types.ts";
 
 const maxDocs = 2;
 
-const familyOf = (di: string): string | null => {
-  const m = /^(?:OIML\s+)?([A-Z])\s?(\d{1,3})(?:[-–]([0-9A-Za-z]+))?/.exec(di);
-  return m ? `${m[1]}-${m[2]}` : null;
-};
+import { refCodec } from "../codecs.ts";
+const familyOf = (di: string): string | null => refCodec().familyOf(di);
 
 export const editionCover: Stage = {
   name: "edition-cover",

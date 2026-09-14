@@ -212,7 +212,7 @@ export function datasetsFor(session: unknown): unknown[] {
     description: d.description,
     enabled: datasetAllowed(d, session),
     ...(d.session
-      ? { requires: `the ${d.permission ?? "ai-preview"} permission (id.oimlsmart.org)`, authenticated: !!session }
+      ? { requires: `the ${d.permission ?? "ai-preview"} permission (${P().publisher.identity.issuer.replace(/^https?:\/\//, "")})`, authenticated: !!session }
       : {}),
   }));
 }

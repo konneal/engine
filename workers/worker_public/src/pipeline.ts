@@ -348,12 +348,13 @@ export function buildMessages(
   };
 }
 
-function oimlPublicationUrl(meta: ChunkMeta): string | undefined {
-  if (!meta.doctype || !meta.doc_number) return undefined;
-  const typeMap: Record<string, string> = { R: "r", D: "d", B: "b", G: "g", E: "e" };
-  const t = typeMap[meta.doctype];
-  if (!t) return undefined;
-  return `https://www.oiml.org/en/publications/${t}${meta.doc_number}`;
+/** The publisher's catalog page for a publication, from the profile's
+ *  URL template ({type} = lowercase doctype, then the number); no
+ *  template, no catalog link. */
+function publicationUrl(meta: ChunkMeta): string | undefined {
+  const tpl = P().publisher.catalog_url_template;
+  if (!tpl || !meta.doctype || !meta.doc_number) return undefined;
+  return tpl.replace("{type}", meta.doctype.toLowerCase()) + meta.doc_number;
 }
 
 export function citations(hits: Hit[]) {
@@ -368,8 +369,8 @@ export function citations(hits: Hit[]) {
       clause_title: h.metadata.clause_title,
       status: h.metadata.status ?? "unknown",
       superseded_by: h.metadata.superseded_by || undefined,
-      corpus: h.metadata.corpus || "oiml",
-      url: oimlPublicationUrl(h.metadata),
+      corpus: h.metadata.corpus || P().publisher.id,
+      url: publicationUrl(h.metadata),
       snippet: h.text.slice(0, 400),
       score: h.rerank_score ?? h.score,
     }))

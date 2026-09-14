@@ -20,6 +20,11 @@ import {
   retainOpAccessToken,
 } from "../workers/worker_public/src/livedata.ts";
 
+import { setProfile } from "../workers/worker_public/src/profile.ts";
+import { PROFILE } from "../workers/worker_public/src/profile.gen.ts";
+// the livedata rows carry the OIML platform's id convention (oiml-r60)
+setProfile({ ...PROFILE, publisher: { ...PROFILE.publisher, id: "oiml" } });
+
 // ── the doubles ──────────────────────────────────────────────────────
 
 function kvStub() {

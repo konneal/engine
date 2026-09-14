@@ -11,6 +11,7 @@ export interface Env {
   RAG_BASE: string;
   RAG_API_KEY?: string;
   /** read-only access to the derived documents registry (public OIML
+import { P } from "../../worker_public/src/profile.ts";
    *  metadata: editions, active flags, supersession) */
   DB: D1Database;
 }
@@ -27,11 +28,13 @@ const rpcResult = (id: unknown, result: unknown) => json({ jsonrpc: "2.0", id, r
 const rpcError = (id: unknown, code: number, message: string) =>
   json({ jsonrpc: "2.0", id, error: { code, message } });
 
+const publisherId = () => P().publisher.id;
+const publisherName = () => P().publisher.name;
 const TOOLS = [
   {
-    name: "oiml_search",
+    name: `${publisherId()}_search`,
     description:
-      "Search the OIML publications corpus (legal metrology: Recommendations R, Documents D, Basic publications B, Guides G). Returns ranked passages with publication identifier, edition, clause and snippet.",
+      `Search the ${publisherName()} publications corpus. Returns ranked passages with publication identifier, edition, clause and snippet.`,
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -42,9 +45,9 @@ const TOOLS = [
     },
   },
   {
-    name: "oiml_documents",
+    name: `${publisherId()}_documents`,
     description:
-      "Look up the publication registry for an OIML family: every edition with its derived status (in-force/superseded), which edition is ACTIVE (terminal of the successor chain), and supersession links. Use for 'current/latest edition' and edition-history questions.",
+      `Look up the publication registry for a ${publisherName()} family: every edition with its derived status (in-force/superseded), which edition is ACTIVE (terminal of the successor chain), and supersession links. Use for 'current/latest edition' and edition-history questions.`,
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -54,9 +57,9 @@ const TOOLS = [
     },
   },
   {
-    name: "oiml_ask",
+    name: `${publisherId()}_ask`,
     description:
-      "Ask a question about OIML publications and get a grounded, citation-linked answer. Every claim cites the exact publication and clause it comes from.",
+      `Ask a question about ${publisherName()} publications and get a grounded, citation-linked answer. Every claim cites the exact publication and clause it comes from.`,
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -87,14 +90,14 @@ function searchResultText(r: any): string {
 }
 
 async function callTool(env: Env, name: string, args: any): Promise<{ content: Array<{ type: string; text: string }> }> {
-  if (name === "oiml_search") {
+  if (name === `${publisherId()}_search`) {
     const query = String(args?.query ?? "").slice(0, 2000);
     if (!query) throw new Error("query is required");
     const data = await rag(env, "/api/search", { query, top_k: Math.min(10, Math.max(1, Number(args?.top_k) || 5)) });
     const text = (data.results ?? []).map(searchResultText).join("\n\n") || "No passages matched.";
     return { content: [{ type: "text", text }] };
   }
-  if (name === "oiml_documents") {
+  if (name === `${publisherId()}_documents`) {
     const family = String(args?.family ?? "").trim().slice(0, 20);
     if (!/^[A-Z]-\d{1,3}$/i.test(family)) throw new Error("family must look like 'R-60'");
     const rows = await env.DB.prepare(
@@ -107,7 +110,7 @@ async function callTool(env: Env, name: string, args: any): Promise<{ content: A
     );
     return { content: [{ type: "text", text: lines.join("\n") || `No editions found for ${family}` }] };
   }
-  if (name === "oiml_ask") {
+  if (name === `${publisherId()}_ask`) {
     const query = String(args?.query ?? "").slice(0, 2000);
     if (!query) throw new Error("query is required");
     const data = await rag(env, "/api/ask", { query, stream: false, ...(args?.fresh ? { fresh: true } : {}) });
@@ -152,7 +155,7 @@ export default {
           return rpcResult(msg.id, {
             protocolVersion: PROTOCOL_VERSION,
             capabilities: { tools: {} },
-            serverInfo: { name: "rag-mcp", version: "1.0.0", title: "OIML SMART AI — public corpus" },
+            serverInfo: { name: "rag-mcp", version: "1.0.0", title: `${P().publisher.product_name} — public corpus` },
           });
         case "tools/list":
           return rpcResult(msg.id, { tools: TOOLS });

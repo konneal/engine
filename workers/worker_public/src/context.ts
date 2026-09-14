@@ -73,28 +73,16 @@ export function parseContext(body: any): DeclaredContext | null {
   return { kind: c.kind, label, ...(route ? { route } : {}), ...(doc ? { doc } : {}), ...(edition ? { edition } : {}) };
 }
 
-export interface DocScope {
-  /** the Vectorize doc_number filter value (the publication FAMILY —
-   *  an entity's clause provenance spans parts: R 60-1 requirements,
-   *  R 60-2 tests) */
-  doc_number: string;
-  edition?: string;
-  /** the canonical label form for the echo + the prompt note */
-  label: string;
-}
+import { refCodec, type DocScope } from "./codecs.ts";
+import { P } from "./profile.ts";
+export type { DocScope };
 
 /** Parse the two reference forms the estate speaks: the URN the SMART
  *  models carry as clause provenance (urn:oiml:pub:r:60-1:2021) and the
  *  plain docidentifier (OIML R 60-1:2021 / R 60). Part designations
  *  parse but do not narrow the scope (the family IS the scope). */
 export function parseDocRef(doc: string, edition?: string): DocScope | null {
-  const m =
-    doc.match(/^urn:oiml:pub:([rdbge]):(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i) ??
-    doc.match(/^(?:OIML\s+)?([RDBGE])\s*(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i);
-  if (!m) return null;
-  const type = m[1].toUpperCase();
-  const ed = edition ?? m[3] ?? undefined;
-  return { doc_number: m[2], ...(ed ? { edition: ed } : {}), label: `OIML ${type} ${m[2]}${ed ? `:${ed}` : ""}` };
+  return refCodec().parse(doc, edition);
 }
 
 /** Read the FIRST publication the question's own text names, in the
@@ -108,15 +96,7 @@ export function parseDocRef(doc: string, edition?: string): DocScope | null {
  *  A glued single digit is a class/designation ("E2 weights"), never a
  *  naming; part designations parse but do not narrow the family. */
 export function namedDocumentIn(query: string): DocScope | null {
-  const re = /\b(OIML\s+)?([RDBGE])(\s*)0*(\d{1,3})(?:\s*[-–]\s*\d+)?(?:\s*:\s*(\d{4}))?/gi;
-  for (const m of query.matchAll(re)) {
-    const [, oimlPrefix, letter, gap, digits, edition] = m;
-    if (digits!.length === 1 && !oimlPrefix && !gap) continue;
-    const num = String(Number(digits));
-    const type = letter!.toUpperCase();
-    return { doc_number: num, ...(edition ? { edition } : {}), label: `OIML ${type} ${num}${edition ? `:${edition}` : ""}` };
-  }
-  return null;
+  return refCodec().scanQuestion(query);
 }
 
 /** Resolve the declared document against the publications registry: the
@@ -202,7 +182,7 @@ export function contextNote(declared: DeclaredContext | null, scope: DocScope | 
     return undefined;
   }
   if (declared.kind === "page") {
-    return `Context note: the user is viewing ${declared.label || "a page"}${declared.route ? ` (${declared.route})` : ""} in the OIML SMART platform. The passages come from the general corpus; frame procedural guidance for that page when relevant.`;
+    return `Context note: the user is viewing ${declared.label || "a page"}${declared.route ? ` (${declared.route})` : ""} in the ${P().publisher.product_name} platform. The passages come from the general corpus; frame procedural guidance for that page when relevant.`;
   }
   if (declared.kind === "entity") {
     return scope

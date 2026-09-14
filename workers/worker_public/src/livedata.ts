@@ -25,6 +25,7 @@
  *  dependency-free (context.ts's pattern: the unit tests load it on
  *  plain node's type stripping, which never resolves extensionless
  *  relative imports). */
+import { P } from "./profile.ts";
 async function sha256Hex(s: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -174,7 +175,7 @@ export type LiveRead =
 /** The platform page for a record — the role family decides the console
  *  (the same page the user's own browser would open). */
 function recordUrl(cfg: LiveDataConfig, roleFamily: string, store: string, row: any): string {
-  const std = typeof row.standard_id === "string" ? row.standard_id.replace(/^oiml-/, "") : null;
+  const std = typeof row.standard_id === "string" ? row.standard_id.replace(new RegExp(`^${P().publisher.id}-`, "i"), "") : null;
   if (store === "certificates") {
     if (roleFamily === "applicant") return `${cfg.platformApi}/app/portal/certificates/${row.id}`;
     if (std) return `${cfg.platformApi}/app/standards/${std}/certificates/${row.id}`;
@@ -245,7 +246,7 @@ export async function readMyAccount(_env: any, cfg: LiveDataConfig, token: strin
       records.push({
         store: "applications",
         id: String(row.id),
-        label: `Application ${row.application_number ?? row.id}${row.standard_id ? ` — ${String(row.standard_id).replace(/^oiml-/, "").toUpperCase().replace(/^R(\d)/, "R $1")}` : ""}`,
+        label: `Application ${row.application_number ?? row.id}${row.standard_id ? ` — ${String(row.standard_id).replace(new RegExp(`^${P().publisher.id}-`, "i"), "").toUpperCase().replace(/^R(\d)/, "R $1")}` : ""}`,
         url: recordUrl(cfg, family, "applications", row),
         status: row.status,
         date: row.submitted_date ?? row.date_of_application,

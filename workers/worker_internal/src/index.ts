@@ -113,7 +113,7 @@ async function adminSyncRoute(c: RouteContext): Promise<Response> {
 
 async function retrieveRoute(c: RouteContext): Promise<Response> {
   const session = await sessionFrom(c.req, c.env as any);
-  if (!session) return err(401, "unauthorized", "Sign in required — this endpoint federates the OIML + ISO/IEC corpora.");
+  if (!session) return err(401, "unauthorized", "Sign in required — this endpoint federates the internal and public corpora.");
   let body: any;
   try {
     body = await c.req.json();

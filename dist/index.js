@@ -1,11 +1,11 @@
 import {
   canonicalRefusal,
   refusalAnswer
-} from "./chunk-LLWPT2XV.js";
+} from "./chunk-4DBFB2GM.js";
 import {
   requestSalt,
   resolveRequestScope
-} from "./chunk-WWNCWKKC.js";
+} from "./chunk-6HBXNAP7.js";
 import {
   DATASETS,
   LIMITS,
@@ -21,11 +21,11 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "./chunk-WOGQM7DJ.js";
+} from "./chunk-C42QFWEI.js";
 import {
   P,
   setProfile
-} from "./chunk-MB74PTRM.js";
+} from "./chunk-5K6JKVCL.js";
 
 // workers/worker_public/src/ai.ts
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -607,6 +607,49 @@ var glossary = {
   }
 };
 
+// workers/worker_public/src/codecs.ts
+var oimlPubid = {
+  parse(doc, edition) {
+    const m = doc.match(/^urn:oiml:pub:([rdbge]):(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i) ?? doc.match(/^(?:OIML\s+)?([RDBGE])\s*(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i);
+    if (!m) return null;
+    const type = m[1].toUpperCase();
+    const ed = edition ?? m[3] ?? void 0;
+    return { doc_number: m[2], ...ed ? { edition: ed } : {}, label: `OIML ${type} ${m[2]}${ed ? `:${ed}` : ""}` };
+  },
+  scanQuestion(query) {
+    const re = /\b(OIML\s+)?([RDBGE])(\s*)0*(\d{1,3})(?:\s*[-–]\s*\d+)?(?:\s*:\s*(\d{4}))?/gi;
+    for (const m of query.matchAll(re)) {
+      const [, oimlPrefix, letter, gap, digits, edition] = m;
+      if (digits.length === 1 && !oimlPrefix && !gap) continue;
+      const num2 = String(Number(digits));
+      const type = letter.toUpperCase();
+      return { doc_number: num2, ...edition ? { edition } : {}, label: `OIML ${type} ${num2}${edition ? `:${edition}` : ""}` };
+    }
+    return null;
+  },
+  graphDocNumber(nodeId) {
+    const m = nodeId.match(/^doc:OIML-[A-Z]-(\d+)-/);
+    return m ? m[1] : null;
+  },
+  familyOf(di) {
+    const m = /^(?:OIML\s+)?([A-Z])\s?(\d{1,3})(?:[-–]([0-9A-Za-z]+))?/.exec(di);
+    return m ? `${m[1]}-${m[2]}` : null;
+  }
+};
+var plainSlug = {
+  parse: () => null,
+  scanQuestion: () => null,
+  graphDocNumber: () => null,
+  familyOf: () => null
+};
+var REGISTRY = {
+  "oiml-pubid": oimlPubid,
+  "plain-slug": plainSlug
+};
+function refCodec() {
+  return REGISTRY[P().publisher.codec] ?? plainSlug;
+}
+
 // workers/worker_public/src/stages/conceptGraph.ts
 var conceptGraph = {
   name: "concept-graph",
@@ -623,8 +666,8 @@ var conceptGraph = {
     );
     for (const rows of termRows) {
       for (const r of rows.results ?? []) {
-        const m = String(r.doc ?? "").match(/^doc:OIML-[A-Z]-(\d+)-/);
-        if (m) numbers.add(m[1]);
+        const mNum = refCodec().graphDocNumber(String(r.doc ?? ""));
+        if (mNum) numbers.add(mNum);
       }
     }
     if (numbers.size) {
@@ -800,7 +843,9 @@ var seal = {
 };
 
 // workers/worker_public/src/stages/corpusScope.ts
-var DATASET_CORPORA = /* @__PURE__ */ new Set(["oiml", "dirty", "clean", "synthetic", "smart-model", "iso-internal"]);
+function datasetCorpora() {
+  return new Set(P().datasets.flatMap((d) => d.corpora ?? []));
+}
 var corpusScope = {
   name: "corpus-scope",
   when: (c) => !!c.opts.datasetScope && c.opts.datasetScope.size > 0,
@@ -808,7 +853,7 @@ var corpusScope = {
     const before = c.hits.length;
     c.hits = c.hits.filter((h) => {
       const corpus = h.metadata.corpus;
-      if (!corpus || !DATASET_CORPORA.has(corpus)) return true;
+      if (!corpus || !datasetCorpora().has(corpus)) return true;
       return c.opts.datasetScope.has(corpus);
     });
     if (c.hits.length !== before) console.log("corpus scope:", before, "\u2192", c.hits.length, "candidates");
@@ -817,10 +862,7 @@ var corpusScope = {
 
 // workers/worker_public/src/stages/editionCover.ts
 var maxDocs = 2;
-var familyOf = (di) => {
-  const m = /^(?:OIML\s+)?([A-Z])\s?(\d{1,3})(?:[-–]([0-9A-Za-z]+))?/.exec(di);
-  return m ? `${m[1]}-${m[2]}` : null;
-};
+var familyOf = (di) => refCodec().familyOf(di);
 var editionCover = {
   name: "edition-cover",
   failure: "additive",
@@ -1459,12 +1501,10 @@ ${context}` }
     usedHits
   };
 }
-function oimlPublicationUrl(meta) {
-  if (!meta.doctype || !meta.doc_number) return void 0;
-  const typeMap = { R: "r", D: "d", B: "b", G: "g", E: "e" };
-  const t = typeMap[meta.doctype];
-  if (!t) return void 0;
-  return `https://www.oiml.org/en/publications/${t}${meta.doc_number}`;
+function publicationUrl(meta) {
+  const tpl = P().publisher.catalog_url_template;
+  if (!tpl || !meta.doctype || !meta.doc_number) return void 0;
+  return tpl.replace("{type}", meta.doctype.toLowerCase()) + meta.doc_number;
 }
 function citations(hits) {
   const rank = (s) => s === "in-force" || s === "joint" ? 0 : s === "unknown" || !s ? 1 : 2;
@@ -1477,8 +1517,8 @@ function citations(hits) {
     clause_title: h.metadata.clause_title,
     status: h.metadata.status ?? "unknown",
     superseded_by: h.metadata.superseded_by || void 0,
-    corpus: h.metadata.corpus || "oiml",
-    url: oimlPublicationUrl(h.metadata),
+    corpus: h.metadata.corpus || P().publisher.id,
+    url: publicationUrl(h.metadata),
     snippet: h.text.slice(0, 400),
     score: h.rerank_score ?? h.score
   })).sort((a, b) => rank(a.status) - rank(b.status));
@@ -1759,8 +1799,14 @@ function clearSessionCookie() {
 
 // workers/worker_public/src/bubble.ts
 function isAllowedBubbleOrigin(origin) {
-  if (origin === "https://oimlsmart.org") return true;
-  if (/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.oimlsmart\.org$/.test(origin)) return true;
+  const d = P().publisher.domains;
+  const suffix = d.origin_suffix ?? (d.public ? d.public.replace(/^[^.]+\./, "") : null);
+  if (suffix) {
+    const host = origin.startsWith("https://") ? origin.slice("https://".length) : "";
+    const labels = host.split(".");
+    if (host === suffix) return true;
+    if (labels.length >= 3 && labels.slice(1).join(".") === suffix) return true;
+  }
   if (/^http:\/\/localhost(:\d{1,5})?$/.test(origin)) return true;
   if (/^http:\/\/127\.0\.0\.1(:\d{1,5})?$/.test(origin)) return true;
   return false;
@@ -1773,7 +1819,7 @@ function bubbleConfirmPage(opts) {
   const host = escapeHtml(new URL(opts.origin).host);
   const jsSafe = (v) => JSON.stringify(v).replace(/</g, "\\u003c");
   const payload = jsSafe({
-    type: "oimlsmart-ai-session",
+    type: P().publisher.session_cookie ?? `${P().publisher.id}-session`,
     token: opts.token,
     name: opts.name,
     expiresAt: opts.expiresAt
@@ -1784,7 +1830,7 @@ function bubbleConfirmPage(opts) {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
-<title>OIML SMART AI \u2014 sign in</title>
+<title>${P().publisher.product_name} \u2014 sign in</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 2rem 1.25rem;
@@ -1806,10 +1852,10 @@ function bubbleConfirmPage(opts) {
 </head>
 <body>
 <main>
-  <h1>Continue to the OIML SMART AI assistant?</h1>
+  <h1>Continue to the ${P().publisher.product_name} assistant?</h1>
   <p>Signed in as <span class="who">${who}</span>. The page at <span class="who">${host}</span>
      asked to connect the assistant to your account, so your conversations sync there.</p>
-  <p>The assistant can read the public OIML corpus and your own assistant conversations \u2014 nothing else.</p>
+  <p>The assistant can read the public corpus and your own assistant conversations \u2014 nothing else.</p>
   <div class="row">
     <button type="button" class="no" id="cancel">Cancel</button>
     <button type="button" class="go" id="go">Continue</button>
@@ -1909,7 +1955,7 @@ async function exchangeForLiveToken(env, sessionRaw) {
   return { ok: true, token: granted.access_token };
 }
 function recordUrl(cfg, roleFamily, store, row) {
-  const std = typeof row.standard_id === "string" ? row.standard_id.replace(/^oiml-/, "") : null;
+  const std = typeof row.standard_id === "string" ? row.standard_id.replace(new RegExp(`^${P().publisher.id}-`, "i"), "") : null;
   if (store === "certificates") {
     if (roleFamily === "applicant") return `${cfg.platformApi}/app/portal/certificates/${row.id}`;
     if (std) return `${cfg.platformApi}/app/standards/${std}/certificates/${row.id}`;
@@ -1964,7 +2010,7 @@ async function readMyAccount(_env, cfg, token) {
       records.push({
         store: "applications",
         id: String(row.id),
-        label: `Application ${row.application_number ?? row.id}${row.standard_id ? ` \u2014 ${String(row.standard_id).replace(/^oiml-/, "").toUpperCase().replace(/^R(\d)/, "R $1")}` : ""}`,
+        label: `Application ${row.application_number ?? row.id}${row.standard_id ? ` \u2014 ${String(row.standard_id).replace(new RegExp(`^${P().publisher.id}-`, "i"), "").toUpperCase().replace(/^R(\d)/, "R $1")}` : ""}`,
         url: recordUrl(cfg, family, "applications", row),
         status: row.status,
         date: row.submitted_date ?? row.date_of_application
@@ -2217,10 +2263,7 @@ var json = (body, status = 200, extra = {}) => new Response(JSON.stringify(body)
 var err = (status, code, message) => json({ error: { code, message } }, status);
 function corsHeaders(req) {
   const origin = req.headers.get("origin") ?? "";
-  const allowed = origin === "https://oimlsmart.org" || /^https:\/\/[a-z0-9-]+\.oimlsmart\.org$/.test(origin) || // the local dev posture: the platform and the minisites develop on
-  // localhost ports against the live service (the bubble bridge admits
-  // the same class; anon quota is per-IP, member auth needs the token)
-  /^http:\/\/localhost(:\d{1,5})?$/.test(origin) || /^http:\/\/127\.0\.0\.1(:\d{1,5})?$/.test(origin);
+  const allowed = isAllowedBubbleOrigin(origin);
   return allowed ? {
     "access-control-allow-origin": origin,
     // PATCH + DELETE: the conversations API speaks them (rename,
@@ -2275,22 +2318,10 @@ function parseContext(body) {
   return { kind: c.kind, label, ...route ? { route } : {}, ...doc ? { doc } : {}, ...edition ? { edition } : {} };
 }
 function parseDocRef(doc, edition) {
-  const m = doc.match(/^urn:oiml:pub:([rdbge]):(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i) ?? doc.match(/^(?:OIML\s+)?([RDBGE])\s*(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i);
-  if (!m) return null;
-  const type = m[1].toUpperCase();
-  const ed = edition ?? m[3] ?? void 0;
-  return { doc_number: m[2], ...ed ? { edition: ed } : {}, label: `OIML ${type} ${m[2]}${ed ? `:${ed}` : ""}` };
+  return refCodec().parse(doc, edition);
 }
 function namedDocumentIn(query) {
-  const re = /\b(OIML\s+)?([RDBGE])(\s*)0*(\d{1,3})(?:\s*[-–]\s*\d+)?(?:\s*:\s*(\d{4}))?/gi;
-  for (const m of query.matchAll(re)) {
-    const [, oimlPrefix, letter, gap, digits, edition] = m;
-    if (digits.length === 1 && !oimlPrefix && !gap) continue;
-    const num2 = String(Number(digits));
-    const type = letter.toUpperCase();
-    return { doc_number: num2, ...edition ? { edition } : {}, label: `OIML ${type} ${num2}${edition ? `:${edition}` : ""}` };
-  }
-  return null;
+  return refCodec().scanQuestion(query);
 }
 async function resolveDocScope(env, ctx) {
   if (!ctx.doc) return null;
@@ -2335,7 +2366,7 @@ function contextNote(declared, scope) {
     return void 0;
   }
   if (declared.kind === "page") {
-    return `Context note: the user is viewing ${declared.label || "a page"}${declared.route ? ` (${declared.route})` : ""} in the OIML SMART platform. The passages come from the general corpus; frame procedural guidance for that page when relevant.`;
+    return `Context note: the user is viewing ${declared.label || "a page"}${declared.route ? ` (${declared.route})` : ""} in the ${P().publisher.product_name} platform. The passages come from the general corpus; frame procedural guidance for that page when relevant.`;
   }
   if (declared.kind === "entity") {
     return scope ? `Context note: the user is asking about ${declared.label || "an entity"} \u2014 the passages are scoped to ${scope.label}, the publication that governs it. You do NOT have the entity's own data; answer what the publication requires and say when the question needs the record itself.` : `Context note: the user is asking about ${declared.label || "an entity"}. You do NOT have the entity's own data; answer from the corpus passages and say when the question needs the record itself.`;
@@ -2991,8 +3022,7 @@ function telemetry(env, ctx, tier, route, model, ok, answerChars, queryHash, lan
 
 // workers/worker_public/src/graph.ts
 function docNumberOf(nodeId) {
-  const m = nodeId.match(/^doc:OIML-[A-Z]-(\d+)-/);
-  return m ? m[1] : null;
+  return refCodec().graphDocNumber(nodeId);
 }
 async function graphExpand(env, u) {
   if (!env.DB || !u) return void 0;
@@ -3422,7 +3452,7 @@ async function handleCreateKey(env, req) {
   const body = await readJson(req);
   if (!body?.name || typeof body.name !== "string") return err(400, "invalid_input", "name is required");
   const dayLimit = Number.isFinite(Number(body.day_limit)) && Number(body.day_limit) > 0 ? Number(body.day_limit) : num(env, "KEY_DAY_ASK_DEFAULT", 2e3);
-  const raw = `oiml_${[...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+  const raw = `${P().publisher.id}_[...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
   const id = crypto.randomUUID();
   const keyHash = await sha256Hex(raw);
   await env.DB.prepare(
@@ -3456,7 +3486,7 @@ Rules:
 // workers/worker_public/src/research.ts
 async function handleResearch(env, ctx, req, session) {
   if (!session) {
-    return err(403, "forbidden", "Deep research is a member feature \u2014 sign in with your OIML SMART account.");
+    return err(403, "forbidden", `Deep research is a member feature \u2014 sign in with your ${P().publisher.product_name} account.`);
   }
   const body = await readJson(req);
   const q = validateQuery(body);
@@ -4648,7 +4678,7 @@ ${summary}` }] : [],
       model: roleModel(env, "understand")
     });
     console.log("draft act:", draftAct, "\u2192", verdict.status === "draft" ? `draft (${Object.keys(verdict.draft.fields).length} fields)` : `refused (${verdict.reason})`);
-    const citations2 = verdict.citation ? [{ ...verdict.citation, corpus: "oiml" }] : [];
+    const citations2 = verdict.citation ? [{ ...verdict.citation, corpus: P().publisher.id }] : [];
     const draftPayload = verdict.status === "draft" ? verdict.draft : void 0;
     telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash2, q.lang);
     if (wantsStream) {
@@ -4681,7 +4711,7 @@ ${summary}` }] : [],
   const verdictBlock = machineVerdict ? {
     unit_id: boundModel.node_id,
     type: "verdict",
-    docidentifier: `OIML SMART model (${boundModel.standard})`,
+    docidentifier: `${P().publisher.name} SMART model (${boundModel.standard})`,
     payload: {
       verdict: machineVerdict.verdict,
       on_violation: machineVerdict.on_violation,
@@ -4705,7 +4735,7 @@ ${summary}` }] : [],
         const lines = live.records.map(
           (r) => `- ${r.label} [${[r.status, r.detail].filter(Boolean).join("; ")}] ${r.url}`
         );
-        accountNote = `Live account data (read ${live.readAt} from the user's own OIML SMART account \u2014 exactly what they may see, never more):
+        accountNote = `Live account data (read ${live.readAt} from ${P().prompts.vars.account_note_source ?? `the user's own ${P().publisher.product_name} account`} \u2014 exactly what they may see, never more):
 ` + (lines.length ? lines.join("\n") : "(the account surfaces answered empty)") + `
 Answer account questions from these records ONLY: name the record when you use it, never invent one, and say honestly when they do not hold the answer. The corpus passages still ground the regulatory claims (the requirements, the procedures); the records are the user's own work.`;
         console.log("live data:", live.records.length, "records from", live.stores.join("+") || "none");
@@ -4757,7 +4787,7 @@ Answer account questions from these records ONLY: name the record when you use i
     telemetry(env, ctx, tier, "ask", model, true, answer2.length, out2.query_hash, q.lang);
     return json({ ...out2, quota });
   }
-  const processNote = understanding?.process_intent ? "Retrieval note: these passages come from the OIML Certification System documents because they govern certification/application procedures for OIML publications." : void 0;
+  const processNote = understanding?.process_intent ? P().retrieval.process_note : void 0;
   const glossaryForNote = (() => {
     const g = retrieved.glossary ?? [];
     if (!g.length) return g;
@@ -5070,7 +5100,7 @@ async function tierFor(c) {
   let key = null;
   if (isApi) {
     key = await authenticate(c.env, c.req);
-    if (!key) return err(401, "unauthorized", "Provide a valid API key: Authorization: Bearer oiml_...");
+    if (!key) return err(401, "unauthorized", `Provide a valid API key: Authorization: Bearer ${P().publisher.id}_...`);
   }
   let tier = isApi ? "key" : "anon";
   if (!isApi && c.env.SESSION_SECRET && await sessionFrom(c.req, c.env)) tier = "member";
@@ -5166,7 +5196,7 @@ async function verifyRoute(c) {
     const checks = [
       { name: "quote_anchors", deterministic: true, pass: anchors.violations.length === 0, detail: `${anchors.violations.length} of ${anchors.total} quoted spans absent from the retrieved passages` },
       { name: "unit_references", deterministic: true, pass: refs.length === validRefs.length, detail: refs.length ? `${validRefs.length}/${refs.length} unit references resolve to served units` : "no unit references" },
-      { name: "citations_present", deterministic: true, pass: /\[[^\]]*(OIML|ISO)[^\]]*\]/.test(answer), detail: "normative claims should carry a passage citation" }
+      { name: "citations_present", deterministic: true, pass: new RegExp(`\\[[^\\]]*(${P().publisher.name})[^\\]]*\\]`).test(answer), detail: "normative claims should carry a passage citation" }
     ];
     const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h) => h.text));
     return json({

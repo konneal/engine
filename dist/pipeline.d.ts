@@ -50,7 +50,7 @@ export declare function citations(hits: Hit[]): {
     clause_title: string;
     status: string;
     superseded_by: string | undefined;
-    corpus: string;
+    corpus: any;
     url: string | undefined;
     snippet: string;
     score: number;

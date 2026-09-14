@@ -15,11 +15,18 @@
 // The token is the service's OWN session artifact — it can act on this
 // service only, never on the OP or other properties.
 
+import { P } from "./profile.ts";
 /** The origins a bubble may ride from: the estate pattern (the same rule
  *  corsHeaders applies) plus localhost for the local dev posture. */
 export function isAllowedBubbleOrigin(origin: string): boolean {
-  if (origin === "https://oimlsmart.org") return true;
-  if (/^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.oimlsmart\.org$/.test(origin)) return true;
+  const d = P().publisher.domains;
+  const suffix = d.origin_suffix ?? (d.public ? d.public.replace(/^[^.]+\./, "") : null);
+  if (suffix) {
+    const host = origin.startsWith("https://") ? origin.slice("https://".length) : "";
+    const labels = host.split(".");
+    if (host === suffix) return true;
+    if (labels.length >= 3 && labels.slice(1).join(".") === suffix) return true;
+  }
   if (/^http:\/\/localhost(:\d{1,5})?$/.test(origin)) return true;
   if (/^http:\/\/127\.0\.0\.1(:\d{1,5})?$/.test(origin)) return true;
   return false;
@@ -45,7 +52,7 @@ export function bubbleConfirmPage(opts: { name: string; origin: string; token: s
   // never close the element early (</script> breakout).
   const jsSafe = (v: unknown) => JSON.stringify(v).replace(/</g, "\\u003c");
   const payload = jsSafe({
-    type: "oimlsmart-ai-session",
+    type: P().publisher.session_cookie ?? `${P().publisher.id}-session`,
     token: opts.token,
     name: opts.name,
     expiresAt: opts.expiresAt,
@@ -56,7 +63,7 @@ export function bubbleConfirmPage(opts: { name: string; origin: string; token: s
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
-<title>OIML SMART AI — sign in</title>
+<title>${P().publisher.product_name} — sign in</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 2rem 1.25rem;
@@ -78,10 +85,10 @@ export function bubbleConfirmPage(opts: { name: string; origin: string; token: s
 </head>
 <body>
 <main>
-  <h1>Continue to the OIML SMART AI assistant?</h1>
+  <h1>Continue to the ${P().publisher.product_name} assistant?</h1>
   <p>Signed in as <span class="who">${who}</span>. The page at <span class="who">${host}</span>
      asked to connect the assistant to your account, so your conversations sync there.</p>
-  <p>The assistant can read the public OIML corpus and your own assistant conversations — nothing else.</p>
+  <p>The assistant can read the public corpus and your own assistant conversations — nothing else.</p>
   <div class="row">
     <button type="button" class="no" id="cancel">Cancel</button>
     <button type="button" class="go" id="go">Continue</button>

@@ -3,15 +3,14 @@
 // the graph says are relevant. Mirrors graph.py's node-id format
 // (doc:OIML-R-60-1-2017, concept:<id>).
 import type { Env } from "./env";
+import { refCodec } from "./codecs.ts";
 
 /** Graph expansion (G8 query lane): map understanding's term / named
  *  document onto the D1 projection (graph_nodes / graph_edges) and return
  *  the doc_numbers the graph says are relevant. Mirrors graph.py's node-id
  *  format (doc:OIML-R-60-1-2017, concept:<id>). */
 function docNumberOf(nodeId: string): string | null {
-  // doc:OIML-R-60-1-2017 → "60" | doc:OIML-B-18-2025 → "18"
-  const m = nodeId.match(/^doc:OIML-[A-Z]-(\d+)-/);
-  return m ? m[1] : null;
+  return refCodec().graphDocNumber(nodeId);
 }
 
 export async function graphExpand(env: Env, u: { term?: string | null; defined_terms?: string[]; docidentifier?: string | null } | null): Promise<string[] | undefined> {
