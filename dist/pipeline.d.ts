@@ -1,4 +1,11 @@
 export { refusalAnswer } from "./refusal";
+/** The interpolation source for every prompt: the profile's declared
+ *  vars plus the derived publisher tokens. Call sites never build
+ *  their own var map. */
+export declare function promptVars(extra?: Record<string, string>): Record<string, string>;
+/** Fill {{TOKEN}} placeholders in a prompt data file. Unknown/empty tokens
+ *  resolve to "" so optional lines vanish cleanly. */
+export declare function fill(template: string, vars: Record<string, string>): string;
 import { QueryFilters } from "./selfquery";
 import type { RetrieveOptions, GlossaryEntry } from "./stages/types";
 export type { ChunkMeta, Hit } from "../../shared/chunk";

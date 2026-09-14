@@ -1,6 +1,6 @@
 import {
   P
-} from "./chunk-BZEX6JOJ.js";
+} from "./chunk-35ODH64W.js";
 
 // workers/worker_public/src/config.ts
 var MODELS = {

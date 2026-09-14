@@ -76,6 +76,14 @@ export declare const PROFILE: {
             readonly assistant_identity: "the fixture assistant — a public service answering questions about the fixture publisher's documents";
             readonly refusal_sentence: "I don't have information on this in the indexed fixture documents.";
             readonly account_note_source: "the user's own fixture account";
+            readonly corpus_kind: "a fixture corpus publication";
+            readonly corpus_kind_plural: "fixture corpus publications";
+            readonly cite_example: "FIXTURE 1:2024 §2.1";
+            readonly cite_quote_example: "FIXTURE 1:2024 §2.1: \"the limit shall not exceed one interval\"";
+            readonly parts_example: "FIXTURE 1-1, FIXTURE 1-A";
+            readonly docid_example: "FIXTURE 1-2";
+            readonly spelling_examples: "\"f1\", \"FIXTURE 1\"";
+            readonly process_vocab: "the fixture certification system framework";
         };
     };
 };
