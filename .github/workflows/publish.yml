@@ -1,0 +1,32 @@
+# npm Trusted Publishing: the publish authenticates with the GitHub
+# Actions OIDC token — no npm token secret exists to leak or rotate.
+# Requires the one-time portal registration (npmjs.com → package →
+# Publishing access → Trusted Publisher: this repository, this
+# workflow filename). Publishes only on explicit human intent:
+# workflow_dispatch (you press the button) or a GitHub release.
+name: publish
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: dist freshness (never publish a stale build)
+        run: |
+          npm ci
+          npm run build >/dev/null 2>&1
+          git diff --exit-code dist || (echo "dist/ is stale — rebuild and commit first"; exit 1)
+      - name: publish (OIDC, provenance-attested)
+        run: npm publish --access public --provenance
