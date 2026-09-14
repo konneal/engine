@@ -19,7 +19,7 @@ export type { Env };
 import { json, err, corsHeaders, withCors, readJson, authenticate, type ApiKey } from "./lib/http";
 
 import { handleSearch } from "./search";
-import { handleEnrich, handleSectionUnit, handleCaption, handleVectors, handleJudge, handleCreateKey, handleListKeys } from "./admin";
+import { handleEnrich, handleSectionUnit, handleCaption, handleVectors, handleJudge, handleCreateKey, handleListKeys, handleRevokeKey } from "./admin";
 import { handleResearch } from "./research";
 import { handleAsk } from "./ask";
 
@@ -422,6 +422,7 @@ export const ROUTES: Route[] = [
   { method: "POST", pattern: "/v1/admin/judge", handler: (c) => handleJudge(c.env, c.req) },
   { method: "POST", pattern: "/v1/admin/keys", handler: (c) => handleCreateKey(c.env, c.req) },
   { method: "GET", pattern: "/v1/admin/keys", handler: (c) => handleListKeys(c.env, c.req) },
+  { method: "DELETE", pattern: "/v1/admin/keys/:id", handler: (c) => handleRevokeKey(c.env, c.req, c.params.id) },
 ];
 
 export default {

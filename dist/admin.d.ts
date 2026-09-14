@@ -24,3 +24,6 @@ export declare function handleVectors(env: Env, req: Request): Promise<Response>
 export declare function handleJudge(env: Env, req: Request): Promise<Response>;
 export declare function handleCreateKey(env: Env, req: Request): Promise<Response>;
 export declare function handleListKeys(env: Env, req: Request): Promise<Response>;
+/** Revoke an API key (soft: revoked = 1 — the hash row stays for
+ *  audit; authenticate() already excludes revoked keys). */
+export declare function handleRevokeKey(env: Env, req: Request, id: string): Promise<Response>;
