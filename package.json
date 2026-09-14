@@ -16,7 +16,9 @@
     "test:units": "node --test --experimental-strip-types tests/*.test.ts",
     "build": "rm -rf dist dist-types && esbuild workers/worker_public/src/index.ts workers/worker_public/src/config.ts workers/worker_public/src/refusal.ts workers/worker_public/src/profile.ts workers/worker_public/src/requestScope.ts --bundle --format=esm --splitting --platform=neutral --outdir=dist --loader:.md=text && tsc -p tsconfig.build.json && cp dist-types/worker_public/src/*.d.ts dist/ && mkdir -p dist/prompts && cp workers/worker_public/prompts/*.md dist/prompts/",
     "prepare": "npm run build",
-    "lint:ports": "node scripts/lint-ports.mjs"
+    "lint:ports": "node scripts/lint-ports.mjs",
+    "lint:publisher": "node scripts/lint-publisher-leak.mjs",
+    "gen:profile": "node scripts/gen_profile.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260911.1",

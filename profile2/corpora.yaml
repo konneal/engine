@@ -1,0 +1,10 @@
+# corpora registry: which corpora exist and which indexes serve them
+production: [spec, errata, model]
+lanes:
+  review: [review]
+  glossary: [glossary]
+corpora:
+  spec: { repo: fixtures/matrix2, note: the second fixture corpus }
+bibliography: {}
+terminology: {}
+models: {}

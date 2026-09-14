@@ -12,6 +12,7 @@ import precisionPrompt from "../prompts/precision.md";
 import { scoreFaithfulness } from "./faithfulness";
 import { scoreJudge } from "./grader";
 import { portModelRunner } from "./env.ts";
+import { P } from "./profile.ts";
 
 /** Contextual enrichment (quality-first lane): for each chunk, write a
  *  situating context (KV-cached per chunk id), embed context+text, and
@@ -336,7 +337,7 @@ export async function handleCreateKey(env: Env, req: Request): Promise<Response>
   const body = await readJson(req);
   if (!body?.name || typeof body.name !== "string") return err(400, "invalid_input", "name is required");
   const dayLimit = Number.isFinite(Number(body.day_limit)) && Number(body.day_limit) > 0 ? Number(body.day_limit) : num(env as any, "KEY_DAY_ASK_DEFAULT", 2000);
-  const raw = `oiml_${[...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+  const raw = `${P().publisher.id}_[...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
   const id = crypto.randomUUID();
   const keyHash = await sha256Hex(raw);
   await env.DB.prepare(

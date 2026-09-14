@@ -22,6 +22,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint:wrangler
       - run: npm run lint:ports
+      - run: node scripts/lint-publisher-leak.mjs
       - run: npm run test:units
 
   ingest:

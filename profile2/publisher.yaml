@@ -1,0 +1,27 @@
+# The reference matrix's second fixture (konneal item 10): a publisher
+# with a deliberately different shape — different identifier style,
+# different domains, a different session/cookie surface — so engine CI
+# proves the engine serves DECLARED profiles, never one publisher's
+# assumptions. Where the primary fixture keeps everything minimal, this
+# one exercises the reference-prefix surface and derived names.
+id: atlas
+name: Atlas
+full_name: The Atlas Standards Institute
+product_name: Atlas Answers
+description: >-
+  The second fixture publisher of the reference matrix: a
+  technical-standards institute issuing specifications and errata, with
+  a working-group corpus behind a session permission.
+domains:
+  public: answers.atlas.example
+  origin_suffix: atlas.example
+identity:
+  issuer: https://identity.atlas.example
+codec: plain-slug
+session_cookie: atlas-session
+references:
+  label_prefix: "ATLAS"
+production: [spec, errata, model]
+lanes:
+  review: [review]
+  glossary: [glossary]

@@ -13,6 +13,12 @@ import {
   namedDocumentIn,
   resolveDocScope,
 } from "../workers/worker_public/src/context.ts";
+import { setProfile } from "../workers/worker_public/src/profile.ts";
+import { PROFILE } from "../workers/worker_public/src/profile.gen.ts";
+
+// these tests exercise the oiml-pubid grammar; the codec is profile
+// data (codecs.ts), so the profile under test declares it
+setProfile({ ...PROFILE, publisher: { ...PROFILE.publisher, codec: "oiml-pubid" } });
 
 test("parseContext: absent / malformed context degrades to null, never to an error", () => {
   assert.equal(parseContext({}), null);

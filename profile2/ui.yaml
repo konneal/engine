@@ -1,0 +1,7 @@
+suggestions:
+  - What does ATLAS 12 specify?
+  - Which errata are open?
+models_disclosure:
+  - { role: Answers, model: atlas-answer-model }
+smoke:
+  - { label: sanity, query: What does ATLAS 12 specify?, expect: ATLAS }

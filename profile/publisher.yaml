@@ -12,6 +12,10 @@ description: >-
   corpora, prompt vars and retrieval vocabulary.
 domains:
   public: fixture.example.org
+  origin_suffix: fixture.example.org
 identity:
   issuer: https://id.fixture.example.org
 codec: plain-slug
+session_cookie: fixture-session
+references:
+  label_prefix: "" 

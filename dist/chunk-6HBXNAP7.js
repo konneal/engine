@@ -1,7 +1,7 @@
 import {
   DATASETS,
   datasetAllowed
-} from "./chunk-WOGQM7DJ.js";
+} from "./chunk-C42QFWEI.js";
 
 // workers/worker_public/src/requestScope.ts
 function resolveRequestScope(body, member) {

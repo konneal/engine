@@ -1,6 +1,6 @@
 import {
   P
-} from "./chunk-MB74PTRM.js";
+} from "./chunk-5K6JKVCL.js";
 
 // workers/worker_public/src/config.ts
 var MODELS = {
@@ -159,7 +159,7 @@ function datasetsFor(session) {
     label: d.label,
     description: d.description,
     enabled: datasetAllowed(d, session),
-    ...d.session ? { requires: `the ${d.permission ?? "ai-preview"} permission (id.oimlsmart.org)`, authenticated: !!session } : {}
+    ...d.session ? { requires: `the ${d.permission ?? "ai-preview"} permission (${P().publisher.identity.issuer.replace(/^https?:\/\//, "")})`, authenticated: !!session } : {}
   }));
 }
 function SUGGESTIONS() {

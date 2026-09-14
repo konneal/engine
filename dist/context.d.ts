@@ -50,15 +50,8 @@ export declare const NO_CONTEXT: AppliedContext;
  *  malformed degrades to null (no context), never to a 400 — a context
  *  the service can't parse is a context it must not apply. */
 export declare function parseContext(body: any): DeclaredContext | null;
-export interface DocScope {
-    /** the Vectorize doc_number filter value (the publication FAMILY —
-     *  an entity's clause provenance spans parts: R 60-1 requirements,
-     *  R 60-2 tests) */
-    doc_number: string;
-    edition?: string;
-    /** the canonical label form for the echo + the prompt note */
-    label: string;
-}
+import { type DocScope } from "./codecs.ts";
+export type { DocScope };
 /** Parse the two reference forms the estate speaks: the URN the SMART
  *  models carry as clause provenance (urn:oiml:pub:r:60-1:2021) and the
  *  plain docidentifier (OIML R 60-1:2021 / R 60). Part designations
