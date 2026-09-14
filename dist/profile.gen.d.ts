@@ -17,6 +17,10 @@ export declare const PROFILE: {
         readonly references: {
             readonly label_prefix: "";
         };
+        readonly features: {
+            readonly drafts: false;
+            readonly model_plane: false;
+        };
     };
     readonly datasets: readonly [{
         readonly id: "pub";

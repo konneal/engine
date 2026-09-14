@@ -25,9 +25,27 @@ import {
   modelGroundingBlock,
   modelCitation,
   modelEcho,
-  MODEL_CORPUS_NOTE,
+  modelCorpusNote,
 } from "../workers/worker_public/src/modelplane.ts";
 import { parseAppliedContext } from "../workers/worker_public/src/context.ts";
+
+import { setProfile } from "../workers/worker_public/src/profile.ts";
+import { PROFILE } from "../workers/worker_public/src/profile.gen.ts";
+// the model plane is a declared feature; these tests pin the OIML
+// deployment's mapping
+setProfile({
+  ...PROFILE,
+  publisher: { ...PROFILE.publisher, features: { drafts: false, model_plane: true } },
+  sources: { ...PROFILE.sources, models: { ...PROFILE.sources.models, standards: ["60", "91", "129", "144"], standard_prefix: "oiml-r" } },
+  prompts: {
+    ...PROFILE.prompts,
+    vars: {
+      ...PROFILE.prompts.vars,
+      model_grounding_intro: "Model grounding — the OIML SMART model plane (the platform's machine-readable Recommendation model, derived from the Primmel packages, the models' single source of truth):",
+      model_passage_note: "Some passages are the OIML SMART model plane (labeled OIML SMART model) — the platform's machine-readable Recommendation models derived from the Primmel packages. Treat their machine limits, applicability rules and acceptance criteria as the model's own statement of them (quote machine limits verbatim); where a model passage and a prose passage disagree, say so explicitly and cite both.",
+    },
+  },
+});
 
 // ── the doubles ──────────────────────────────────────────────────────
 
@@ -241,7 +259,7 @@ test("the citation names the model plane + the node's clause", async () => {
 });
 
 test("the corpus note instructs the model/prose disagreement posture for every retrieved model chunk", () => {
-  assert.match(MODEL_CORPUS_NOTE, /machine-readable Recommendation models/);
-  assert.match(MODEL_CORPUS_NOTE, /quote machine limits verbatim/);
-  assert.match(MODEL_CORPUS_NOTE, /disagree, say so explicitly and cite both/);
+  assert.match(modelCorpusNote(), /machine-readable Recommendation models/);
+  assert.match(modelCorpusNote(), /quote machine limits verbatim/);
+  assert.match(modelCorpusNote(), /disagree, say so explicitly and cite both/);
 });

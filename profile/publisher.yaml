@@ -18,4 +18,9 @@ identity:
 codec: plain-slug
 session_cookie: fixture-session
 references:
-  label_prefix: "" 
+  label_prefix: ""
+# engine features this deployment switches on (default: off — the
+# engine serves every publisher without them)
+features:
+  drafts: false
+  model_plane: false

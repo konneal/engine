@@ -31,6 +31,10 @@ export const PROFILE = {
       "glossary": [
         "glossary"
       ]
+    },
+    "features": {
+      "drafts": false,
+      "model_plane": false
     }
   },
   "datasets": [

@@ -22,6 +22,10 @@ export declare const PROFILE: {
             readonly review: readonly ["review"];
             readonly glossary: readonly ["glossary"];
         };
+        readonly features: {
+            readonly drafts: false;
+            readonly model_plane: false;
+        };
     };
     readonly datasets: readonly [{
         readonly id: "spec";
