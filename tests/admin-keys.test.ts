@@ -12,6 +12,6 @@ test("the key template in admin.ts interpolates the random hex (no literal sourc
   const src = readFileSync("workers/worker_public/src/admin.ts", "utf8");
   const m = src.match(/const raw = `([^`]*crypto\.getRandomValues[^`]*)`;/);
   assert.ok(m, "the key-generation template not found");
-  assert.ok(!m[1].includes("[...crypto"), "the inner expression must be interpolated, not literal");
+  assert.ok(m[1].includes("${[...crypto"), "the inner expression must be interpolated (${[...]), not literal source text");
   assert.ok(m[1].startsWith("${P().publisher.id}_${"), "the template shape drifted");
 });
