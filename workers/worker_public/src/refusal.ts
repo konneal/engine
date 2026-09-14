@@ -14,7 +14,7 @@ function refusalPatterns(publisher: string): { variant: RegExp; drift: RegExp[] 
   return {
     variant: new RegExp(`^\\s*I don[’']?t have information on .{1,120}? in the indexed ${publisher}(?: \\w+){0,2} (?:publications|passages|documents|corpus)\\.?`, "i"),
     drift: [
-      new RegExp(`\\b(can'?t|cannot|couldn'?t|unable)\\b[^.]{0,120}?\\b(indexed )?${publisher}(?: \\w+){0,2} publications\\b`, "i"),
+      new RegExp(`\\b(can'?t|cannot|couldn'?t|unable)\\b[^.]{0,120}?\\b(indexed )?${publisher}(?: \\w+){0,2} (?:publications|passages|documents|corpus)\\b`, "i"),
       new RegExp(`\\bno real answer to give\\b[^.]{0,120}?\\b${publisher}\\b`, "i"),
       /\b(?:falls|well) outside\b[^.]{0,120}?\b(?:what I can answer|my scope|the scope of)\b/i,
       /\boutside (?:of )?what (?:I|this service) can answer\b/i,
