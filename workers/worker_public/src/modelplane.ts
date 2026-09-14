@@ -186,7 +186,11 @@ export function modelGroundingBlock(node: BoundModelNode): string {
 export function modelCitation(node: BoundModelNode) {
   return {
     doc_id: `model:${node.standard}`,
-    docidentifier: `OIML SMART model (${node.standard.replace(/^oiml-r/, "R ")})`,
+    docidentifier: `${P().publisher.name} SMART model (${(() => {
+      const prefix = P().sources?.models?.standard_prefix ?? "";
+      const letter = prefix.replace(/^.*-/, "").toUpperCase();
+      return String(node.standard).replace(new RegExp(`^${prefix}`, "i"), `${letter} `);
+    })()})`,
     edition: "",
     language: "en",
     clause_anchor: node.clause?.ref || "model",
