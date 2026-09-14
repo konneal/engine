@@ -8,12 +8,17 @@ export const PROFILE = {
     "product_name": "Fixture Answers",
     "description": "A minimal publisher profile exercising every declared surface: an open dataset, a permission-gated dataset, production and lane corpora, prompt vars and retrieval vocabulary.",
     "domains": {
-      "public": "fixture.example.org"
+      "public": "fixture.example.org",
+      "origin_suffix": "fixture.example.org"
     },
     "identity": {
       "issuer": "https://id.fixture.example.org"
     },
-    "codec": "plain-slug"
+    "codec": "plain-slug",
+    "session_cookie": "fixture-session",
+    "references": {
+      "label_prefix": ""
+    }
   },
   "datasets": [
     {
@@ -90,12 +95,14 @@ export const PROFILE = {
     ]
   },
   "retrieval": {
-    "process_expansion": " fixture certification system framework application evaluation"
+    "process_expansion": " fixture certification system framework application evaluation",
+    "process_note": "Retrieval note: these passages come from the fixture certification system documents because they govern application procedures for fixture publications."
   },
   "prompts": {
     "vars": {
       "assistant_identity": "the fixture assistant — a public service answering questions about the fixture publisher's documents",
-      "refusal_sentence": "I don't have information on this in the indexed fixture documents."
+      "refusal_sentence": "I don't have information on this in the indexed fixture documents.",
+      "account_note_source": "the user's own fixture account"
     }
   }
 } as const;
