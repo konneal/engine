@@ -39,23 +39,23 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "default": "./dist/worker_public/src/index.js"
     },
     "./setProfile": {
       "types": "./dist/profile.d.ts",
-      "default": "./dist/profile.js"
+      "default": "./dist/worker_public/src/profile.js"
     },
     "./config": {
       "types": "./dist/config.d.ts",
-      "default": "./dist/config.js"
+      "default": "./dist/worker_public/src/config.js"
     },
     "./refusal": {
       "types": "./dist/refusal.d.ts",
-      "default": "./dist/refusal.js"
+      "default": "./dist/worker_public/src/refusal.js"
     },
     "./requestScope": {
       "types": "./dist/requestScope.d.ts",
-      "default": "./dist/requestScope.js"
+      "default": "./dist/worker_public/src/requestScope.js"
     },
     "./mcp": "./dist/worker_mcp/src/index.js"
   },
