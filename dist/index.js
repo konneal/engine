@@ -1,11 +1,11 @@
 import {
   canonicalRefusal,
   refusalAnswer
-} from "./chunk-TDLESKLB.js";
+} from "./chunk-AOO54KOE.js";
 import {
   requestSalt,
   resolveRequestScope
-} from "./chunk-6HBXNAP7.js";
+} from "./chunk-R2H5YURV.js";
 import {
   DATASETS,
   LIMITS,
@@ -21,11 +21,11 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "./chunk-C42QFWEI.js";
+} from "./chunk-VXDNSU4H.js";
 import {
   P,
   setProfile
-} from "./chunk-5K6JKVCL.js";
+} from "./chunk-BZEX6JOJ.js";
 
 // workers/worker_public/src/ai.ts
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -2877,7 +2877,9 @@ function modelNodeRefIn(text) {
 }
 function standardForDocNumber(docNumber) {
   if (!docNumber) return null;
-  return ["60", "91", "129", "144"].includes(docNumber) ? `oiml-r${docNumber}` : null;
+  const models = P().sources?.models;
+  if (!models?.standards?.length || !models?.standard_prefix) return null;
+  return models.standards.includes(docNumber) ? `${models.standard_prefix}${docNumber}` : null;
 }
 async function fetchNode(env, standard, nodeId) {
   try {
@@ -2931,7 +2933,7 @@ function modelGroundingBlock(node) {
   const c = node.content ?? {};
   const lines = [];
   lines.push(
-    `Model grounding \u2014 the OIML SMART model plane (the platform's machine-readable Recommendation model, derived from the Primmel packages, the models' single source of truth):`
+    P().prompts.vars.model_grounding_intro ?? "Model grounding \u2014 the model plane's own statement:"
   );
   lines.push(`Node: ${node.node_id} (${node.kind.replace(/_/g, " ")}) \u2014 ${node.name} [${node.standard}]`);
   if (node.clause) lines.push(`Provenance: ${node.clause.urn}`);
@@ -4430,7 +4432,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
   const declaredCtx = parseContext(body);
-  const draftAct = detectDraftIntent(q.query);
+  const draftAct = P().publisher.features?.drafts ? detectDraftIntent(q.query) : null;
   const member = tier === "member" ? await sessionFrom(req, env) : null;
   const effort = requestEffort(env, member, body?.effort);
   const limit = tier === "key" ? key.day_limit : tier === "member" || member ? num(env, "MEMBER_DAY_ASK", 300) : num(env, "ANON_DAY_ASK", 20);
@@ -4696,11 +4698,11 @@ ${summary}` }] : [],
   let liveRecords;
   let accountNote;
   const modelDocHint = named ?? docScope ?? namedDocumentIn(q.query);
-  const boundModel = await bindModelNode(env, {
+  const boundModel = P().publisher.features?.model_plane ? await bindModelNode(env, {
     label: declaredCtx?.label,
     query: q.query,
     standard: standardForDocNumber(modelDocHint?.doc_number)
-  });
+  }) : null;
   if (boundModel) {
     ctxApplied = { ...ctxApplied, model: modelEcho(boundModel) };
     console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause");

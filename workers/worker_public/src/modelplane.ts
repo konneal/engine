@@ -29,6 +29,7 @@
  *  slug segments (the packages' identifier shapes — /req/<class>/<id>,
  *  /conf/<class>/<id>, /term/<id>, /constraint/<id>, /characteristic/<id>,
  *  /state-machine/<id>, /dimension/<id>). */
+import { P } from "./profile.ts";
 const NODE_RE = /(?:^|[\s("'`])\/(req|conf|term|constraint|characteristic|state-machine|dimension)\/([a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)?)(?=[\s)"'`,;:.]|$)/i;
 
 /** The first model-node id a text names (the declared chip label first,
@@ -46,7 +47,9 @@ export function modelNodeRefIn(text: string | undefined | null): string | null {
  *  carry a plane; anything else resolves null (honest: no model to bind). */
 export function standardForDocNumber(docNumber: string | undefined): string | null {
   if (!docNumber) return null;
-  return ["60", "91", "129", "144"].includes(docNumber) ? `oiml-r${docNumber}` : null;
+  const models = P().sources?.models;
+  if (!models?.standards?.length || !models?.standard_prefix) return null;
+  return (models.standards as string[]).includes(docNumber) ? `${models.standard_prefix}${docNumber}` : null;
 }
 
 export interface BoundModelNode {
@@ -139,7 +142,7 @@ export function modelGroundingBlock(node: BoundModelNode): string {
   const c = node.content ?? {};
   const lines: string[] = [];
   lines.push(
-    `Model grounding — the OIML SMART model plane (the platform's machine-readable Recommendation model, derived from the Primmel packages, the models' single source of truth):`,
+    P().prompts.vars.model_grounding_intro ?? "Model grounding — the model plane's own statement:",
   );
   lines.push(`Node: ${node.node_id} (${node.kind.replace(/_/g, " ")}) — ${node.name} [${node.standard}]`);
   if (node.clause) lines.push(`Provenance: ${node.clause.urn}`);
@@ -209,5 +212,6 @@ export function modelEcho(node: BoundModelNode) {
 
 /** The per-corpus guidance note (config.ts's DATASETS pattern — every
  *  retrieved model-plane chunk carries it, chip or no chip). */
-export const MODEL_CORPUS_NOTE =
-  "Some passages are the OIML SMART model plane (labeled OIML SMART model) — the platform's machine-readable Recommendation models derived from the Primmel packages. Treat their machine limits, applicability rules and acceptance criteria as the model's own statement of them (quote machine limits verbatim); where a model passage and a prose passage disagree, say so explicitly and cite both.";
+export function modelCorpusNote(): string {
+  return P().prompts.vars.model_passage_note ?? "";
+}

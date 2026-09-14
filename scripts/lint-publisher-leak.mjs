@@ -10,15 +10,15 @@
 //     publisher-shaped by definition)
 //   prompts/*.md — prompt templates still carry OIML example wording
 //     (PR: varianlize like ASSISTANT_IDENTITY; then delist)
-//   drafts.ts, modelplane.ts — OIML-CS-specific features pending
-//     profile feature gates (PR-B; then delist)
+//   drafts.ts — the OIML-CS application-drafting feature, gated behind
+//     features.drafts (off by default); its home is an extension
+//     package, not more profile vars
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const ALLOW = new Set([
   "workers/worker_public/src/codecs.ts",
   "workers/worker_public/src/drafts.ts",
-  "workers/worker_public/src/modelplane.ts",
 ]);
 const ALLOW_DIR = ["workers/worker_public/prompts/"];
 // scope for now: the SERVING engine (workers/). The producer-side trees

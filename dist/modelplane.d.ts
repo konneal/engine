@@ -58,4 +58,4 @@ export declare function modelEcho(node: BoundModelNode): {
 };
 /** The per-corpus guidance note (config.ts's DATASETS pattern — every
  *  retrieved model-plane chunk carries it, chip or no chip). */
-export declare const MODEL_CORPUS_NOTE = "Some passages are the OIML SMART model plane (labeled OIML SMART model) \u2014 the platform's machine-readable Recommendation models derived from the Primmel packages. Treat their machine limits, applicability rules and acceptance criteria as the model's own statement of them (quote machine limits verbatim); where a model passage and a prose passage disagree, say so explicitly and cite both.";
+export declare function modelCorpusNote(): string;

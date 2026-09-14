@@ -25,3 +25,6 @@ production: [spec, errata, model]
 lanes:
   review: [review]
   glossary: [glossary]
+features:
+  drafts: false
+  model_plane: false

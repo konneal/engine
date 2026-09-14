@@ -17,6 +17,10 @@ var PROFILE = {
     "session_cookie": "fixture-session",
     "references": {
       "label_prefix": ""
+    },
+    "features": {
+      "drafts": false,
+      "model_plane": false
     }
   },
   "datasets": [

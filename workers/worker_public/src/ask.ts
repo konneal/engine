@@ -224,7 +224,7 @@ async function handleAsk(
   // live standing and the registry, never on the query alone, so a draft
   // ask bypasses both answer caches (read AND write) exactly as a
   // declared-context ask does.
-  const draftAct = detectDraftIntent(q.query);
+  const draftAct = P().publisher.features?.drafts ? detectDraftIntent(q.query) : null;
 
   const member = tier === "member" ? await sessionFrom(req, env as any) : null;
   // resolved before the quota check: the effort choice prices the ask
@@ -630,11 +630,13 @@ async function handleAsk(
   // wave-02 lesson); scope-less binds hold only when the node id is
   // unambiguous across the indexed standards.
   const modelDocHint = named ?? docScope ?? namedDocumentIn(q.query);
-  const boundModel = await bindModelNode(env, {
-    label: declaredCtx?.label,
-    query: q.query,
-    standard: standardForDocNumber(modelDocHint?.doc_number),
-  });
+  const boundModel = P().publisher.features?.model_plane
+    ? await bindModelNode(env, {
+        label: declaredCtx?.label,
+        query: q.query,
+        standard: standardForDocNumber(modelDocHint?.doc_number),
+      })
+    : null;
   if (boundModel) {
     ctxApplied = { ...ctxApplied, model: modelEcho(boundModel) };
     console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause");
