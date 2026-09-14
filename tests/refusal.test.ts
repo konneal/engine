@@ -72,3 +72,12 @@ test("control: a plain apology outside the drift family is not a refusal", () =>
 test("control: the empty answer is untouched", () => {
   assert.equal(canonicalRefusal(""), "");
 });
+
+test("drift: 'metrology documents' naming — the 2026-09-14 smoke shape — canonicalizes", () => {
+  const answer =
+    "I can't help with that — none of the passages relate to cooking or recipes; they cover OIML metrology documents.\n\nI can instead answer questions about OIML publications — for example, definitions like maximum permissible error.";
+  const out = canonicalRefusal(answer);
+  assert.ok(out.includes(REFUSAL_ANSWER), "the pinned sentence must appear");
+  assert.ok(!out.includes("can't help"), "the drift sentence must be replaced");
+});
+
