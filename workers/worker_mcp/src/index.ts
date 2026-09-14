@@ -1,18 +1,26 @@
-// MCP server (streamable HTTP transport) exposing the OIML public corpus
-// to MCP clients: tools oiml_search and oiml_ask, proxied to the rag-public
-// API. Audience isolation stays enforced in rag-public (this worker holds
-// no index bindings and no secrets beyond an optional API key).
+// MCP server (streamable HTTP transport) exposing the publisher's public
+// corpus to MCP clients, proxied to the rag-public API. Audience
+// isolation stays enforced in rag-public (this worker holds no index
+// bindings and no secrets).
+//
+// AUTH IS REQUIRED (2026-09-14, the user's call): the MCP client
+// presents one of the deployment's API keys (Authorization: Bearer …,
+// standard for MCP streamable-HTTP transports); the same token rides
+// outbound so spend, quota and telemetry charge the CALLER'S key. The
+// public corpus only — internal corpora stay session-bound and are not
+// offered over MCP.
 //
 // Protocol: JSON-RPC 2.0 over POST /mcp (Streamable HTTP). Stateless
 // server — each request is answered in one JSON response; no sessions.
 // https://modelcontextprotocol.io spec (2025-06 streamable HTTP).
 
+import { P } from "../../worker_public/src/profile.ts";
+import { authenticate } from "../../worker_public/src/lib/http";
+
 export interface Env {
   RAG_BASE: string;
-  RAG_API_KEY?: string;
-  /** read-only access to the derived documents registry (public OIML
-import { P } from "../../worker_public/src/profile.ts";
-   *  metadata: editions, active flags, supersession) */
+  /** the deployment's shared D1 (API keys + the derived documents
+   *  registry: editions, active flags, supersession) */
   DB: D1Database;
 }
 
@@ -29,6 +37,7 @@ const rpcError = (id: unknown, code: number, message: string) =>
   json({ jsonrpc: "2.0", id, error: { code, message } });
 
 const publisherId = () => P().publisher.id;
+const bearer = (req: Request) => (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
 const publisherName = () => P().publisher.name;
 const TOOLS = [
   {
@@ -71,13 +80,10 @@ const TOOLS = [
   },
 ];
 
-async function rag(env: Env, path: string, body: Record<string, unknown>): Promise<any> {
+async function rag(env: Env, auth: string, path: string, body: Record<string, unknown>): Promise<any> {
   const res = await fetch(`${env.RAG_BASE}${path}`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(env.RAG_API_KEY ? { authorization: `Bearer ${env.RAG_API_KEY}` } : {}),
-    },
+    headers: { "content-type": "application/json", authorization: auth },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`rag-public ${path} → ${res.status}`);
@@ -89,11 +95,11 @@ function searchResultText(r: any): string {
   return `${r.docidentifier ?? r.doc_id}${r.edition ? ":" + r.edition : ""}${anchor}${r.clause_title ? " — " + r.clause_title : ""}\n${r.snippet ?? ""}`;
 }
 
-async function callTool(env: Env, name: string, args: any): Promise<{ content: Array<{ type: string; text: string }> }> {
+async function callTool(env: Env, auth: string, name: string, args: any): Promise<{ content: Array<{ type: string; text: string }> }> {
   if (name === `${publisherId()}_search`) {
     const query = String(args?.query ?? "").slice(0, 2000);
     if (!query) throw new Error("query is required");
-    const data = await rag(env, "/api/search", { query, top_k: Math.min(10, Math.max(1, Number(args?.top_k) || 5)) });
+    const data = await rag(env, auth, "/api/search", { query, top_k: Math.min(10, Math.max(1, Number(args?.top_k) || 5)) });
     const text = (data.results ?? []).map(searchResultText).join("\n\n") || "No passages matched.";
     return { content: [{ type: "text", text }] };
   }
@@ -113,7 +119,7 @@ async function callTool(env: Env, name: string, args: any): Promise<{ content: A
   if (name === `${publisherId()}_ask`) {
     const query = String(args?.query ?? "").slice(0, 2000);
     if (!query) throw new Error("query is required");
-    const data = await rag(env, "/api/ask", { query, stream: false, ...(args?.fresh ? { fresh: true } : {}) });
+    const data = await rag(env, auth, "/api/ask", { query, stream: false, ...(args?.fresh ? { fresh: true } : {}) });
     const cites = (data.citations ?? [])
       .map((c: any) => `${c.docidentifier}${c.clause_anchor ? " §" + c.clause_anchor : ""}`)
       .join(", ");
@@ -139,6 +145,10 @@ export default {
     if (url.pathname !== "/mcp") return json({ error: "not_found" }, 404);
     if (req.method !== "POST") return json({ error: "method_not_allowed — POST JSON-RPC to /mcp" }, 405);
 
+    // inbound auth: the caller's API key gates entry AND rides outbound
+    const key = await authenticate(env, req);
+    if (!key) return json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized: configure this MCP server with an API key (Authorization: Bearer <key>)" } }, 401);
+
     let msg: any;
     try {
       msg = await req.json();
@@ -160,7 +170,7 @@ export default {
         case "tools/list":
           return rpcResult(msg.id, { tools: TOOLS });
         case "tools/call": {
-          const out = await callTool(env, String(msg.params?.name ?? ""), msg.params?.arguments ?? {});
+          const out = await callTool(env, bearer(req), String(msg.params?.name ?? ""), msg.params?.arguments ?? {});
           return rpcResult(msg.id, out);
         }
         case "ping":

@@ -48,7 +48,7 @@ export interface ApiKey {
   day_limit: number;
 }
 
-export async function authenticate(env: Env, req: Request): Promise<ApiKey | null> {
+export async function authenticate(env: Pick<Env, "DB">, req: Request): Promise<ApiKey | null> {
   const auth = req.headers.get("authorization") ?? "";
   const m = auth.match(/^Bearer\s+(.+)$/i);
   if (!m) return null;

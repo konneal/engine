@@ -16,6 +16,7 @@
   },
   "include": [
     "workers/worker_public/src/**/*.ts",
+    "workers/worker_mcp/src/**/*.ts",
     "workers/shared/**/*.ts"
   ]
 }

@@ -358,3 +358,13 @@ export async function handleListKeys(env: Env, req: Request): Promise<Response> 
   ).all();
   return json({ keys: rows.results, ...corsHeaders(req) });
 }
+
+/** Revoke an API key (soft: revoked = 1 — the hash row stays for
+ *  audit; authenticate() already excludes revoked keys). */
+export async function handleRevokeKey(env: Env, req: Request, id: string): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const r = await env.DB.prepare("UPDATE api_keys SET revoked = 1 WHERE id = ?1 AND revoked = 0").bind(id).run();
+  return json({ ok: true, updated: r.meta?.changes ?? 0 });
+}
