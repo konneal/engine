@@ -1,6 +1,5 @@
 {
   "name": "@konneal/engine",
-  "private": true,
   "workspaces": [
     "workers/*"
   ],
