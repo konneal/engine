@@ -38,8 +38,11 @@ export const citationProbe: Stage = {
     c.lane["citation-probe"] = (async () => {
       if (!docNum) return [] as Hit[];
       try {
+        // chunks_fts is a virtual FTS5 table over chunks.fts_text — it
+        // has NO metadata columns. The doc_number and clause_title live
+        // in the chunks content table; join them.
         const rows = await c.env.DB.prepare(
-          "SELECT id FROM chunks_fts WHERE chunks_fts MATCH ?1 AND doc_number = ?2 LIMIT 8",
+          "SELECT c.id FROM chunks_fts f JOIN chunks c ON c.rowid = f.rowid WHERE chunks_fts MATCH ?1 AND c.doc_number = ?2 AND (c.clause_title LIKE '%ibliograph%' OR c.clause_title LIKE '%ormative reference%') LIMIT 8",
         )
           .bind("bibliography OR references", docNum)
           .all() as { results?: Array<{ id: string }> };

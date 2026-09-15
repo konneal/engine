@@ -581,7 +581,7 @@ var citationProbe = {
       if (!docNum) return [];
       try {
         const rows = await c.env.DB.prepare(
-          "SELECT id FROM chunks_fts WHERE chunks_fts MATCH ?1 AND doc_number = ?2 LIMIT 8"
+          "SELECT c.id FROM chunks_fts f JOIN chunks c ON c.rowid = f.rowid WHERE chunks_fts MATCH ?1 AND c.doc_number = ?2 AND (c.clause_title LIKE '%ibliograph%' OR c.clause_title LIKE '%ormative reference%') LIMIT 8"
         ).bind("bibliography OR references", docNum).all();
         const ids = (rows.results ?? []).map((r) => r.id).slice(0, 8);
         if (!ids.length) return [];
