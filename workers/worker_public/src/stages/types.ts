@@ -64,6 +64,10 @@ export interface PipelineContext {
   hits: Hit[]; // the ranked pool from poolOpen onward
   finalHits: Hit[]; // the answer window
   glossary: GlossaryEntry[]; // the vocabulary link (glossary stage owns)
+  /** structured facts stages contribute to the answer prompt (the
+   *  GraphRAG seam: graph-derived notes ride the same channel the
+   *  vocabulary link does — ask.ts merges them into the retrieval note) */
+  notes: string[];
   opts: RetrieveOptions;
   /** prefetch bag: stage-name → that stage's in-flight I/O promise (the
    *  stage owns its key; see Stage.prefetch) */

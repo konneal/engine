@@ -10,10 +10,14 @@ Edge kinds:
   successor   hasSuccessor (edition supersession chains)
   amends      amends / updates
   defines     vocab concept → source document (when the concept cites one)
+  cites       bibliography references (extracted from the indexed
+              bibliography chunks; the citation grammar is the profile
+              codec's — the same identifier grammar the pipeline uses)
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -22,7 +26,8 @@ from pathlib import Path
 
 import yaml
 
-from .config import ARTIFACTS
+from .codecs import codec_for_profile
+from .config import ARTIFACTS, CANONICAL_CHUNK_SOURCES
 
 RELATON = Path.home() / "src/relaton/relaton-data-oiml/data"
 VOCAB = Path.home() / "src/oimlsmart/vocab/datasets"
@@ -61,6 +66,54 @@ def family_of(raw: str) -> str | None:
 
 def esc(s: str) -> str:
     return s.replace("'", "''")[:200]
+
+
+def bibliography_chunks():
+    """(docidentifier, edition, text) of the canonical chunk set's
+    bibliography sections — normative references and bibliographies,
+    wherever the producer marked them by clause title (or the text head
+    carries the word when the title did not survive the corpus)."""
+    for p in CANONICAL_CHUNK_SOURCES:
+        if not p.is_file():
+            continue
+        with p.open(encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    c = json.loads(line)
+                except ValueError:
+                    continue
+                md = c.get("metadata") or {}
+                title = str(md.get("clause_title") or "")
+                text = str(c.get("text") or "")
+                if (
+                    re.search(r"bibliograph", title, re.I)
+                    or re.search(r"normative\s+references?", title, re.I)
+                    or re.search(r"bibliograph", text[:400], re.I)
+                ):
+                    yield str(md.get("docidentifier") or ""), str(md.get("edition") or ""), text
+
+
+def edition_node(docs: dict, docidentifier: str, edition: str) -> str | None:
+    """The graph node a chunk's docidentifier+edition belongs to: the
+    exact edition when it exists, else the family's active edition, else
+    the newest — the SAME family+part resolution the registry build uses,
+    so a part never leaks into its siblings."""
+    m = SERIES.match(docidentifier)
+    if not m:
+        return None
+    fam = f"{m.group(2)}-{m.group(3)}"
+    base_id = re.sub(r"^OIML\s+", "", docidentifier)
+    part_m = re.search(r"^[A-Z]+\s+\d+(?:-([A-Za-z0-9]+))?", base_id)
+    part = part_m.group(1) if part_m else None
+    cands = [nid for nid, rec in docs.items() if rec["family"] == fam and rec["part"] == part]
+    if not cands:
+        return None
+    if edition:
+        for n in cands:
+            if n.endswith(f"-{edition}"):
+                return n
+    pool = [n for n in cands if docs[n]["active"]] or cands
+    return max(pool, key=lambda n: docs[n]["edition"])
 
 
 def build() -> int:
@@ -148,6 +201,35 @@ def build() -> int:
             for n in nids:
                 docs[n]["active"] = 0
 
+    # ── cites edges (GraphRAG): what each publication's bibliography
+    # actually cites — relaton records how editions relate, not what they
+    # reference; the citations live in the documents' own bibliography
+    # sections, already chunked. Extraction grammar = the profile codec.
+    codec = codec_for_profile("profile")
+    cites_edges = 0
+    for docidentifier, edition, text in bibliography_chunks():
+        src = edition_node(docs, docidentifier, edition)
+        if not src:
+            continue
+        src_rec = docs[src]
+        for nid, label in codec.cited_refs(text)[:40]:
+            # a publication naming itself is not a citation — the family
+            # overview chunks list their own parts
+            m = SERIES.match(label)
+            if m:
+                base_id = re.sub(r"^OIML\s+", "", label)
+                pm = re.search(r"^[A-Z]+\s+\d+(?:-([A-Za-z0-9]+))?", base_id)
+                part = pm.group(1) if pm else None
+                em = re.search(r":(\d{4})", base_id)
+                if part and em and part == em.group(1):
+                    part = None  # the trailing :year is not a part
+                if src_rec["family"] == f"{m.group(2)}-{m.group(3)}" and src_rec["part"] == part:
+                    continue
+            nodes.setdefault(nid, f"cite|{esc(label)}")
+            before = len(edges)
+            edges.add((src, nid, "cites"))
+            cites_edges += len(edges) - before
+
     # vocab concepts (public projection: OIML + VIM/VIML terminology).
     # Glossarist files are multi-document YAML: the concept record carries
     # data.identifier + authoritative source refs; the localized record
@@ -213,11 +295,13 @@ def build() -> int:
 
     kept = sum(1 for s, d, k in edges if s in nodes and d in nodes)
     active_ct = sum(1 for r in docs.values() if r.get("active"))
+    cite_ct = sum(1 for v in nodes.values() if v.startswith("cite|"))
     print(
         f"documents registry: {len(docs)} editions, {active_ct} active; "
         f"graph: {len(nodes)} nodes ({sum(1 for v in node_rows if v[0]=='doc')} docs, "
-        f"{sum(1 for v in node_rows if v[0]=='family')} families, {concepts} concepts), "
-        f"{kept} edges ({defines} defines), {skipped} non-publication records skipped → {OUT}"
+        f"{sum(1 for v in node_rows if v[0]=='family')} families, {concepts} concepts, "
+        f"{cite_ct} cited refs), "
+        f"{kept} edges ({defines} defines, {cites_edges} cites), {skipped} non-publication records skipped → {OUT}"
     )
     return 0
 
