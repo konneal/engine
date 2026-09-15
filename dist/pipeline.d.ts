@@ -18,6 +18,9 @@ export interface Retrieved {
      *  among them (dense retrieval alone binds everyday words to the wrong
      *  term: measured "keeps drifting" → creep 0.69 vs durability 0.54) */
     glossary?: GlossaryEntry[];
+    /** structured facts stages extracted from the graph (GraphRAG) —
+     *  merged into the answer prompt's retrieval note */
+    notes?: string[];
 }
 export declare function retrievalQuery(query: string, prev?: string): string;
 export declare function retrieve(env: any, query: string, opts?: RetrieveOptions): Promise<Retrieved>;
