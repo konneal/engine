@@ -14,7 +14,7 @@
 // server — each request is answered in one JSON response; no sessions.
 // https://modelcontextprotocol.io spec (2025-06 streamable HTTP).
 
-import { P } from "../../worker_public/src/profile.ts";
+import { P, setProfile } from "../../worker_public/src/profile.ts";
 import { authenticate } from "../../worker_public/src/lib/http";
 
 export interface Env {
@@ -186,3 +186,4 @@ export default {
     }
   },
 };
+export { setProfile };

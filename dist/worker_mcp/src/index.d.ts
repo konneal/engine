@@ -1,3 +1,4 @@
+import { setProfile } from "../../worker_public/src/profile.ts";
 export interface Env {
     RAG_BASE: string;
     /** the deployment's shared D1 (API keys + the derived documents
@@ -8,3 +9,4 @@ declare const _default: {
     fetch(req: Request, env: Env): Promise<Response>;
 };
 export default _default;
+export { setProfile };

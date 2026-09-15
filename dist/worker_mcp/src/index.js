@@ -3,7 +3,8 @@ import {
 } from "../../chunk-ROF3Q7UC.js";
 import "../../chunk-OCNLV7Q7.js";
 import {
-  P
+  P,
+  setProfile
 } from "../../chunk-35ODH64W.js";
 
 // workers/worker_mcp/src/index.ts
@@ -149,5 +150,6 @@ var src_default = {
   }
 };
 export {
-  src_default as default
+  src_default as default,
+  setProfile
 };
