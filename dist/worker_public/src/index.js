@@ -594,6 +594,7 @@ var citationProbe = {
   },
   run: async (c) => {
     const probes = await c.lane["citation-probe"];
+    console.log("citation-probe: when-fired, probe results:", probes.length, "docNum:", c.__citeDocNum);
     const seen = new Set(c.hits.map((m) => m.id));
     let added = 0;
     for (const h of probes) {
@@ -606,7 +607,7 @@ var citationProbe = {
         added++;
       }
     }
-    if (added) console.log("citation probe: +", added, "bibliography chunks from doc", c.u?.doc_number);
+    console.log("citation-probe: added", added, "of", probes.length, "bibliography chunks; hits after:", c.hits.length);
   }
 };
 

@@ -62,6 +62,7 @@ export const citationProbe: Stage = {
   },
   run: async (c) => {
     const probes = (await c.lane["citation-probe"]) as Hit[];
+    console.log("citation-probe: when-fired, probe results:", probes.length, "docNum:", (c as any).__citeDocNum);
     const seen = new Set(c.hits.map((m: any) => m.id));
     let added = 0;
     // only bibliography-shaped chunks (clause title or text mentions it)
@@ -75,6 +76,6 @@ export const citationProbe: Stage = {
         added++;
       }
     }
-    if (added) console.log("citation probe: +", added, "bibliography chunks from doc", c.u?.doc_number);
+    console.log("citation-probe: added", added, "of", probes.length, "bibliography chunks; hits after:", c.hits.length);
   },
 };
