@@ -432,6 +432,183 @@ var dense = {
   }
 };
 
+// workers/worker_public/src/codecs.ts
+var oimlPubid = {
+  parse(doc, edition) {
+    const m = doc.match(/^urn:oiml:pub:([rdbge]):(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i) ?? doc.match(/^(?:OIML\s+)?([RDBGE])\s*(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i);
+    if (!m) return null;
+    const type = m[1].toUpperCase();
+    const ed = edition ?? m[3] ?? void 0;
+    return { doc_number: m[2], ...ed ? { edition: ed } : {}, label: `OIML ${type} ${m[2]}${ed ? `:${ed}` : ""}` };
+  },
+  scanQuestion(query) {
+    const re = /\b(OIML\s+)?([RDBGE])(\s*)0*(\d{1,3})(?:\s*[-–]\s*\d+)?(?:\s*:\s*(\d{4}))?/gi;
+    for (const m of query.matchAll(re)) {
+      const [, oimlPrefix, letter, gap, digits, edition] = m;
+      if (digits.length === 1 && !oimlPrefix && !gap) continue;
+      const num2 = String(Number(digits));
+      const type = letter.toUpperCase();
+      return { doc_number: num2, ...edition ? { edition } : {}, label: `OIML ${type} ${num2}${edition ? `:${edition}` : ""}` };
+    }
+    return null;
+  },
+  graphDocNumber(nodeId) {
+    const m = nodeId.match(/^doc:OIML-[A-Z]-(\d+)-/);
+    return m ? m[1] : null;
+  },
+  familyOf(di) {
+    const m = /^(?:OIML\s+)?([A-Z])\s?(\d{1,3})(?:[-–]([0-9A-Za-z]+))?/.exec(di);
+    return m ? `${m[1]}-${m[2]}` : null;
+  }
+};
+var plainSlug = {
+  parse: () => null,
+  scanQuestion: () => null,
+  graphDocNumber: () => null,
+  familyOf: () => null
+};
+var REGISTRY = {
+  "oiml-pubid": oimlPubid,
+  "plain-slug": plainSlug
+};
+function refCodec() {
+  return REGISTRY[P().publisher.codec] ?? plainSlug;
+}
+
+// workers/worker_public/src/context.ts
+var NO_CONTEXT = { kind: "none", scoped_to: null };
+function parseContext(body) {
+  const c = body?.context;
+  if (!c || typeof c !== "object") return null;
+  if (c.kind !== "page" && c.kind !== "entity" && c.kind !== "document" && c.kind !== "account") return null;
+  const label = typeof c.label === "string" ? c.label.trim().slice(0, 120) : "";
+  const route = typeof c.route === "string" && c.route.trim() ? c.route.trim().slice(0, 200) : void 0;
+  const doc = typeof c.doc === "string" && c.doc.trim() ? c.doc.trim().slice(0, 80) : void 0;
+  const edition = typeof c.edition === "string" && /^\d{4}$/.test(c.edition.trim()) ? c.edition.trim() : void 0;
+  return { kind: c.kind, label, ...route ? { route } : {}, ...doc ? { doc } : {}, ...edition ? { edition } : {} };
+}
+function parseDocRef(doc, edition) {
+  return refCodec().parse(doc, edition);
+}
+function namedDocumentIn(query) {
+  return refCodec().scanQuestion(query);
+}
+async function resolveDocScope(env, ctx) {
+  if (!ctx.doc) return null;
+  const parsed = parseDocRef(ctx.doc, ctx.edition);
+  if (!parsed) return null;
+  try {
+    const type = parsed.label.split(" ")[1];
+    const row = await env.DB.prepare("SELECT 1 FROM documents WHERE family = ?1 LIMIT 1").bind(`${type}-${parsed.doc_number}`).first();
+    if (!row) return null;
+  } catch {
+  }
+  return parsed;
+}
+function appliedContext(declared, scope, note, live) {
+  if (!declared) return NO_CONTEXT;
+  return {
+    kind: declared.kind,
+    label: declared.label,
+    scoped_to: scope ? scope.label : null,
+    ...note ? { note } : {},
+    ...live ? { live } : {}
+  };
+}
+function parseAppliedContext(v) {
+  if (!v || typeof v !== "object") return null;
+  if (v.kind !== "page" && v.kind !== "entity" && v.kind !== "document" && v.kind !== "account" && v.kind !== "none") return null;
+  const label = typeof v.label === "string" && v.label.trim() ? v.label.trim().slice(0, 120) : void 0;
+  const scoped = typeof v.scoped_to === "string" && v.scoped_to.trim() ? v.scoped_to.trim().slice(0, 80) : null;
+  const note = v.note === "document-not-in-corpus" || v.note === "question-document-wins" || v.note === "sign-in-required" || v.note === "live-window-expired" || v.note === "live-unavailable" ? v.note : void 0;
+  const live = v.live && typeof v.live === "object" && typeof v.live.read_at === "string" && Array.isArray(v.live.stores) && typeof v.live.records === "number" ? { read_at: v.live.read_at.slice(0, 40), stores: v.live.stores.filter((s) => typeof s === "string").slice(0, 8), records: Math.min(Math.max(0, v.live.records), 999) } : void 0;
+  const model = v.model && typeof v.model === "object" && typeof v.model.node_id === "string" && typeof v.model.kind === "string" && typeof v.model.standard === "string" ? {
+    node_id: v.model.node_id.slice(0, 120),
+    kind: v.model.kind.slice(0, 40),
+    standard: v.model.standard.slice(0, 40),
+    ...typeof v.model.clause === "string" && v.model.clause.trim() ? { clause: v.model.clause.slice(0, 120) } : {}
+  } : void 0;
+  return { kind: v.kind, ...label ? { label } : {}, scoped_to: scoped, ...note ? { note } : {}, ...live ? { live } : {}, ...model ? { model } : {} };
+}
+function contextNote(declared, scope) {
+  if (!declared) return void 0;
+  if (declared.kind === "account") {
+    return void 0;
+  }
+  if (declared.kind === "page") {
+    return `Context note: the user is viewing ${declared.label || "a page"}${declared.route ? ` (${declared.route})` : ""} in the ${P().publisher.product_name} platform. The passages come from the general corpus; frame procedural guidance for that page when relevant.`;
+  }
+  if (declared.kind === "entity") {
+    return scope ? `Context note: the user is asking about ${declared.label || "an entity"} \u2014 the passages are scoped to ${scope.label}, the publication that governs it. You do NOT have the entity's own data; answer what the publication requires and say when the question needs the record itself.` : `Context note: the user is asking about ${declared.label || "an entity"}. You do NOT have the entity's own data; answer from the corpus passages and say when the question needs the record itself.`;
+  }
+  return scope ? `Context note: the user scoped this question to ${scope.label} \u2014 the passages come from that publication. If they cannot answer the question, say so instead of drawing on other documents.` : `Context note: the user named ${declared.label || declared.doc || "a document"} as context, but it is not in the indexed corpus \u2014 answer from the general corpus and say the document was not found.`;
+}
+function syntheticUnderstanding(scope) {
+  return {
+    intent: "knowledge",
+    docidentifier: scope.label,
+    doc_number: scope.doc_number,
+    edition: scope.edition ?? null,
+    language: null,
+    process_intent: false,
+    term: null,
+    defined_terms: [],
+    standalone_query: "",
+    complexity: "simple",
+    query_variants: [],
+    sub_queries: [],
+    hypothetical_answer: "",
+    follow_ups: []
+  };
+}
+
+// workers/worker_public/src/stages/citationProbe.ts
+var CITE_PATTERN = /\b(?:cite[sd]?|citing|referenc(?:e|es|ed|ing)|list[s]?|quote[sd]?)\b/i;
+var REFS_PATTERN = /\b(?:standard|publication|document|normative|bibliograph)/i;
+var citationProbe = {
+  name: "citation-probe",
+  failure: "additive",
+  when: (c) => {
+    if (!CITE_PATTERN.test(c.query) || !REFS_PATTERN.test(c.query)) return false;
+    const named = namedDocumentIn(c.query);
+    return !!named && !!c.u?.doc_number;
+  },
+  prefetch: (c) => {
+    const { env, u } = c;
+    const docNum = String(u.doc_number);
+    const probe = `bibliography normative references standards cited document ${docNum}`;
+    c.lane["citation-probe"] = (async () => {
+      try {
+        const v = await embed(env.AI, MODELS.embed, probe);
+        const res = await env.VECTORIZE.query(v, {
+          topK: 12,
+          returnMetadata: "all",
+          filter: { doc_number: docNum }
+        });
+        return toHits(res.matches ?? []);
+      } catch {
+        return [];
+      }
+    })();
+  },
+  run: async (c) => {
+    const probes = await c.lane["citation-probe"];
+    const seen = new Set(c.matches.map((m) => m.id));
+    let added = 0;
+    for (const h of probes) {
+      if (seen.has(h.id)) continue;
+      const title = String(h.metadata?.clause_title ?? "");
+      const text = String(h.text ?? "");
+      if (/bibliograph|normative reference/i.test(title + " " + text.slice(0, 300))) {
+        c.matches.push(h);
+        seen.add(h.id);
+        added++;
+      }
+    }
+    if (added) console.log("citation probe: +", added, "bibliography chunks from doc", c.u?.doc_number);
+  }
+};
+
 // workers/worker_public/src/ports/cloudflare/adapters.ts
 var EMBED_REQUEST_SHAPES = {
   // "text" first: the verified request shape for qwen3-embedding-0.6b
@@ -617,49 +794,6 @@ var glossary = {
     if (c.glossary.length) console.log("glossary link:", c.glossary.map((g2) => g2.term).join(", "));
   }
 };
-
-// workers/worker_public/src/codecs.ts
-var oimlPubid = {
-  parse(doc, edition) {
-    const m = doc.match(/^urn:oiml:pub:([rdbge]):(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i) ?? doc.match(/^(?:OIML\s+)?([RDBGE])\s*(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i);
-    if (!m) return null;
-    const type = m[1].toUpperCase();
-    const ed = edition ?? m[3] ?? void 0;
-    return { doc_number: m[2], ...ed ? { edition: ed } : {}, label: `OIML ${type} ${m[2]}${ed ? `:${ed}` : ""}` };
-  },
-  scanQuestion(query) {
-    const re = /\b(OIML\s+)?([RDBGE])(\s*)0*(\d{1,3})(?:\s*[-–]\s*\d+)?(?:\s*:\s*(\d{4}))?/gi;
-    for (const m of query.matchAll(re)) {
-      const [, oimlPrefix, letter, gap, digits, edition] = m;
-      if (digits.length === 1 && !oimlPrefix && !gap) continue;
-      const num2 = String(Number(digits));
-      const type = letter.toUpperCase();
-      return { doc_number: num2, ...edition ? { edition } : {}, label: `OIML ${type} ${num2}${edition ? `:${edition}` : ""}` };
-    }
-    return null;
-  },
-  graphDocNumber(nodeId) {
-    const m = nodeId.match(/^doc:OIML-[A-Z]-(\d+)-/);
-    return m ? m[1] : null;
-  },
-  familyOf(di) {
-    const m = /^(?:OIML\s+)?([A-Z])\s?(\d{1,3})(?:[-–]([0-9A-Za-z]+))?/.exec(di);
-    return m ? `${m[1]}-${m[2]}` : null;
-  }
-};
-var plainSlug = {
-  parse: () => null,
-  scanQuestion: () => null,
-  graphDocNumber: () => null,
-  familyOf: () => null
-};
-var REGISTRY = {
-  "oiml-pubid": oimlPubid,
-  "plain-slug": plainSlug
-};
-function refCodec() {
-  return REGISTRY[P().publisher.codec] ?? plainSlug;
-}
 
 // workers/worker_public/src/stages/conceptGraph.ts
 var conceptGraph = {
@@ -1302,6 +1436,7 @@ var windowFloor = {
 // workers/worker_public/src/stages/index.ts
 var STAGES = [
   dense,
+  citationProbe,
   hyde,
   glossary,
   conceptGraph,
@@ -2183,93 +2318,6 @@ async function handleLogout(env, req) {
   }
   headers.location = "/";
   return new Response(null, { status: 302, headers });
-}
-
-// workers/worker_public/src/context.ts
-var NO_CONTEXT = { kind: "none", scoped_to: null };
-function parseContext(body) {
-  const c = body?.context;
-  if (!c || typeof c !== "object") return null;
-  if (c.kind !== "page" && c.kind !== "entity" && c.kind !== "document" && c.kind !== "account") return null;
-  const label = typeof c.label === "string" ? c.label.trim().slice(0, 120) : "";
-  const route = typeof c.route === "string" && c.route.trim() ? c.route.trim().slice(0, 200) : void 0;
-  const doc = typeof c.doc === "string" && c.doc.trim() ? c.doc.trim().slice(0, 80) : void 0;
-  const edition = typeof c.edition === "string" && /^\d{4}$/.test(c.edition.trim()) ? c.edition.trim() : void 0;
-  return { kind: c.kind, label, ...route ? { route } : {}, ...doc ? { doc } : {}, ...edition ? { edition } : {} };
-}
-function parseDocRef(doc, edition) {
-  return refCodec().parse(doc, edition);
-}
-function namedDocumentIn(query) {
-  return refCodec().scanQuestion(query);
-}
-async function resolveDocScope(env, ctx) {
-  if (!ctx.doc) return null;
-  const parsed = parseDocRef(ctx.doc, ctx.edition);
-  if (!parsed) return null;
-  try {
-    const type = parsed.label.split(" ")[1];
-    const row = await env.DB.prepare("SELECT 1 FROM documents WHERE family = ?1 LIMIT 1").bind(`${type}-${parsed.doc_number}`).first();
-    if (!row) return null;
-  } catch {
-  }
-  return parsed;
-}
-function appliedContext(declared, scope, note, live) {
-  if (!declared) return NO_CONTEXT;
-  return {
-    kind: declared.kind,
-    label: declared.label,
-    scoped_to: scope ? scope.label : null,
-    ...note ? { note } : {},
-    ...live ? { live } : {}
-  };
-}
-function parseAppliedContext(v) {
-  if (!v || typeof v !== "object") return null;
-  if (v.kind !== "page" && v.kind !== "entity" && v.kind !== "document" && v.kind !== "account" && v.kind !== "none") return null;
-  const label = typeof v.label === "string" && v.label.trim() ? v.label.trim().slice(0, 120) : void 0;
-  const scoped = typeof v.scoped_to === "string" && v.scoped_to.trim() ? v.scoped_to.trim().slice(0, 80) : null;
-  const note = v.note === "document-not-in-corpus" || v.note === "question-document-wins" || v.note === "sign-in-required" || v.note === "live-window-expired" || v.note === "live-unavailable" ? v.note : void 0;
-  const live = v.live && typeof v.live === "object" && typeof v.live.read_at === "string" && Array.isArray(v.live.stores) && typeof v.live.records === "number" ? { read_at: v.live.read_at.slice(0, 40), stores: v.live.stores.filter((s) => typeof s === "string").slice(0, 8), records: Math.min(Math.max(0, v.live.records), 999) } : void 0;
-  const model = v.model && typeof v.model === "object" && typeof v.model.node_id === "string" && typeof v.model.kind === "string" && typeof v.model.standard === "string" ? {
-    node_id: v.model.node_id.slice(0, 120),
-    kind: v.model.kind.slice(0, 40),
-    standard: v.model.standard.slice(0, 40),
-    ...typeof v.model.clause === "string" && v.model.clause.trim() ? { clause: v.model.clause.slice(0, 120) } : {}
-  } : void 0;
-  return { kind: v.kind, ...label ? { label } : {}, scoped_to: scoped, ...note ? { note } : {}, ...live ? { live } : {}, ...model ? { model } : {} };
-}
-function contextNote(declared, scope) {
-  if (!declared) return void 0;
-  if (declared.kind === "account") {
-    return void 0;
-  }
-  if (declared.kind === "page") {
-    return `Context note: the user is viewing ${declared.label || "a page"}${declared.route ? ` (${declared.route})` : ""} in the ${P().publisher.product_name} platform. The passages come from the general corpus; frame procedural guidance for that page when relevant.`;
-  }
-  if (declared.kind === "entity") {
-    return scope ? `Context note: the user is asking about ${declared.label || "an entity"} \u2014 the passages are scoped to ${scope.label}, the publication that governs it. You do NOT have the entity's own data; answer what the publication requires and say when the question needs the record itself.` : `Context note: the user is asking about ${declared.label || "an entity"}. You do NOT have the entity's own data; answer from the corpus passages and say when the question needs the record itself.`;
-  }
-  return scope ? `Context note: the user scoped this question to ${scope.label} \u2014 the passages come from that publication. If they cannot answer the question, say so instead of drawing on other documents.` : `Context note: the user named ${declared.label || declared.doc || "a document"} as context, but it is not in the indexed corpus \u2014 answer from the general corpus and say the document was not found.`;
-}
-function syntheticUnderstanding(scope) {
-  return {
-    intent: "knowledge",
-    docidentifier: scope.label,
-    doc_number: scope.doc_number,
-    edition: scope.edition ?? null,
-    language: null,
-    process_intent: false,
-    term: null,
-    defined_terms: [],
-    standalone_query: "",
-    complexity: "simple",
-    query_variants: [],
-    sub_queries: [],
-    hypothetical_answer: "",
-    follow_ups: []
-  };
 }
 
 // workers/worker_public/src/conversations.ts
