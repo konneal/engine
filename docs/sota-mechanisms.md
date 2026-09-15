@@ -97,6 +97,21 @@ unit selection, so the pin lands the object the question is about
 ranking answers from stale editions, guesses at doc scope, and never
 surfaces a typed object.
 
+### 7b. The citation graph (structured questions get graph answers)
+
+Bibliographic citations become graph edges: what each edition's
+bibliography cites is extracted at index time (the identifier grammar
+lives in the publisher codec — ISO/IEC floor generic, publisher series
+on top; ~300 cites edges across the OIML corpus), stored beside the
+publication registry, and keyed by the same normalized pubids
+everywhere ("OIML R 60", never a bare number). When a question asks
+what a publication cites or references, the answer receives the
+cited-standards list per edition as authoritative structured data
+(the `notes` channel), while the bibliography section itself is
+retrieved as the passage that grounds the answer verbatim. Structured
+questions get graph answers; semantic questions get vector answers;
+the hybrid class gets both, fused by the same rerank.
+
 ### 8. The answer contract (claims are checkable)
 Inline citations on every claim; normative values quoted verbatim from
 the cited passage; tables/formulas/figures rendered as typed objects

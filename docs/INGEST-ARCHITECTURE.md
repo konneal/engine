@@ -54,6 +54,7 @@ hand.
 │                 (derived status, active flags — the SSOT)         │
 │   structure     typed nodes → ChunkRecordV2 (per block type)      │
 │   derivation    registry + graph projection (relaton edges +      │
+│                 citation edges from the indexed bibliographies    │
 │                 glossarist defines edges)                         │
 │   enrichment    contextual contexts (quality-first lane, KV-      │
 │                 cached, content-hash invalidated)                 │

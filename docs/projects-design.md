@@ -2,6 +2,13 @@
 
 > The question: should chats group into **projects** that share a
 > per-project contextual memory? Yes — and the parts already exist.
+>
+> **Shipped (2026-09-15)**: membership is drag-and-drop — a chat drags
+> onto a project row to file, onto the conversations list to unfile,
+> with drop-target highlights and a live hint; a per-row picker covers
+> touch/keyboard; chats carry a project badge. The conversations list
+> carries `project_id` from the server (membership stays server-truth)
+> and the move rides the server conversation id.
 > This is the design; nothing is implemented yet.
 
 ## 1. Prior art — what the best got right and wrong

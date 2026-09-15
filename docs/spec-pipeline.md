@@ -51,18 +51,25 @@ candidate lanes → pool open → pool-level merges → refinement → window as
 | 13 | `family-boost` | boost only under `filter.doc_number`; sort always | blocking | mutates `hits[].score`, sorts | Family chunks decisively boosted for doc-scoped queries; the sort establishes the rerank-failure fallback order. |
 | 14 | `rerank` | `hits.length > 1` | additive | `hits[].rerank_score`, sorts, family pin | Cross-encoder scores; vector order is the designed fallback. Post-rerank family pin for doc-scoped queries. |
 | 15 | `lexical-rrf` | `hits.length > 1 && lexicalHits.length` | blocking | REPLACES `hits` order | RRF fusion with the full-corpus lexical ranking. Runs even when rerank failed (additive semantics preserve this). |
-| 16 | `std-ref-nudge` | query names ISO/IEC/ASTM/EN | blocking | `hits[].rerank_score`, sorts | Standard-reference nudge: chunks CARRYING such a citation get `stdRefNudgeSpread × spread` — the citing clause is the answer to "which standard does X invoke", and generic family prose otherwise fills the window (l5a measured). |
-| 17 | `edition-cover` | `!filters.edition && hits.length > 1` | additive | appends `hits` | Registry-driven cover: when a pool holds only stale editions of a document whose ACTIVE edition the documents registry knows, fetch the current edition's chunks and add at `editionCoverDiscount` — steering needs the successor present to demote. |
-| 18 | `corpus-scope` | `opts.datasetScope` | blocking | filters `hits` | Dataset scope (the sidebar toggles): drops hits whose corpus the request excludes. LAST of the pool-assembly stages — the lexical union above refills the pool after rerank, so filtering earlier let excluded corpora back in. Corpora the toggle model doesn't name pass untouched. |
-| 19 | `term-nudge` | `u.term` | blocking | `hits[].rerank_score`, sorts | Clause whose head IS the asked term gets `termNudgeSpread × spread` (decisive). |
-| 20 | `concept-steer` | `glossary.length && hits.length > 1` | blocking | `hits[].rerank_score`, sorts | Vocabulary-link families boosted (`conceptSteerSpread`). |
-| 21 | `edition-steer` | `!filters.edition && hits.length > 1` | blocking | `hits[].rerank_score`, sorts | Cross-pub recency boost + family-relative superseded-edition demotion (spread-scaled). |
-| 22 | `structural-propagate` | — | blocking | REPLACES `hits` | FABLE TreeExpansion: score blends along the clause tree. |
-| 23 | `diversity` | — | blocking | `finalHits` (from `hits`) | Per-publication caps (1 overview / 2–3 clauses; global overview cap 2/6); window cut to `rerankKeep`. FIRST writer of `finalHits`. |
-| 21 | `typed-pin` | pin families resolvable | blocking (inner parent-fetch additive) | `finalHits` | Answer-contract v2: one typed unit guaranteed a slot (+ small-to-big parent fetch at `smallToBigDiscount`). |
-| 22 | `section-descent` | a ranked depth-1 summary has children | additive | `finalHits` | Summary node → top child clauses at `sectionDescentDiscount`; the summary retires when children answer. |
-| 23 | `dedup` | — | blocking | `finalHits` | FABLE ancestor-descendant same-chain collapse (≥0.5 text overlap). |
-| 24 | `window-floor` | — | blocking | filters `finalHits` | Evidence-budget cut at `windowFloorFraction` of top; typed/family/unscored exempt; never fewer than two. |
+| 16 | `citation-probe` | citation-question shape + a document named in the TEXT | additive | appends `hits`, appends `notes` | GraphRAG: bibliography-shaped questions get (a) the family's bibliography sections as passages — FTS over the chunk store, deterministic, text fetched from D1 (getByIds returns no text), pushed to `hits` at score 10 — and (b) the graph's `cites` edges for the family as an authoritative per-edition note on the `notes` channel, identifiers codec-normalized. The graph answers the STRUCTURE; the passages ground it verbatim. |
+| 17 | `corpus-scope` | `opts.datasetScope` | blocking | filters `hits` | Dataset scope (the sidebar toggles): drops hits whose corpus the request excludes. LAST of the pool-assembly stages — the lexical union above refills the pool after rerank, so filtering earlier let excluded corpora back in. Corpora the toggle model doesn't name pass untouched. |
+| 18 | `edition-cover` | `!filters.edition && hits.length > 1` | additive | appends `hits` | Registry-driven cover: when a pool holds only stale editions of a document whose ACTIVE edition the documents registry knows, fetch the current edition's chunks and add at `editionCoverDiscount` — steering needs the successor present to demote. |
+| 19 | `std-ref-nudge` | query names ISO/IEC/ASTM/EN | blocking | `hits[].rerank_score`, sorts | Standard-reference nudge: chunks CARRYING such a citation get `stdRefNudgeSpread × spread` — the citing clause is the answer to "which standard does X invoke", and generic family prose otherwise fills the window (l5a measured). |
+| 20 | `term-nudge` | `u.term` | blocking | `hits[].rerank_score`, sorts | Clause whose head IS the asked term gets `termNudgeSpread × spread` (decisive). |
+| 21 | `concept-steer` | `glossary.length && hits.length > 1` | blocking | `hits[].rerank_score`, sorts | Vocabulary-link families boosted (`conceptSteerSpread`). |
+| 22 | `edition-steer` | `!filters.edition && hits.length > 1` | blocking | `hits[].rerank_score`, sorts | Cross-pub recency boost + family-relative superseded-edition demotion (spread-scaled). |
+| 23 | `structural-propagate` | — | blocking | REPLACES `hits` | FABLE TreeExpansion: score blends along the clause tree. |
+| 24 | `diversity` | — | blocking | `finalHits` (from `hits`) | Per-publication caps (1 overview / 2–3 clauses; global overview cap 2/6); window cut to `rerankKeep`. FIRST writer of `finalHits`. |
+| 25 | `typed-pin` | pin families resolvable | blocking (inner parent-fetch additive) | `finalHits` | Answer-contract v2: one typed unit guaranteed a slot (+ small-to-big parent fetch at `smallToBigDiscount`). |
+| 26 | `section-descent` | a ranked depth-1 summary has children | additive | `finalHits` | Summary node → top child clauses at `sectionDescentDiscount`; the summary retires when children answer. |
+| 27 | `dedup` | — | blocking | `finalHits` | FABLE ancestor-descendant same-chain collapse (≥0.5 text overlap). |
+| 28 | `window-floor` | — | blocking | filters `finalHits` | Evidence-budget cut at `windowFloorFraction` of top; typed/family/unscored exempt; never fewer than two. |
+
+The `notes` channel (the GraphRAG seam): stages may append structured
+facts to `PipelineContext.notes`; `retrieve()` returns them and the ask
+path merges them into the answer prompt's retrieval note — the same
+channel the vocabulary link rides. `citation-probe` is the first
+writer; any future graph-derived fact uses the same seam.
 
 ## Ordering dependencies (why the order is what it is)
 
@@ -77,7 +84,7 @@ candidate lanes → pool open → pool-level merges → refinement → window as
 - **`seal` before `overview-demote`/`rerank`**: the declared context is
   a hard scope, not a preference — steering and reranking happen WITHIN
   it.
-- **`rerank` before every steering stage** (16–18): steering is
+- **`rerank` before every steering stage** (19–22): steering is
   spread-scaled over rerank scores; steering before rerank would be
   erased by the re-sort.
 - **`structural-propagate` after steering, before `diversity`**:
