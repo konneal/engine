@@ -145,7 +145,7 @@ function ctx(env: any, over: Partial<PipelineContext> = {}): PipelineContext {
   return {
     env, query: "load cell creep", rq: "load cell creep", folded: "load cell creep",
     u: null, filters: null, filter: null, vector: vec("load cell creep"),
-    lexicalHits: [], matches: [], hits: [], finalHits: [], glossary: [],
+    lexicalHits: [], matches: [], hits: [], finalHits: [], glossary: [], notes: [],
     opts: {}, lane: {}, ...over,
   } as PipelineContext;
 }

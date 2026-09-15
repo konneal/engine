@@ -38,6 +38,7 @@ const ALLOWLIST = new Set([
   "worker_public/src/stages/multiQuery.ts",
   "worker_public/src/stages/hyde.ts",
   "worker_public/src/stages/graphLane.ts",
+  "worker_public/src/stages/citationProbe.ts", // D1 FTS + Vectorize getByIds + graph cites (the 2026-09-15 incident hotfix lane)
   "worker_public/src/lib/http.ts",
   "shared/router.ts",
 ]);

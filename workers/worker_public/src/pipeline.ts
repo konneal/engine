@@ -52,6 +52,9 @@ export interface Retrieved {
    *  among them (dense retrieval alone binds everyday words to the wrong
    *  term: measured "keeps drifting" → creep 0.69 vs durability 0.54) */
   glossary?: GlossaryEntry[];
+  /** structured facts stages extracted from the graph (GraphRAG) —
+   *  merged into the answer prompt's retrieval note */
+  notes?: string[];
 }
 
 // Short follow-ups are usually elliptical ("and the limits?") — fold the
@@ -130,13 +133,14 @@ export async function retrieve(
 
   const ctx: PipelineContext = {
     env, query, rq, folded, u, filters, filter, vector, lexicalHits,
-    matches: [], hits: [], finalHits: [], glossary: [], opts, lane: {},
+    matches: [], hits: [], finalHits: [], glossary: [], notes: [], opts, lane: {},
   };
   await runStages(STAGES, ctx);
   return {
     hits: ctx.finalHits,
     filters: ctx.filters ?? {},
     ...(ctx.glossary?.length ? { glossary: ctx.glossary } : {}),
+    ...(ctx.notes?.length ? { notes: ctx.notes } : {}),
   };
 }
 

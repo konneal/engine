@@ -733,7 +733,7 @@ async function handleAsk(
       const reordered = await listwiseRerank(env, MODELS.listwise, understanding?.standalone_query || q.query, retrieved.hits);
       if (reordered) {
         console.log("listwise: reordered", reordered[0]?.metadata?.docidentifier ?? "?", "to top");
-        retrieved = { hits: reordered, filters: retrieved.filters };
+        retrieved = { ...retrieved, hits: reordered };
       }
     }
     const grade = await gradePromise;
@@ -787,7 +787,8 @@ async function handleAsk(
     hits,
     q.lang,
     keptHistory,
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote].filter(Boolean).join("\n") || undefined,
+    // stage-extracted graph facts (GraphRAG) ride the same note channel
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
