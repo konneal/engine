@@ -46,7 +46,12 @@ export const citationProbe: Stage = {
         const ids = (rows.results ?? []).map((r: { id: string }) => r.id).slice(0, 8);
         if (!ids.length) return [] as Hit[];
         const got = await c.env.VECTORIZE.getByIds(ids);
-        return toHits(got ?? []);
+        // getByIds returns score=0 — the usedHits builder sorts by score
+        // and takes the top N, so zero-score hits never make the cut.
+        // These are deterministically relevant (the user asked what the
+        // document cites; these ARE the bibliography chunks) — give them
+        // a score that places them at the head of the pool.
+        return (got ?? []).map((h: any) => ({ ...h, score: 10 }));
       } catch {
         return [] as Hit[];
       }
