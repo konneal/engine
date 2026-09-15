@@ -1438,7 +1438,6 @@ var windowFloor = {
 // workers/worker_public/src/stages/index.ts
 var STAGES = [
   dense,
-  citationProbe,
   hyde,
   glossary,
   conceptGraph,
@@ -1453,6 +1452,7 @@ var STAGES = [
   familyBoost,
   rerankStage,
   lexicalRrf,
+  citationProbe,
   corpusScope,
   editionCover,
   stdRefNudge,
