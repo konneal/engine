@@ -9,8 +9,6 @@
 // The gap: "What ISO standards does R 60 cite?" — R 60-1:2021's
 // bibliography lists OIML documents only; the ISO/IEC references live
 // in the 2017 edition's §22.3 (2026-09-15).
-import { embed } from "../ai.ts";
-import { MODELS } from "../config.ts";
 import { toHits, type Stage } from "./types.ts";
 import { namedDocumentIn } from "../context.ts";
 import type { Hit } from "../../../shared/chunk.ts";
@@ -32,20 +30,23 @@ export const citationProbe: Stage = {
     return true;
   },
   prefetch: (c) => {
-    const { env, u } = c;
-    const docNum = String((c as any).__citeDocNum ?? u!.doc_number);
-    // the probe: the bibliography's own vocabulary, scoped to the family
-    const probe = `bibliography normative references standards cited document ${docNum}`;
-    // no edition filter — prior editions may carry what the current dropped
+    // deterministic: the chunk store's own bibliography-titled chunks for
+    // this document family — no embedding similarity involved (three
+    // vector-probe iterations measured: the embedding never matched
+    // reliably)
+    const docNum = String((c as any).__citeDocNum ?? c.u?.doc_number ?? "");
     c.lane["citation-probe"] = (async () => {
+      if (!docNum) return [] as Hit[];
       try {
-        const v = await embed(env.AI, MODELS.embed, probe);
-        const res = await env.VECTORIZE.query(v, {
-          topK: 12,
-          returnMetadata: "all",
-          filter: { doc_number: docNum },
-        });
-        return toHits(res.matches ?? []);
+        const rows = await c.env.DB.prepare(
+          "SELECT id FROM chunks_fts WHERE chunks_fts MATCH ?1 AND doc_number = ?2 LIMIT 8",
+        )
+          .bind("bibliography OR references", docNum)
+          .all() as { results?: Array<{ id: string }> };
+        const ids = (rows.results ?? []).map((r: { id: string }) => r.id).slice(0, 8);
+        if (!ids.length) return [] as Hit[];
+        const got = await c.env.VECTORIZE.getByIds(ids);
+        return toHits(got ?? []);
       } catch {
         return [] as Hit[];
       }
