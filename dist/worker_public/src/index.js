@@ -586,7 +586,7 @@ var citationProbe = {
         const ids = (rows.results ?? []).map((r) => r.id).slice(0, 8);
         if (!ids.length) return [];
         const got = await c.env.VECTORIZE.getByIds(ids);
-        return toHits(got ?? []);
+        return (got ?? []).map((h) => ({ ...h, score: 10 }));
       } catch {
         return [];
       }
