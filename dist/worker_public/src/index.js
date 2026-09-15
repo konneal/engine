@@ -565,6 +565,22 @@ function syntheticUnderstanding(scope) {
 // workers/worker_public/src/stages/citationProbe.ts
 var CITE_PATTERN = /\b(?:cite[sd]?|citing|referenc(?:e|es|ed|ing)|list[s]?|quote[sd]?)\b/i;
 var REFS_PATTERN = /\b(?:standard|publication|document|normative|bibliograph)/i;
+function citationGraphNote(docLabel, rows, cap = 30) {
+  const bySrc = /* @__PURE__ */ new Map();
+  for (const r of rows) {
+    const key = r.edition && !r.docidentifier.includes(r.edition) ? `${r.docidentifier}:${r.edition}` : r.docidentifier;
+    let e = bySrc.get(key);
+    if (!e) bySrc.set(key, e = { active: !!r.active, labels: [] });
+    if (e.labels.length < cap && !e.labels.includes(r.label)) e.labels.push(r.label);
+  }
+  if (!bySrc.size) return "";
+  const lines = [...bySrc.entries()].sort((a, b) => Number(b[1].active) - Number(a[1].active)).map(([k, v]) => `- ${k}${v.active ? " (active edition)" : ""} cites: ${v.labels.join(", ")}`);
+  return [
+    `Citation graph (authoritative \u2014 extracted from the indexed bibliographies of ${docLabel}):`,
+    ...lines,
+    `When the question asks what ${docLabel} cites or references, answer from this list, name each standard exactly as listed, and cite the bibliography passage(s) provided in the context.`
+  ].join("\n");
+}
 var citationProbe = {
   name: "citation-probe",
   failure: "additive",
@@ -573,28 +589,49 @@ var citationProbe = {
     const named = namedDocumentIn(c.query);
     if (!named) return false;
     c.__citeDocNum = named.doc_number;
+    c.__citeFamily = refCodec().familyOf(named.label);
+    c.__citeLabel = named.label;
+    c.__citeEdition = named.edition ?? null;
     return true;
   },
   prefetch: (c) => {
     const docNum = String(c.__citeDocNum ?? c.u?.doc_number ?? "");
-    c.lane["citation-probe"] = (async () => {
-      if (!docNum) return [];
-      try {
-        const rows = await c.env.DB.prepare(
-          "SELECT c.id FROM chunks_fts f JOIN chunks c ON c.rowid = f.rowid WHERE chunks_fts MATCH ?1 AND c.doc_number = ?2 AND (c.clause_title LIKE '%ibliograph%' OR c.clause_title LIKE '%ormative reference%') LIMIT 8"
-        ).bind("bibliography OR references", docNum).all();
-        const ids = (rows.results ?? []).map((r) => r.id).slice(0, 8);
-        if (!ids.length) return [];
-        const got = await c.env.VECTORIZE.getByIds(ids);
-        return (got ?? []).map((h) => ({ ...h, score: 10 }));
-      } catch {
-        return [];
-      }
-    })();
+    const family = c.__citeFamily;
+    c.lane["citation-probe"] = Promise.all([
+      (async () => {
+        if (!docNum) return [];
+        try {
+          const rows = await c.env.DB.prepare(
+            "SELECT c.id FROM chunks_fts f JOIN chunks c ON c.rowid = f.rowid WHERE chunks_fts MATCH ?1 AND c.doc_number = ?2 AND (c.clause_title LIKE '%ibliograph%' OR c.clause_title LIKE '%ormative reference%') LIMIT 8"
+          ).bind("bibliography OR references", docNum).all();
+          const ids = (rows.results ?? []).map((r) => r.id).slice(0, 8);
+          if (!ids.length) return [];
+          const got = await c.env.VECTORIZE.getByIds(ids);
+          if (!got?.length) return [];
+          const ph = ids.map((_, i) => `?${i + 1}`).join(",");
+          const texts = await c.env.DB.prepare(`SELECT id, text FROM chunks WHERE id IN (${ph})`).bind(...ids).all();
+          const textById = new Map((texts.results ?? []).map((r) => [r.id, r.text]));
+          return got.filter((h) => textById.has(h.id)).map((h) => ({ ...h, score: 10, text: textById.get(h.id) }));
+        } catch {
+          return [];
+        }
+      })(),
+      // the graph's cites edges for the family — structured, edition-keyed
+      (async () => {
+        if (!family) return [];
+        try {
+          const rows = await c.env.DB.prepare(
+            "SELECT d.docidentifier, d.edition, d.active, n.label FROM graph_edges e JOIN documents d ON e.src = d.canonical_id JOIN graph_nodes n ON e.dst = n.id WHERE e.kind = 'cites' AND d.family = ?1 ORDER BY d.active DESC, d.edition DESC LIMIT 120"
+          ).bind(family).all();
+          return rows.results ?? [];
+        } catch {
+          return [];
+        }
+      })()
+    ]);
   },
   run: async (c) => {
-    const probes = await c.lane["citation-probe"];
-    console.log("citation-probe: when-fired, probe results:", probes.length, "docNum:", c.__citeDocNum);
+    const [probes, citeRows] = await c.lane["citation-probe"];
     const seen = new Set(c.hits.map((m) => m.id));
     let added = 0;
     for (const h of probes) {
@@ -607,7 +644,11 @@ var citationProbe = {
         added++;
       }
     }
-    console.log("citation-probe: added", added, "of", probes.length, "bibliography chunks; hits after:", c.hits.length);
+    const edition = c.__citeEdition;
+    const scoped = edition ? citeRows.filter((r) => r.edition === edition) : citeRows;
+    const note = citationGraphNote(c.__citeLabel, scoped);
+    if (note) c.notes.push(note);
+    console.log("citation-probe:", added, "passages,", note ? "graph note on" : "graph note off", `(${citeRows.length} cite rows)`);
   }
 };
 
@@ -1511,6 +1552,7 @@ async function retrieve(env, query, opts = {}) {
     hits: [],
     finalHits: [],
     glossary: [],
+    notes: [],
     opts,
     lane: {}
   };
@@ -1518,7 +1560,8 @@ async function retrieve(env, query, opts = {}) {
   return {
     hits: ctx.finalHits,
     filters: ctx.filters ?? {},
-    ...ctx.glossary?.length ? { glossary: ctx.glossary } : {}
+    ...ctx.glossary?.length ? { glossary: ctx.glossary } : {},
+    ...ctx.notes?.length ? { notes: ctx.notes } : {}
   };
 }
 function estTokens(s) {
@@ -4708,7 +4751,7 @@ Answer account questions from these records ONLY: name the record when you use i
       const reordered = await listwiseRerank(env, MODELS.listwise, understanding?.standalone_query || q.query, retrieved.hits);
       if (reordered) {
         console.log("listwise: reordered", reordered[0]?.metadata?.docidentifier ?? "?", "to top");
-        retrieved = { hits: reordered, filters: retrieved.filters };
+        retrieved = { ...retrieved, hits: reordered };
       }
     }
     const grade = await gradePromise;
@@ -4746,7 +4789,8 @@ Answer account questions from these records ONLY: name the record when you use i
     hits,
     q.lang,
     keptHistory,
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote].filter(Boolean).join("\n") || void 0,
+    // stage-extracted graph facts (GraphRAG) ride the same note channel
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
     summary,
     budget
   );
