@@ -12,6 +12,7 @@ import type { Stage } from "./types.ts";
 export { runStages } from "./types.ts";
 export type { PipelineContext, RetrieveOptions, GlossaryEntry, Stage } from "./types.ts";
 import { dense } from "./dense.ts";
+import { citationProbe } from "./citationProbe.ts";
 import { hyde } from "./hyde.ts";
 import { glossary } from "./glossary.ts";
 import { conceptGraph } from "./conceptGraph.ts";
@@ -40,6 +41,7 @@ import { windowFloor } from "./windowFloor.ts";
 
 export const STAGES: Stage[] = [
   dense,
+  citationProbe,
   hyde,
   glossary,
   conceptGraph,
