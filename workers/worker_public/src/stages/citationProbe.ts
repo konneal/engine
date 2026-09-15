@@ -9,7 +9,7 @@
 // The gap: "What ISO standards does R 60 cite?" — R 60-1:2021's
 // bibliography lists OIML documents only; the ISO/IEC references live
 // in the 2017 edition's §22.3 (2026-09-15).
-import { toHits, type Stage } from "./types.ts";
+import type { Stage } from "./types.ts";
 import { namedDocumentIn } from "../context.ts";
 import type { Hit } from "../../../shared/chunk.ts";
 
@@ -49,12 +49,18 @@ export const citationProbe: Stage = {
         const ids = (rows.results ?? []).map((r: { id: string }) => r.id).slice(0, 8);
         if (!ids.length) return [] as Hit[];
         const got = await c.env.VECTORIZE.getByIds(ids);
-        // getByIds returns score=0 — the usedHits builder sorts by score
-        // and takes the top N, so zero-score hits never make the cut.
-        // These are deterministically relevant (the user asked what the
-        // document cites; these ARE the bibliography chunks) — give them
-        // a score that places them at the head of the pool.
-        return (got ?? []).map((h: any) => ({ ...h, score: 10 }));
+        if (!got?.length) return [] as Hit[];
+        // getByIds returns metadata WITHOUT the chunk text — the
+        // usedHits builder calls h.text.clipToTokens and crashes on
+        // undefined (the live 503). Fetch the text from D1 and merge.
+        const ph = ids.map((_: string, i: number) => `?${i + 1}`).join(",");
+        const texts = await c.env.DB.prepare(`SELECT id, text FROM chunks WHERE id IN (${ph})`)
+          .bind(...ids)
+          .all() as { results?: Array<{ id: string; text: string }> };
+        const textById = new Map((texts.results ?? []).map((r) => [r.id, r.text]));
+        return got
+          .filter((h: any) => textById.has(h.id))
+          .map((h: any) => ({ ...h, score: 10, text: textById.get(h.id)! }));
       } catch {
         return [] as Hit[];
       }
