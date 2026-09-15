@@ -571,11 +571,13 @@ var citationProbe = {
   when: (c) => {
     if (!CITE_PATTERN.test(c.query) || !REFS_PATTERN.test(c.query)) return false;
     const named = namedDocumentIn(c.query);
-    return !!named && !!c.u?.doc_number;
+    if (!named) return false;
+    c.__citeDocNum = named.doc_number;
+    return true;
   },
   prefetch: (c) => {
     const { env, u } = c;
-    const docNum = String(u.doc_number);
+    const docNum = String(c.__citeDocNum ?? u.doc_number);
     const probe = `bibliography normative references standards cited document ${docNum}`;
     c.lane["citation-probe"] = (async () => {
       try {

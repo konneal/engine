@@ -23,12 +23,17 @@ export const citationProbe: Stage = {
   failure: "additive",
   when: (c) => {
     if (!CITE_PATTERN.test(c.query) || !REFS_PATTERN.test(c.query)) return false;
+    // the TEXT-derived naming (namedDocumentIn), never the LLM's
+    // extraction — the understand model may omit doc_number for this
+    // query shape (measured: it did)
     const named = namedDocumentIn(c.query);
-    return !!named && !!c.u?.doc_number;
+    if (!named) return false;
+    (c as any).__citeDocNum = named.doc_number;
+    return true;
   },
   prefetch: (c) => {
     const { env, u } = c;
-    const docNum = String(u!.doc_number!);
+    const docNum = String((c as any).__citeDocNum ?? u!.doc_number);
     // the probe: the bibliography's own vocabulary, scoped to the family
     const probe = `bibliography normative references standards cited document ${docNum}`;
     // no edition filter — prior editions may carry what the current dropped
