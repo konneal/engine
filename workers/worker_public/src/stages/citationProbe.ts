@@ -59,7 +59,7 @@ export const citationProbe: Stage = {
   },
   run: async (c) => {
     const probes = (await c.lane["citation-probe"]) as Hit[];
-    const seen = new Set(c.matches.map((m: any) => m.id));
+    const seen = new Set(c.hits.map((m: any) => m.id));
     let added = 0;
     // only bibliography-shaped chunks (clause title or text mentions it)
     for (const h of probes) {
@@ -67,7 +67,7 @@ export const citationProbe: Stage = {
       const title = String((h.metadata as any)?.clause_title ?? "");
       const text = String(h.text ?? "");
       if (/bibliograph|normative reference/i.test(title + " " + text.slice(0, 300))) {
-        c.matches.push(h);
+        c.hits.push(h);
         seen.add(h.id as any);
         added++;
       }

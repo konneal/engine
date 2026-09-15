@@ -594,14 +594,14 @@ var citationProbe = {
   },
   run: async (c) => {
     const probes = await c.lane["citation-probe"];
-    const seen = new Set(c.matches.map((m) => m.id));
+    const seen = new Set(c.hits.map((m) => m.id));
     let added = 0;
     for (const h of probes) {
       if (seen.has(h.id)) continue;
       const title = String(h.metadata?.clause_title ?? "");
       const text = String(h.text ?? "");
       if (/bibliograph|normative reference/i.test(title + " " + text.slice(0, 300))) {
-        c.matches.push(h);
+        c.hits.push(h);
         seen.add(h.id);
         added++;
       }
