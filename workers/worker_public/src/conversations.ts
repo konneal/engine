@@ -38,7 +38,7 @@ export async function handleConversations(
 
   if (method === "GET" && !id) {
     const rows: any = await env.DB.prepare(
-      "SELECT c.id, c.title, c.updated_at, COUNT(m.id) AS messages FROM conversations c LEFT JOIN messages m ON m.conversation_id = c.id WHERE c.sub = ?1 GROUP BY c.id ORDER BY c.updated_at DESC LIMIT 50",
+      "SELECT c.id, c.title, c.updated_at, c.project_id, COUNT(m.id) AS messages FROM conversations c LEFT JOIN messages m ON m.conversation_id = c.id WHERE c.sub = ?1 GROUP BY c.id ORDER BY c.updated_at DESC LIMIT 50",
     )
       .bind(sub)
       .all();
