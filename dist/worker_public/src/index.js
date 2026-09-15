@@ -576,18 +576,17 @@ var citationProbe = {
     return true;
   },
   prefetch: (c) => {
-    const { env, u } = c;
-    const docNum = String(c.__citeDocNum ?? u.doc_number);
-    const probe = `bibliography normative references standards cited document ${docNum}`;
+    const docNum = String(c.__citeDocNum ?? c.u?.doc_number ?? "");
     c.lane["citation-probe"] = (async () => {
+      if (!docNum) return [];
       try {
-        const v = await embed(env.AI, MODELS.embed, probe);
-        const res = await env.VECTORIZE.query(v, {
-          topK: 12,
-          returnMetadata: "all",
-          filter: { doc_number: docNum }
-        });
-        return toHits(res.matches ?? []);
+        const rows = await c.env.DB.prepare(
+          "SELECT id FROM chunks_fts WHERE chunks_fts MATCH ?1 AND doc_number = ?2 LIMIT 8"
+        ).bind("bibliography OR references", docNum).all();
+        const ids = (rows.results ?? []).map((r) => r.id).slice(0, 8);
+        if (!ids.length) return [];
+        const got = await c.env.VECTORIZE.getByIds(ids);
+        return toHits(got ?? []);
       } catch {
         return [];
       }
