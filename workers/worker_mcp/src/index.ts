@@ -39,7 +39,7 @@ const rpcError = (id: unknown, code: number, message: string) =>
 const publisherId = () => P().publisher.id;
 const bearer = (req: Request) => (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
 const publisherName = () => P().publisher.name;
-const TOOLS = [
+const tools = () => [
   {
     name: `${publisherId()}_search`,
     description:
@@ -138,7 +138,7 @@ export default {
         server: "rag-mcp",
         transport: "streamable-http",
         endpoint: "/mcp",
-        tools: TOOLS.map((t) => t.name),
+        tools: tools().map((t) => t.name),
       });
     }
 
@@ -168,7 +168,7 @@ export default {
             serverInfo: { name: "rag-mcp", version: "1.0.0", title: `${P().publisher.product_name} — public corpus` },
           });
         case "tools/list":
-          return rpcResult(msg.id, { tools: TOOLS });
+          return rpcResult(msg.id, { tools: tools() });
         case "tools/call": {
           const out = await callTool(env, bearer(req), String(msg.params?.name ?? ""), msg.params?.arguments ?? {});
           return rpcResult(msg.id, out);

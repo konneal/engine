@@ -17,7 +17,7 @@ var rpcError = (id, code, message) => json({ jsonrpc: "2.0", id, error: { code, 
 var publisherId = () => P().publisher.id;
 var bearer = (req) => (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
 var publisherName = () => P().publisher.name;
-var TOOLS = [
+var tools = () => [
   {
     name: `${publisherId()}_search`,
     description: `Search the ${publisherName()} publications corpus. Returns ranked passages with publication identifier, edition, clause and snippet.`,
@@ -107,7 +107,7 @@ var src_default = {
         server: "rag-mcp",
         transport: "streamable-http",
         endpoint: "/mcp",
-        tools: TOOLS.map((t) => t.name)
+        tools: tools().map((t) => t.name)
       });
     }
     if (url.pathname !== "/mcp") return json({ error: "not_found" }, 404);
@@ -130,7 +130,7 @@ var src_default = {
             serverInfo: { name: "rag-mcp", version: "1.0.0", title: `${P().publisher.product_name} \u2014 public corpus` }
           });
         case "tools/list":
-          return rpcResult(msg.id, { tools: TOOLS });
+          return rpcResult(msg.id, { tools: tools() });
         case "tools/call": {
           const out = await callTool(env, bearer(req), String(msg.params?.name ?? ""), msg.params?.arguments ?? {});
           return rpcResult(msg.id, out);
