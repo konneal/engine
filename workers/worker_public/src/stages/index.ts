@@ -41,7 +41,6 @@ import { windowFloor } from "./windowFloor.ts";
 
 export const STAGES: Stage[] = [
   dense,
-  citationProbe,
   hyde,
   glossary,
   conceptGraph,
@@ -56,6 +55,7 @@ export const STAGES: Stage[] = [
   familyBoost,
   rerankStage,
   lexicalRrf,
+  citationProbe,
   corpusScope,
   editionCover,
   stdRefNudge,
