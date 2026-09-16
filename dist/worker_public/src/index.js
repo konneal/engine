@@ -2566,7 +2566,7 @@ async function handleProjects(env, sub, req, route) {
   }
   if (method === "POST") {
     const body = await req.json().catch(() => null);
-    if (typeof body?.project_id === "string") {
+    if (body && (typeof body.project_id === "string" || body.project_id === null)) {
       const convId = String(body.conversation_id ?? "");
       if (!/^[a-zA-Z0-9_-]{8,64}$/.test(convId)) return err(400, "invalid_input", "bad conversation id");
       const target = body.project_id === null ? null : String(body.project_id);
