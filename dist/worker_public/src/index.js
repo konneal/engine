@@ -8,15 +8,15 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-ROF3Q7UC.js";
+} from "../../chunk-GTJSMC2P.js";
 import {
   canonicalRefusal,
   refusalAnswer
-} from "../../chunk-CAEHIVG5.js";
+} from "../../chunk-KY7PQWYB.js";
 import {
   requestSalt,
   resolveRequestScope
-} from "../../chunk-EHJEELVB.js";
+} from "../../chunk-X6VMX3BP.js";
 import {
   DATASETS,
   LIMITS,
@@ -32,11 +32,143 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-OCNLV7Q7.js";
+} from "../../chunk-X7PL5VVX.js";
 import {
   P,
+  __commonJS,
+  __toESM,
   setProfile
-} from "../../chunk-35ODH64W.js";
+} from "../../chunk-HHII3F26.js";
+
+// node_modules/@oimlsmart/oiml-pubid/dist/index.js
+var require_dist = __commonJS({
+  "node_modules/@oimlsmart/oiml-pubid/dist/index.js"(exports) {
+    "use strict";
+    Object.defineProperty(exports, "__esModule", { value: true });
+    exports.parseOimlPubid = parseOimlPubid2;
+    exports.urnForOimlPubid = urnForOimlPubid;
+    exports.urnForIdentifier = urnForIdentifier;
+    function tokenize2(src) {
+      const out = [];
+      let i = 0;
+      const s = src.trim();
+      while (i < s.length) {
+        const c = s[i];
+        if (/\s/.test(c)) {
+          i++;
+          continue;
+        }
+        if (/[A-Za-z]/.test(c)) {
+          let j = i;
+          while (j < s.length && /[A-Za-z/]/.test(s[j]))
+            j++;
+          out.push({ kind: "word", value: s.slice(i, j) });
+          i = j;
+        } else if (/[0-9]/.test(c)) {
+          let j = i;
+          while (j < s.length && /[0-9]/.test(s[j]))
+            j++;
+          out.push({ kind: "num", value: s.slice(i, j) });
+          i = j;
+        } else {
+          out.push({ kind: "punct", value: c });
+          i++;
+        }
+      }
+      return out;
+    }
+    var PUB_FAMILIES = /* @__PURE__ */ new Set(["r", "b", "d", "g", "e", "v"]);
+    var CS_FAMILIES = /* @__PURE__ */ new Set(["pd", "od", "cid"]);
+    function parseOimlPubid2(src, bibdataYear = "") {
+      const t = tokenize2(src);
+      let i = 0;
+      const peek = () => t[i];
+      const eat = () => t[i++];
+      const head = eat();
+      if (head?.kind !== "word" || head.value.toUpperCase() !== "OIML")
+        return null;
+      let series = "pub";
+      if (peek()?.kind === "punct" && peek().value === "-" && t[i + 1]?.kind === "word" && t[i + 1].value.toUpperCase() === "CS") {
+        eat();
+        eat();
+        series = "cs";
+      } else if (peek()?.kind === "word" && peek().value.toUpperCase() === "CS") {
+        eat();
+        series = "cs";
+      }
+      const fam = eat();
+      if (fam?.kind !== "word")
+        return null;
+      const family = fam.value.toLowerCase();
+      if (series === "cs" ? !CS_FAMILIES.has(family) : !PUB_FAMILIES.has(family))
+        return null;
+      if (peek()?.kind === "punct" && peek().value === "-")
+        eat();
+      const num2 = eat();
+      if (num2?.kind !== "num")
+        return null;
+      let part;
+      if (peek()?.kind === "punct" && peek().value === "-" && t[i + 1]?.kind === "num") {
+        eat();
+        part = eat().value;
+      }
+      let year;
+      if (peek()?.kind === "punct" && peek().value === ":" && t[i + 1]?.kind === "num" && t[i + 1].value.length === 4) {
+        eat();
+        year = eat().value;
+      }
+      if (peek()?.kind === "punct" && peek().value === "(") {
+        let depth = 0;
+        let j = i;
+        while (j < t.length && !(t[j].kind === "punct" && t[j].value === ")" && depth === 1)) {
+          if (t[j].kind === "punct" && t[j].value === "(")
+            depth++;
+          j++;
+          if (depth === 1 && t[j]?.kind === "punct" && t[j].value === ")")
+            break;
+        }
+        if (j < t.length)
+          i = j + 1;
+      }
+      let edition;
+      if (peek()?.kind === "word" && peek().value.toLowerCase() === "edition" && t[i + 1]?.kind === "num") {
+        eat();
+        edition = eat().value;
+      }
+      let amendment;
+      if (peek()?.kind === "punct" && peek().value === "(" && t[i + 1]?.kind === "word" && t[i + 1].value.toLowerCase() === "amendment" && t[i + 2]?.kind === "num") {
+        eat();
+        eat();
+        amendment = eat().value;
+        if (peek()?.kind === "punct" && peek().value === ")")
+          eat();
+      }
+      if (i < t.length)
+        return null;
+      return {
+        series,
+        family,
+        number: num2.value,
+        ...part ? { part } : {},
+        ...year ? { year } : bibdataYear ? { year: bibdataYear } : {},
+        ...edition ? { edition } : {},
+        ...amendment ? { amendment } : {}
+      };
+    }
+    function urnForOimlPubid(pubid) {
+      const year = pubid.year ? `:${pubid.year}` : "";
+      if (pubid.series === "cs") {
+        return `urn:oiml:pub:cs:${pubid.family}-${pubid.number}${year}`;
+      }
+      const part = pubid.part ? `-${pubid.part}` : "";
+      return `urn:oiml:pub:${pubid.family}:${pubid.number}${part}${year}`;
+    }
+    function urnForIdentifier(src, bibdataYear = "") {
+      const pubid = parseOimlPubid2(src, bibdataYear);
+      return pubid ? urnForOimlPubid(pubid) : null;
+    }
+  }
+});
 
 // workers/worker_public/src/ai.ts
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -433,13 +565,26 @@ var dense = {
 };
 
 // workers/worker_public/src/codecs.ts
+var import_oiml_pubid = __toESM(require_dist());
+var urnToDisplay = (u) => {
+  const pub = u.match(/^urn:oiml:pub:([a-z]+):(\d+)(?:-([0-9a-z]+))?(?::(\d{4}))?$/i);
+  if (pub) return `OIML ${pub[1].toUpperCase()} ${pub[2]}${pub[3] ? `-${pub[3]}` : ""}${pub[4] ? `:${pub[4]}` : ""}`;
+  const cs = u.match(/^urn:oiml:pub:cs:([a-z]+)-(\d+)(?::(\d{4}))?$/i);
+  if (cs) return `OIML-CS ${cs[1].toUpperCase()}-${cs[2]}${cs[3] ? `:${cs[3]}` : ""}`;
+  return null;
+};
+var parsePubid = (doc) => {
+  const src = /^urn:/i.test(doc) ? urnToDisplay(doc) : /^(?:OIML|oiml)\b/i.test(doc) ? doc : `OIML ${doc}`;
+  return src ? (0, import_oiml_pubid.parseOimlPubid)(src) : null;
+};
 var oimlPubid = {
   parse(doc, edition) {
-    const m = doc.match(/^urn:oiml:pub:([rdbge]):(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i) ?? doc.match(/^(?:OIML\s+)?([RDBGE])\s*(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i);
-    if (!m) return null;
-    const type = m[1].toUpperCase();
-    const ed = edition ?? m[3] ?? void 0;
-    return { doc_number: m[2], ...ed ? { edition: ed } : {}, label: `OIML ${type} ${m[2]}${ed ? `:${ed}` : ""}` };
+    const p = parsePubid(doc);
+    if (!p || p.series !== "pub") return null;
+    const type = p.family.toUpperCase();
+    const num2 = String(Number(p.number));
+    const ed = edition ?? p.year ?? void 0;
+    return { doc_number: num2, ...ed ? { edition: ed } : {}, label: `OIML ${type} ${num2}${p.part ? `-${p.part}` : ""}${ed ? `:${ed}` : ""}` };
   },
   scanQuestion(query) {
     const re = /\b(OIML\s+)?([RDBGE])(\s*)0*(\d{1,3})(?:\s*[-–]\s*\d+)?(?:\s*:\s*(\d{4}))?/gi;
@@ -457,6 +602,8 @@ var oimlPubid = {
     return m ? m[1] : null;
   },
   familyOf(di) {
+    const p = parsePubid(di);
+    if (p && p.series === "pub") return `${p.family.toUpperCase()}-${String(Number(p.number))}`;
     const m = /^(?:OIML\s+)?([A-Z])\s?(\d{1,3})(?:[-–]([0-9A-Za-z]+))?/.exec(di);
     return m ? `${m[1]}-${m[2]}` : null;
   }

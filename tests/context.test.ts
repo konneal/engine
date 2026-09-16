@@ -48,13 +48,13 @@ test("parseContext: the three kinds parse, fields are bounded", () => {
 });
 
 test("parseDocRef: the URN provenance form", () => {
-  assert.deepEqual(parseDocRef("urn:oiml:pub:r:60-1:2021"), { doc_number: "60", edition: "2021", label: "OIML R 60:2021" });
+  assert.deepEqual(parseDocRef("urn:oiml:pub:r:60-1:2021"), { doc_number: "60", edition: "2021", label: "OIML R 60-1:2021" });
   assert.deepEqual(parseDocRef("urn:oiml:pub:b:18:2025"), { doc_number: "18", edition: "2025", label: "OIML B 18:2025" });
   assert.deepEqual(parseDocRef("urn:oiml:pub:d:29"), { doc_number: "29", label: "OIML D 29" });
 });
 
 test("parseDocRef: the plain docidentifier forms", () => {
-  assert.deepEqual(parseDocRef("OIML R 60-1:2021"), { doc_number: "60", edition: "2021", label: "OIML R 60:2021" });
+  assert.deepEqual(parseDocRef("OIML R 60-1:2021"), { doc_number: "60", edition: "2021", label: "OIML R 60-1:2021" });
   assert.deepEqual(parseDocRef("R 76"), { doc_number: "76", label: "OIML R 76" });
   assert.deepEqual(parseDocRef("OIML B 18"), { doc_number: "18", label: "OIML B 18" });
   // the explicit edition argument wins over the reference's own
@@ -64,7 +64,8 @@ test("parseDocRef: the plain docidentifier forms", () => {
 test("parseDocRef: garbage never resolves", () => {
   assert.equal(parseDocRef("the certificate"), null);
   assert.equal(parseDocRef(""), null);
-  assert.equal(parseDocRef("R 1234"), null); // doc numbers are 1-3 digits
+  // number := digits in the SSOT grammar (no 1-3 cap); a nonexistent
+  // family honestly never scopes via the registry check
 });
 
 const dbWith = (families: string[]) => ({
@@ -84,7 +85,7 @@ const dbWith = (families: string[]) => ({
 test("resolveDocScope: an unknown family honestly does not scope", async () => {
   const env = dbWith(["R-60"]);
   const hit = await resolveDocScope(env, { kind: "document", label: "R 60", doc: "OIML R 60-1:2021" });
-  assert.deepEqual(hit, { doc_number: "60", edition: "2021", label: "OIML R 60:2021" });
+  assert.deepEqual(hit, { doc_number: "60", edition: "2021", label: "OIML R 60-1:2021" });
   const miss = await resolveDocScope(env, { kind: "document", label: "R 999", doc: "OIML R 999" });
   assert.equal(miss, null);
   // no doc declared → no scope
@@ -94,7 +95,7 @@ test("resolveDocScope: an unknown family honestly does not scope", async () => {
 test("resolveDocScope: a registry failure keeps the parsed scope (fail-open scoped, never silently widened)", async () => {
   const env = { DB: { prepare: () => ({ bind: () => ({ first: async () => { throw new Error("D1 down"); } }) }) } };
   const scope = await resolveDocScope(env, { kind: "entity", label: "this certificate X", doc: "urn:oiml:pub:r:60-1:2021" });
-  assert.deepEqual(scope, { doc_number: "60", edition: "2021", label: "OIML R 60:2021" });
+  assert.deepEqual(scope, { doc_number: "60", edition: "2021", label: "OIML R 60-1:2021" });
 });
 
 test("appliedContext: none when undeclared; the scope label rides when resolved", () => {
@@ -104,10 +105,10 @@ test("appliedContext: none when undeclared; the scope label rides when resolved"
     label: "the IA console",
     scoped_to: null,
   });
-  assert.deepEqual(appliedContext({ kind: "entity", label: "this certificate R60/2021-A-EX1-26.01", doc: "R 60" }, { doc_number: "60", edition: "2021", label: "OIML R 60:2021" }), {
+  assert.deepEqual(appliedContext({ kind: "entity", label: "this certificate R60/2021-A-EX1-26.01", doc: "R 60" }, { doc_number: "60", edition: "2021", label: "OIML R 60-1:2021" }), {
     kind: "entity",
     label: "this certificate R60/2021-A-EX1-26.01",
-    scoped_to: "OIML R 60:2021",
+    scoped_to: "OIML R 60-1:2021",
   });
 });
 
@@ -121,10 +122,10 @@ test("contextNote: the entity note is honest about the wave-02 boundary (no enti
 });
 
 test("parseAppliedContext: the stored echo is validated + bounded, garbage dropped", () => {
-  assert.deepEqual(parseAppliedContext({ kind: "entity", label: "this certificate X", scoped_to: "OIML R 60:2021" }), {
+  assert.deepEqual(parseAppliedContext({ kind: "entity", label: "this certificate X", scoped_to: "OIML R 60-1:2021" }), {
     kind: "entity",
     label: "this certificate X",
-    scoped_to: "OIML R 60:2021",
+    scoped_to: "OIML R 60-1:2021",
   });
   assert.deepEqual(parseAppliedContext({ kind: "none", scoped_to: null }), { kind: "none", scoped_to: null });
   assert.equal(parseAppliedContext({ kind: "everything" }), null);

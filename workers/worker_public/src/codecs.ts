@@ -24,18 +24,41 @@ export interface RefCodec {
   familyOf(docidentifier: string): string | null;
 }
 
-/** OIML's grammar: type letter (R/D/B/G/E) + 1–3 digits, optional part,
- *  optional edition year; the URN provenance form; part numbers are
- *  significant (R 60-1), the edition is never part of the number. */
+// The OIML grammar is @oimlsmart/oiml-pubid — the estate's single
+// source of truth (real tokenizer: editions, amendments, languages,
+// the CS family — beyond what any regex here carried). This codec's
+// job is the ADAPTATION: the parser takes the prefixed form and
+// returns null for everything else; our callers also send bare forms
+// ("R 60-1:2021") and the URN provenance shape. Corpi: the package
+// ships the shared conformance corpus; our tests run against it.
+import { parseOimlPubid } from "@oimlsmart/oiml-pubid";
+
+/** urn:oiml:pub:r:60-1:2021 (pub) / urn:oiml:pub:cs:pd-06 (CS) → the
+ *  prefixed display form the parser takes. */
+const urnToDisplay = (u: string) => {
+  const pub = u.match(/^urn:oiml:pub:([a-z]+):(\d+)(?:-([0-9a-z]+))?(?::(\d{4}))?$/i);
+  if (pub) return `OIML ${pub[1].toUpperCase()} ${pub[2]}${pub[3] ? `-${pub[3]}` : ""}${pub[4] ? `:${pub[4]}` : ""}`;
+  const cs = u.match(/^urn:oiml:pub:cs:([a-z]+)-(\d+)(?::(\d{4}))?$/i);
+  if (cs) return `OIML-CS ${cs[1].toUpperCase()}-${cs[2]}${cs[3] ? `:${cs[3]}` : ""}`;
+  return null;
+};
+
+const parsePubid = (doc: string) => {
+  const src = /^urn:/i.test(doc) ? urnToDisplay(doc) : /^(?:OIML|oiml)\b/i.test(doc) ? doc : `OIML ${doc}`;
+  return src ? parseOimlPubid(src) : null;
+};
+
+/** OIML's grammar (delegated): type letter + 1–3 digits, optional part,
+ *  optional edition year; part numbers are significant (R 60-1), the
+ *  edition is never part of the number. */
 export const oimlPubid: RefCodec = {
   parse(doc, edition) {
-    const m =
-      doc.match(/^urn:oiml:pub:([rdbge]):(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i) ??
-      doc.match(/^(?:OIML\s+)?([RDBGE])\s*(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i);
-    if (!m) return null;
-    const type = m[1].toUpperCase();
-    const ed = edition ?? m[3] ?? undefined;
-    return { doc_number: m[2], ...(ed ? { edition: ed } : {}), label: `OIML ${type} ${m[2]}${ed ? `:${ed}` : ""}` };
+    const p = parsePubid(doc);
+    if (!p || p.series !== "pub") return null;
+    const type = p.family.toUpperCase();
+    const num = String(Number(p.number)); // R 060 → R 60 (display and steering agree)
+    const ed = edition ?? p.year ?? undefined;
+    return { doc_number: num, ...(ed ? { edition: ed } : {}), label: `OIML ${type} ${num}${p.part ? `-${p.part}` : ""}${ed ? `:${ed}` : ""}` };
   },
   scanQuestion(query) {
     const re = /\b(OIML\s+)?([RDBGE])(\s*)0*(\d{1,3})(?:\s*[-–]\s*\d+)?(?:\s*:\s*(\d{4}))?/gi;
@@ -54,6 +77,8 @@ export const oimlPubid: RefCodec = {
     return m ? m[1] : null;
   },
   familyOf(di) {
+    const p = parsePubid(di);
+    if (p && p.series === "pub") return `${p.family.toUpperCase()}-${String(Number(p.number))}`;
     const m = /^(?:OIML\s+)?([A-Z])\s?(\d{1,3})(?:[-–]([0-9A-Za-z]+))?/.exec(di);
     return m ? `${m[1]}-${m[2]}` : null;
   },

@@ -51,6 +51,9 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install -r ingest/requirements.txt pytest ruff
       - run: python -m compileall -q ingest
+      # the pubid conformance corpus (the shared expectations the
+      # ingest grammar mirrors) ships inside the npm package
+      - run: npm install @oimlsmart/oiml-pubid --no-save
       - run: python -m pytest tests/python -q
       - run: python -m ruff check --select F ingest/
       - if: steps.smart-checkout.outcome == 'success'
