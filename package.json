@@ -29,7 +29,8 @@
   },
   "dependencies": {
     "@astrojs/markdown-satteri": "^0.4.1",
-    "@astrojs/mdx": "^4.3.14"
+    "@astrojs/mdx": "^4.3.14",
+    "@oimlsmart/oiml-pubid": "^1.1.0"
   },
   "version": "0.1.4",
   "description": "The Konneal engine: the publisher-agnostic build pipeline and API plane for standards intelligence (retrieval, answer contract, verdicts, evaluation).",
