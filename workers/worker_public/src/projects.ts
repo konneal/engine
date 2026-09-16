@@ -30,8 +30,10 @@ export async function handleProjects(env: any, sub: string, req: Request, route:
   }
   if (method === "POST") {
     const body: any = await req.json().catch(() => null);
-    if (typeof body?.project_id === "string") {
-      // move a conversation in/out of a project (membership-as-move)
+    if (body && (typeof body.project_id === "string" || body.project_id === null)) {
+      // move a conversation in/out of a project (membership-as-move) —
+      // null UNFILES (the 2026-09-16 bug: the string-only guard let the
+      // null case fall through to create-project and 400)
       const convId = String(body.conversation_id ?? "");
       if (!/^[a-zA-Z0-9_-]{8,64}$/.test(convId)) return err(400, "invalid_input", "bad conversation id");
       const target = body.project_id === null ? null : String(body.project_id);
