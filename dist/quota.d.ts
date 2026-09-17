@@ -10,4 +10,4 @@ export declare function checkQuota(env: Env, bucket: string, id: string, limit: 
     used: number;
     limit: number;
 }>;
-export declare function telemetry(env: Env, ctx: Background, tier: string, route: string, model: string | null, ok: boolean, answerChars: number, queryHash: string, lang?: string): void;
+export declare function telemetry(env: Env, ctx: Background, tier: string, route: string, model: string | null, ok: boolean, answerChars: number, queryHash: string, lang?: string, cache?: "exact" | "semantic"): void;
