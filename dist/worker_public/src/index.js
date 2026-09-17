@@ -3179,13 +3179,13 @@ async function checkQuota(env, bucket, id, limit, weight = 1) {
   const used = await kvIncr(env.CACHE, `q:${today()}:${bucket}:${await sha256Hex(id)}`, weight);
   return { ok: used <= limit, used, limit };
 }
-function telemetry(env, ctx, tier, route, model, ok, answerChars, queryHash, lang) {
+function telemetry(env, ctx, tier, route, model, ok, answerChars, queryHash, lang, cache) {
   const day = today();
   ctx.waitUntil(
     env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO queries (ts, day, tier, route, model, ok, answer_chars, query_hash, lang) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
-      ).bind((/* @__PURE__ */ new Date()).toISOString(), day, tier, route, model, ok ? 1 : 0, answerChars, queryHash, lang ?? null),
+        "INSERT INTO queries (ts, day, tier, route, model, ok, answer_chars, query_hash, lang, cache) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+      ).bind((/* @__PURE__ */ new Date()).toISOString(), day, tier, route, model, ok ? 1 : 0, answerChars, queryHash, lang ?? null, cache ?? null),
       env.DB.prepare(
         "INSERT INTO spend (day, tier, model, requests) VALUES (?1,?2,?3,1) ON CONFLICT(day, tier, model) DO UPDATE SET requests = requests + 1"
       ).bind(day, tier, model ?? "none")
@@ -4657,7 +4657,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   const wantsStream = body?.stream === true || tier === "anon" && body?.stream !== false;
   if (cached) {
-    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang);
+    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact");
     const cctx = cached.value.context_applied ?? NO_CONTEXT;
     if (wantsStream) {
       return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, context_applied: cctx }], corsHeaders(req));
@@ -4684,7 +4684,7 @@ async function handleAsk(env, ctx, req, tier, key) {
       const sc0 = await semanticCacheGet(env, gen, wv0, salt);
       if (sc0) {
         console.log("semantic cache hit (pre-understanding)");
-        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang);
+        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang, "semantic");
         const cctx0 = sc0.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
           return sseResponse([{ type: "citations", citations: sc0.citations ?? [], context_applied: cctx0 }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true, context_applied: cctx0 }], corsHeaders(req));
@@ -4781,7 +4781,7 @@ async function handleAsk(env, ctx, req, tier, key) {
       const sc = await semanticCacheGet(env, gen, warmVec, salt);
       if (sc) {
         console.log("semantic cache hit");
-        telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang);
+        telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang, "semantic");
         const cctx = sc.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
           return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: cctx }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, context_applied: cctx }], corsHeaders(req));
@@ -5302,8 +5302,9 @@ async function adminStatsRoute(c) {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
   if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
-  const [byDay, byModel, feedback, convCount] = await Promise.all([
+  const [byDay, byModel, feedback, convCount, cacheMix] = await Promise.all([
     env.DB.prepare("SELECT day, tier, COUNT(*) as n, SUM(ok) as ok FROM queries WHERE day >= date('now','-7 days') GROUP BY day, tier ORDER BY day DESC").all(),
+    env.DB.prepare("SELECT COALESCE(cache, 'miss') AS cache, COUNT(*) AS n FROM queries WHERE day >= date('now','-7 days') AND route = 'ask' GROUP BY cache").all(),
     env.DB.prepare("SELECT model, SUM(requests) as requests FROM spend WHERE day >= date('now','-7 days') GROUP BY model ORDER BY requests DESC").all(),
     env.DB.prepare("SELECT rating, COUNT(*) as n FROM feedback GROUP BY rating").all(),
     env.DB.prepare("SELECT COUNT(*) as n FROM conversations").first()
@@ -5321,6 +5322,7 @@ async function adminStatsRoute(c) {
     queries_by_day: byDay.results,
     spend_by_model: byModel.results,
     feedback: feedback.results,
+    cache_mix_7d: cacheMix.results,
     conversations: convCount?.n ?? 0,
     error_rate_pct: errorRate,
     index_version: env.INDEX_VERSION,
