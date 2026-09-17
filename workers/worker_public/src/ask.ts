@@ -307,7 +307,7 @@ async function handleAsk(
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
-    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang);
+    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact");
     // echo the context the CACHED answer was computed under — the payload
     // stores it (cacheable excludes declared-context answers, but a model
     // node named in the question binds WITHOUT a chip and its echo must
@@ -356,7 +356,7 @@ async function handleAsk(
       const sc0 = await semanticCacheGet(env, gen, wv0, salt);
       if (sc0) {
         console.log("semantic cache hit (pre-understanding)");
-        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang);
+        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang, "semantic");
         const cctx0 = sc0.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
           return sseResponse([{ type: "citations", citations: sc0.citations ?? [], context_applied: cctx0 }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true, context_applied: cctx0 }], corsHeaders(req));
@@ -499,7 +499,7 @@ async function handleAsk(
       const sc = await semanticCacheGet(env, gen, warmVec, salt);
       if (sc) {
         console.log("semantic cache hit");
-        telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang);
+        telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang, "semantic");
         const cctx = sc.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
           return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: cctx }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, context_applied: cctx }], corsHeaders(req));

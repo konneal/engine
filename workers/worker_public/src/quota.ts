@@ -39,13 +39,14 @@ export function telemetry(
   answerChars: number,
   queryHash: string,
   lang?: string,
+  cache?: "exact" | "semantic",
 ) {
   const day = today();
   ctx.waitUntil(
     env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO queries (ts, day, tier, route, model, ok, answer_chars, query_hash, lang) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-      ).bind(new Date().toISOString(), day, tier, route, model, ok ? 1 : 0, answerChars, queryHash, lang ?? null),
+        "INSERT INTO queries (ts, day, tier, route, model, ok, answer_chars, query_hash, lang, cache) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+      ).bind(new Date().toISOString(), day, tier, route, model, ok ? 1 : 0, answerChars, queryHash, lang ?? null, cache ?? null),
       env.DB.prepare(
         "INSERT INTO spend (day, tier, model, requests) VALUES (?1,?2,?3,1) ON CONFLICT(day, tier, model) DO UPDATE SET requests = requests + 1",
       ).bind(day, tier, model ?? "none"),
