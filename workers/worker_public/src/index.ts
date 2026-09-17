@@ -22,6 +22,7 @@ import { handleSearch } from "./search";
 import { handleEnrich, handleSectionUnit, handleCaption, handleVectors, handleJudge, handleCreateKey, handleListKeys, handleRevokeKey } from "./admin";
 import { handleResearch } from "./research";
 import { handleAsk } from "./ask";
+import { handleMcp } from "./mcp";
 
 // One named handler per HTTP route, declared in ROUTES below and
 // dispatched by lib/router.ts's matchRoute. Adding a route = one entry +
@@ -118,6 +119,12 @@ async function tierFor(c: RouteContext): Promise<{ tier: "anon" | "key" | "membe
   let tier: "anon" | "key" | "member" = isApi ? "key" : "anon";
   if (!isApi && c.env.SESSION_SECRET && (await sessionFrom(c.req, c.env as any))) tier = "member";
   return { tier, key };
+}
+
+async function mcpRoute(c: RouteContext): Promise<Response> {
+  const t = await tierFor(c);
+  if (t instanceof Response) return t;
+  return withCors(await handleMcp(c.env, c.ctx, c.req, t.tier, t.key), corsHeaders(c.req));
 }
 
 async function askRoute(c: RouteContext): Promise<Response> {
@@ -401,6 +408,7 @@ export const ROUTES: Route[] = [
   { method: "GET", pattern: "/v1/admin/stats", handler: adminStatsRoute },
   { method: "POST", pattern: "/api/ask", handler: askRoute },
   { method: "POST", pattern: "/v1/ask", handler: askRoute },
+  { method: "POST", pattern: "/mcp", handler: mcpRoute },
   { method: "POST", pattern: "/api/absence", handler: absenceRoute },
   { method: "POST", pattern: "/v1/absence", handler: absenceRoute },
   { method: "POST", pattern: "/api/verify", handler: verifyRoute },
