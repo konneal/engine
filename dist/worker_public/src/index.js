@@ -2920,6 +2920,62 @@ async function understandQuery(ai, model, query, history, entities = []) {
 // workers/worker_public/prompts/faithfulness.md
 var faithfulness_default = 'You are a factuality judge. Given an answer and the retrieved passages it was based on, identify any claims in the answer that are NOT directly supported by the passages. Reply with ONLY a JSON object: {"score": 0.0-1.0, "ungrounded_claims": ["claim text", ...]} \u2014 score is the fraction of claims that ARE grounded in the passages; if every claim is supported, score is 1.0 and ungrounded_claims is [].\n';
 
+// workers/worker_public/src/verdict-parse.ts
+function coerceVerdict(obj) {
+  if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const raw = obj.score;
+  const score = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
+  if (!Number.isFinite(score)) return null;
+  const claims = obj.ungrounded_claims;
+  return {
+    score: Math.max(0, Math.min(1, score)),
+    ungrounded_claims: Array.isArray(claims) ? claims.map(String).slice(0, 5) : []
+  };
+}
+function parseVerdict(text) {
+  const stripped = text.replace(/```[a-zA-Z]*\n?/g, "").replace(/```/g, "").trim();
+  try {
+    const whole = coerceVerdict(JSON.parse(stripped));
+    if (whole) return whole;
+  } catch {
+  }
+  let verdict = null;
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString && ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}" && depth > 0) {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        try {
+          const v = coerceVerdict(JSON.parse(stripped.slice(start, i + 1)));
+          if (v) verdict = v;
+        } catch {
+        }
+      }
+    }
+  }
+  return verdict;
+}
+
 // workers/worker_public/src/faithfulness.ts
 async function scoreFaithfulness(ai, model, answer, passages) {
   if (!answer || !passages.length) return null;
@@ -2949,22 +3005,12 @@ ${context}` }
       top_p: 1
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
-    let parsed = null;
-    for (const m of (text ?? "").matchAll(/\{[^{}]*\}/g)) {
-      try {
-        const obj = JSON.parse(m[0]);
-        if (typeof obj.score === "number") parsed = obj;
-      } catch {
-      }
-    }
-    if (!parsed) {
-      console.log(`faithfulness: no parse (${Date.now() - t0}ms, text ${(text ?? "").length} chars)`);
+    const verdict = parseVerdict(text ?? "");
+    if (!verdict) {
+      console.log(`faithfulness: no parse (${Date.now() - t0}ms, text ${(text ?? "").length} chars) raw=${JSON.stringify((text ?? "").replace(/\s+/g, " ").slice(0, 500))}`);
       return null;
     }
-    return {
-      score: Math.max(0, Math.min(1, parsed.score)),
-      ungrounded_claims: Array.isArray(parsed.ungrounded_claims) ? parsed.ungrounded_claims.map(String).slice(0, 5) : []
-    };
+    return verdict;
   })();
   return await Promise.race([call, timeout]);
 }

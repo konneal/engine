@@ -1,3 +1,4 @@
+export type { Verdict } from "./verdict-parse";
 export interface FaithfulnessResult {
     score: number;
     ungrounded_claims: string[];
