@@ -9,10 +9,12 @@ import { json, readJson, type ApiKey } from "./lib/http";
 import { P } from "./profile.ts";
 import { dispatch } from "./mcp-proto.ts";
 import type { Env } from "./env.ts";
+import type { Background } from "./ports/runtime.ts";
 
 export async function handleMcp(
   env: Env,
-  ctx: ExecutionContext,
+  // the port type, not the provider token — the handlers cast at their edge
+  ctx: Background,
   req: Request,
   tier: "anon" | "key" | "member",
   key: ApiKey | null,
@@ -31,8 +33,8 @@ export async function handleMcp(
     // deferred so plain node can load mcp-proto without the handlers'
     // .md prompt imports, which only the bundler resolves
     const res = name === "ask"
-      ? await (await import("./ask")).handleAsk(env, ctx, inner, tier, key)
-      : await (await import("./search")).handleSearch(env, ctx, inner, tier, key);
+      ? await (await import("./ask")).handleAsk(env, ctx as any, inner, tier, key)
+      : await (await import("./search")).handleSearch(env, ctx as any, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
 
