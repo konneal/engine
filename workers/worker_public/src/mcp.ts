@@ -4,7 +4,7 @@
 // internal Request to the exported route handler, so MCP can never
 // drift from the API contract; the protocol dispatch lives in
 // mcp-proto.ts (dependency-free, unit-tested). The internal-audience
-// server federates both indexes and lives with worker_internal.
+// server federates both indexes and lives in its own worker, never here.
 import { json, readJson, type ApiKey } from "./lib/http";
 import { P } from "./profile.ts";
 import { dispatch } from "./mcp-proto.ts";
