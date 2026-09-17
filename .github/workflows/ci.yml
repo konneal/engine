@@ -18,12 +18,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # the pubid-testsuite corpus (the codec's second expectation set —
+      # living ground truth; a corpus change that breaks conformance
+      # should fail here, that is the point)
+      - uses: actions/checkout@v4
+        with:
+          repository: pubid/pubid-testsuite
+          path: pubid-testsuite
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint:wrangler
       - run: npm run lint:ports
       - run: node scripts/lint-publisher-leak.mjs
       - run: npm run test:units
+        env:
+          PUBID_TESTSUITE_DIR: ${{ github.workspace }}/pubid-testsuite/tests/oiml
 
   ingest:
     runs-on: ubuntu-latest
@@ -52,9 +61,16 @@ jobs:
       - run: python -m pip install -r ingest/requirements.txt pytest ruff
       - run: python -m compileall -q ingest
       # the pubid conformance corpus (the shared expectations the
-      # ingest grammar mirrors) ships inside the npm package
+      # ingest grammar mirrors) ships inside the npm package; the
+      # pubid-testsuite checkout is the second expectation set
       - run: npm install @oimlsmart/oiml-pubid --no-save
+      - uses: actions/checkout@v4
+        with:
+          repository: pubid/pubid-testsuite
+          path: pubid-testsuite
       - run: python -m pytest tests/python -q
+        env:
+          PUBID_TESTSUITE_DIR: ${{ github.workspace }}/pubid-testsuite/tests/oiml
       - run: python -m ruff check --select F ingest/
       - if: steps.smart-checkout.outcome == 'success'
         run: SMART_REPO="$GITHUB_WORKSPACE/smart-checkout" python -m ingest.cli model-plane --check
