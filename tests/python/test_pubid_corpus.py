@@ -61,3 +61,77 @@ def test_shape_rejections_never_match():
 def test_normalize_cite_is_pubid_shaped():
     assert normalize_cite("ISO 8601:2004") == ("cite:ISO-8601-2004", "ISO 8601:2004")
     assert normalize_cite("OIML V 2-200") == ("cite:OIML-V-2-200", "OIML V 2-200")
+
+
+# The pubid-testsuite corpus (github.com/pubid/pubid-testsuite) is the
+# second expectation set: the package corpus pins the delegate grammar,
+# this one pins the ingest scan against the ecosystem's ground truth.
+# Resolution mirrors the TS side: PUBID_TESTSUITE_DIR (refuses a vacuous
+# pass when set-but-absent) → the sibling checkout → loud skip.
+import os
+
+TESTSUITE_DIR = os.environ.get("PUBID_TESTSUITE_DIR") or "../pubid-testsuite/tests/oiml"
+if os.environ.get("PUBID_TESTSUITE_DIR") and not Path(TESTSUITE_DIR).is_dir():
+    raise AssertionError(
+        f"PUBID_TESTSUITE_DIR is set but {TESTSUITE_DIR} does not exist — refusing a vacuous pass"
+    )
+
+TESTSUITE_PRESENT = Path(TESTSUITE_DIR).is_dir()
+
+# the testsuite encodes the family in _type (pubid:oiml:recommendation),
+# not a letter field
+TYPE_LETTER = {
+    "recommendation": "R", "document": "D", "basic-publication": "B",
+    "guide": "G", "expert-report": "E", "vocabulary": "V", "seminar-report": "S",
+}
+
+
+def test_testsuite_base_cases_scan():
+    if not TESTSUITE_PRESENT:
+        print("pubid-testsuite: SKIP — no corpus at", TESTSUITE_DIR)
+        return
+    import yaml
+
+    checked = 0
+    for name in sorted(os.listdir(TESTSUITE_DIR)):
+        if not name.endswith(".yaml") or name.startswith("_"):
+            continue
+        for case in yaml.safe_load((Path(TESTSUITE_DIR) / name).read_text()) or []:
+            ident = case.get("identifier") or {}
+            human = (case.get("representations") or {}).get("human")
+            if not ident or not human:
+                continue
+            # amendment/annex constructs and draft stages are the citation
+            # layer's, not the scan grammar's; the S family lands with
+            # oimlsmart/oiml-pubid#5's release
+            if human.startswith("Amendment") or "Annex" in human or ident.get("base"):
+                continue
+            if "CD" in human or "WD" in human or human.startswith("OIML S "):
+                continue
+            st = ident.get("base") or ident
+            letter = TYPE_LETTER.get(str(st.get("_type", "")).split(":")[-1])
+            if not letter:
+                continue
+            spine = f"{letter}-{int(st['number'])}"
+            refs = dict(codec.cited_refs(human))
+            assert refs, human
+            assert any(spine in nid for nid in refs), f"{human}: no {spine} in {list(refs)}"
+            checked += 1
+    assert checked > 30, f"only {checked} cases exercised — the corpus load is broken"
+
+
+def test_testsuite_normalization_pairs():
+    if not TESTSUITE_PRESENT:
+        return
+    import yaml
+
+    norm = Path(TESTSUITE_DIR) / "_normalization.yaml"
+    if not norm.is_file():
+        return
+    for pair in yaml.safe_load(norm.read_text()) or []:
+        src = pair["from"].upper().replace("OIML ", "OIML ", 1)
+        dst = pair["to"].upper().replace("OIML ", "OIML ", 1)
+        m_src, m_dst = FAMILY_RE.search(src), FAMILY_RE.search(dst)
+        if not (m_src and m_dst):
+            continue  # a construct the scan grammar does not own
+        assert (m_src.group(1), m_src.group(2)) == (m_dst.group(1), m_dst.group(2)), pair
