@@ -5,6 +5,9 @@
 
 // The prompt is data (prompts/faithfulness.md), bundled as text.
 import faithfulnessPrompt from "../prompts/faithfulness.md";
+import { parseVerdict } from "./verdict-parse";
+
+export type { Verdict } from "./verdict-parse";
 
 export interface FaithfulnessResult {
   score: number; // 0-1 (1 = every claim grounded)
@@ -41,22 +44,12 @@ export async function scoreFaithfulness(
       top_p: 1.0,
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
-    // reasoning models can emit several {...} fragments before the final
-    // verdict — take the LAST flat object that parses with a numeric score
-    let parsed: { score?: unknown; ungrounded_claims?: unknown } | null = null;
-    for (const m of (text ?? "").matchAll(/\{[^{}]*\}/g)) {
-      try {
-        const obj = JSON.parse(m[0]);
-        if (typeof obj.score === "number") parsed = obj;
-      } catch {
-        // not JSON — keep scanning
-      }
+    const verdict = parseVerdict(text ?? "");
+    if (!verdict) {
+      console.log(`faithfulness: no parse (${Date.now() - t0}ms, text ${((text ?? "").length)} chars) raw=${JSON.stringify((text ?? "").replace(/\s+/g, " ").slice(0, 500))}`);
+      return null;
     }
-    if (!parsed) { console.log(`faithfulness: no parse (${Date.now() - t0}ms, text ${((text ?? "").length)} chars)`); return null; }
-    return {
-      score: Math.max(0, Math.min(1, parsed.score as number)),
-      ungrounded_claims: Array.isArray(parsed.ungrounded_claims) ? parsed.ungrounded_claims.map(String).slice(0, 5) : [],
-    };
+    return verdict;
   })();
 
   return await Promise.race([call, timeout]);
