@@ -27,7 +27,7 @@ export async function scoreFaithfulness(
     .join("\n");
 
   const t0 = Date.now();
-  const timeout = new Promise<null>((r) => setTimeout(() => { console.log(`faithfulness: timeout (${Date.now() - t0}ms)`); r(null); }, 30000));
+  const timeout = new Promise<null>((r) => setTimeout(() => { console.log(`faithfulness: timeout (${Date.now() - t0}ms)`); r(null); }, 90000));
   const call = (async () => {
     const res: any = await ai.run(model, {
       messages: [
