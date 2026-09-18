@@ -1,13 +1,13 @@
 import {
   handleSearch
-} from "../../chunk-IUFXSUJO.js";
+} from "../../chunk-SUIO6HSX.js";
 import {
   checkQuoteAnchors,
   handleAsk,
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-3HLL3FXW.js";
+} from "../../chunk-FWKTHH3R.js";
 import "../../chunk-AWT7DWFJ.js";
 import {
   buildMessages,
@@ -30,7 +30,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-6TWMM46Q.js";
+} from "../../chunk-QKU4PRLG.js";
 import {
   authenticate,
   corsHeaders,
@@ -889,7 +889,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-SA2CA3KJ.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-3NBIZAA5.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-AQOVFVU3.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-BD2LEEFO.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });

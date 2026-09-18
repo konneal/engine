@@ -36,9 +36,9 @@ import { parseOimlPubid } from "@oimlsmart/oiml-pubid";
 /** urn:oiml:pub:r:60-1:2021 (pub) / urn:oiml:pub:cs:pd-06 (CS) → the
  *  prefixed display form the parser takes. */
 const urnToDisplay = (u: string) => {
-  const pub = u.match(/^urn:oiml:pub:([a-z]+):(\d+)(?:-([0-9a-z]+))?(?::(\d{4}))?$/i);
+  const pub = u.match(/^urn:oiml:pub:([a-z]+):(\d+)(?:-([0-9a-z]+))?(?::(\d{4}))?(?::[a-z]{1,7}(?:-[a-z]{1,7})?)?$/i);
   if (pub) return `OIML ${pub[1].toUpperCase()} ${pub[2]}${pub[3] ? `-${pub[3]}` : ""}${pub[4] ? `:${pub[4]}` : ""}`;
-  const cs = u.match(/^urn:oiml:pub:cs:([a-z]+)-(\d+)(?::(\d{4}))?$/i);
+  const cs = u.match(/^urn:oiml:pub:cs:([a-z]+)-(\d+)(?::(\d{4}))?(?::[a-z]{1,7}(?:-[a-z]{1,7})?)?$/i);
   if (cs) return `OIML-CS ${cs[1].toUpperCase()}-${cs[2]}${cs[3] ? `:${cs[3]}` : ""}`;
   return null;
 };

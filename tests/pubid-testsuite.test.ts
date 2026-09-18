@@ -37,9 +37,6 @@ const KNOWN_NULL: { re: RegExp; why: string }[] = [
   { re: /^Amendment \(\d+\) to /, why: "leading-amendment construct — the citation layer owns it" },
   { re: /\b\d?\.?\d*(WD|CD)\b/, why: "draft-stage construct — outside the retrieval plane (no draft documents)" },
   { re: /Annex/, why: "annex construct — the citation layer owns it" },
-  { re: /^OIML S /, why: "seminar-report family — oimlsmart/oiml-pubid#5" },
-  { re: /\d(st|nd|rd|th) Edition/, why: "ordinal edition form — oimlsmart/oiml-pubid#5" },
-  { re: /Edition \d{4}/, why: "edition-year form — oimlsmart/oiml-pubid#5" },
 ];
 
 test("every canonical case parses to the right spine or sits in the ledger", () => {
