@@ -105,6 +105,7 @@ export const PROFILE = {
   "prompts": {
     "vars": {
       "assistant_identity": "the fixture assistant — a public service answering questions about the fixture publisher's documents",
+      "publisher_identity": "the Fixture Organization — a worldwide organization that publishes the fixture corpus",
       "refusal_sentence": "I don't have information on this in the indexed fixture documents.",
       "account_note_source": "the user's own fixture account",
       "corpus_kind": "a fixture corpus publication",
