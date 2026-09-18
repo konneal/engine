@@ -34,7 +34,7 @@ export async function gradeRetrieval(
       // non-think mode is severely degraded (model card: HLE 8.1 vs 34.8),
       // so the grader keeps reasoning on with real headroom plus the
       // card's recommended sampling.
-      max_tokens: 3072,
+      max_tokens: 6144,
       reasoning_effort: "low",
       temperature: 1.0,
       top_p: 1.0,
@@ -65,7 +65,7 @@ export async function scoreJudge(
           { role: "system", content: systemPrompt.trimEnd() },
           { role: "user", content: userPrompt },
         ],
-        max_tokens: 3072,
+        max_tokens: 6144,
         reasoning_effort: "low",
       });
       const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
