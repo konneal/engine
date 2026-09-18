@@ -133,6 +133,7 @@ var PROFILE = {
   },
   "prompts": {
     "vars": {
+      "publisher_identity": "the Fixture Organization \u2014 a worldwide organization that publishes the fixture corpus",
       "assistant_identity": "the fixture assistant \u2014 a public service answering questions about the fixture publisher's documents",
       "refusal_sentence": "I don't have information on this in the indexed fixture documents.",
       "account_note_source": "the user's own fixture account",

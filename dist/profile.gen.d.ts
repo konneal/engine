@@ -73,6 +73,7 @@ export declare const PROFILE: {
     };
     readonly prompts: {
         readonly vars: {
+            readonly publisher_identity: "the Fixture Organization — a worldwide organization that publishes the fixture corpus";
             readonly assistant_identity: "the fixture assistant — a public service answering questions about the fixture publisher's documents";
             readonly refusal_sentence: "I don't have information on this in the indexed fixture documents.";
             readonly account_note_source: "the user's own fixture account";

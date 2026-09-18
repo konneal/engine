@@ -1,14 +1,14 @@
 import {
   handleSearch
-} from "../../chunk-YWIKY7AV.js";
+} from "../../chunk-IUFXSUJO.js";
 import {
   checkQuoteAnchors,
   handleAsk,
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-QGEJM4LN.js";
-import "../../chunk-X6VMX3BP.js";
+} from "../../chunk-3HLL3FXW.js";
+import "../../chunk-AWT7DWFJ.js";
 import {
   buildMessages,
   citations,
@@ -30,7 +30,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-RZ4W6ANO.js";
+} from "../../chunk-6TWMM46Q.js";
 import {
   authenticate,
   corsHeaders,
@@ -39,10 +39,10 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-GTJSMC2P.js";
+} from "../../chunk-ZT5QFTX6.js";
 import {
   canonicalRefusal
-} from "../../chunk-KY7PQWYB.js";
+} from "../../chunk-WGXATDXY.js";
 import {
   LIMITS,
   MODELS,
@@ -52,11 +52,11 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-X7PL5VVX.js";
+} from "../../chunk-QH3RSODB.js";
 import {
   P,
   setProfile
-} from "../../chunk-HHII3F26.js";
+} from "../../chunk-Q327B27J.js";
 
 // workers/worker_public/src/conversations.ts
 var ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
@@ -889,7 +889,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-3ZCK4XGI.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-FWVXU4NV.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-SA2CA3KJ.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-3NBIZAA5.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
