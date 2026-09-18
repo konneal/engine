@@ -37,7 +37,7 @@ export async function scoreFaithfulness(
         },
         { role: "user", content: `Answer:\n${answer.slice(0, 2000)}\n\nPassages:\n${context}` },
       ],
-      max_tokens: 3072,
+      max_tokens: 6144,
       reasoning_effort: "low",
       // DeepSeek-V4 card: temp 1.0 / top_p 1.0
       temperature: 1.0,

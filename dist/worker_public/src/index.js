@@ -7,7 +7,7 @@ import {
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-5TJRZ5OD.js";
+} from "../../chunk-QGEJM4LN.js";
 import "../../chunk-X6VMX3BP.js";
 import {
   buildMessages,
@@ -383,7 +383,7 @@ ${answer.slice(0, 2e3)}
 Passages:
 ${context}` }
       ],
-      max_tokens: 3072,
+      max_tokens: 6144,
       reasoning_effort: "low",
       // DeepSeek-V4 card: temp 1.0 / top_p 1.0
       temperature: 1,
@@ -889,7 +889,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-Q4GXVHWM.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-FWVXU4NV.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-3ZCK4XGI.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-FWVXU4NV.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
