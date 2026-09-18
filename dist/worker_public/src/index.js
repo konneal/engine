@@ -369,7 +369,7 @@ async function scoreFaithfulness(ai, model, answer, passages) {
   const timeout = new Promise((r) => setTimeout(() => {
     console.log(`faithfulness: timeout (${Date.now() - t0}ms)`);
     r(null);
-  }, 9e4));
+  }, 24e4));
   const call = (async () => {
     const res = await ai.run(model, {
       messages: [
