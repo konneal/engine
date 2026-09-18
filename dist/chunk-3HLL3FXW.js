@@ -1,7 +1,7 @@
 import {
   requestSalt,
   resolveRequestScope
-} from "./chunk-X6VMX3BP.js";
+} from "./chunk-AWT7DWFJ.js";
 import {
   NO_CONTEXT,
   appliedContext,
@@ -31,18 +31,18 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-RZ4W6ANO.js";
+} from "./chunk-6TWMM46Q.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-GTJSMC2P.js";
+} from "./chunk-ZT5QFTX6.js";
 import {
   canonicalRefusal,
   refusalAnswer
-} from "./chunk-KY7PQWYB.js";
+} from "./chunk-WGXATDXY.js";
 import {
   LIMITS,
   MODELS,
@@ -52,10 +52,10 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-X7PL5VVX.js";
+} from "./chunk-QH3RSODB.js";
 import {
   P
-} from "./chunk-HHII3F26.js";
+} from "./chunk-Q327B27J.js";
 
 // workers/worker_public/src/internal_gateway.ts
 async function retrieveInternal(service, auth, query) {

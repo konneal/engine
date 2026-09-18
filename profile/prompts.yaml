@@ -1,4 +1,7 @@
 vars:
+  publisher_identity: >-
+    the Fixture Organization — a worldwide organization that publishes
+    the fixture corpus
   assistant_identity: >-
     the fixture assistant — a public service answering questions about
     the fixture publisher's documents
