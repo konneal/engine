@@ -234,6 +234,14 @@ async function handleAsk(
   // wall time from request entry to its own exit
   const tStart = Date.now();
   const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null });
+  // the latency anatomy, surfaced as standard Server-Timing headers on
+  // the JSON response — the reduction program's per-stage data
+  const stageTiming: Record<string, number> = {};
+  const serverTiming = () =>
+    Object.entries(stageTiming)
+      .map(([k, v]) => `${k};dur=${v}`)
+      .concat([`total;dur=${Date.now() - tStart}`])
+      .join(", ");
   const body = await readJson(req);
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
@@ -417,6 +425,7 @@ async function handleAsk(
       // optimistic path is additive; retrieve() runs its own dense lane
     }
     understanding = await understandingP;
+    stageTiming.understand = Date.now() - t0;
     console.log("stage: understand+optimistic", Date.now() - t0, "ms");
   }
   // ── The declared context's document scope (TODO.ai-platform/02) ──
@@ -763,6 +772,7 @@ async function handleAsk(
       }
     }
     const grade = await gradePromise;
+    stageTiming.retrieve = Date.now() - tR;
     console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
@@ -1032,7 +1042,7 @@ async function handleAsk(
   }
 
   // figure completion (#172) — see ./completion for the rationale
-  completionBlocks.push(...(await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks])));
+  completionBlocks.push(...(await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used)));
 
   const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
@@ -1053,7 +1063,7 @@ async function handleAsk(
     clause_anchor: h.metadata.clause_anchor,
     text: h.text.slice(0, 1200),
   }));
-  return json({ ...out, context: contextOut, quota, ...corsHeaders(req) });
+  return json({ ...out, context: contextOut, quota }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
 }
 
 function sseResponse(events: unknown[], cors: Record<string, string>): Response {

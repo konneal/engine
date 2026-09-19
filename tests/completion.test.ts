@@ -51,3 +51,29 @@ test("figure completion: at most 4 distinct mentions", async () => {
   const blocks = await completeFigures(stubDb(rows) as any, "u:fig-1 u:fig-2 u:fig-3 u:fig-4 u:fig-5", []);
   assert.equal(blocks.length, 5);
 });
+
+test("figure completion: prose 'Figure 3' resolves within the used publications only", async () => {
+  const rows: Record<string, any> = { "u:fig-3": {}, "u:fig-7": {} };
+  const db = {
+    prepare(sql: string) {
+      const isFamilyScan = sql.includes("type = 'figure' AND docidentifier");
+      return {
+        bind: (...args: string[]) => ({
+          all: async () => ({
+            results: isFamilyScan
+              ? Object.keys(rows).map((id) => ({ unit_id: id, payload: "{}" }))
+              : args.filter((a) => rows[a]).map((a) => ({ unit_id: a, payload: "{}" })),
+          }),
+        }),
+      };
+    },
+  };
+  const used = [{ metadata: { docidentifier: "OIML R 60-2:2021" }, text: "" }] as any;
+  const blocks = await completeFigures(
+    db as any,
+    "Figure 3 shows the recommended test sequence for each test temperature.",
+    [],
+    used,
+  );
+  assert.deepEqual(blocks.map((b) => b.unit_id), ["u:fig-3"]); // fig-7 exists in the family but is not named
+});
