@@ -158,7 +158,7 @@ async function adminStatsRoute(c: RouteContext): Promise<Response> {
     env.DB.prepare("SELECT COALESCE(cache, 'miss') AS cache, COUNT(*) AS n FROM queries WHERE day >= date('now','-7 days') AND route = 'ask' GROUP BY cache").all(),
   ]);
   const totalQueries = (byDay.results as any[]).reduce((a, r) => a + (r.n || 0), 0) || 0;
-  const totalOk = (byDay.results as any[]).reduce((a, r) => a + (r.ok_count || 0), 0) || 0;
+  const totalOk = (byDay.results as any[]).reduce((a, r) => a + (r.ok || 0), 0) || 0;
   const errorRate = totalQueries > 0 ? (((totalQueries - totalOk) / totalQueries) * 100).toFixed(1) : "0";
   ctx.waitUntil(env.DB.batch([
     env.DB.prepare("DELETE FROM queries WHERE day < date('now','-90 days')"),
