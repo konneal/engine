@@ -77,12 +77,14 @@ class OimlPubidCodec(Codec):
     (OIML R 60-1), the year is not part of the slug."""
 
     name = "oiml-pubid"
-    _REF = re.compile(r"reference\s+(OIML\s+(?:R|D|B|G|E)\s*\d+(?:-\d+)?):\d{4}")
-    _BARE = re.compile(r"(OIML\s+(?:R|D|B|G|E)\s*\d+(?:-\d+)?):\d{4}")
-    # the V series (vocabularies) is bibliography-only: it never heads a
-    # rendering, but bibliographies cite "OIML V 2-200", "OIML V 1:2013"
+    _REF = re.compile(r"reference\s+(OIML\s+(?:R|D|B|G|E|S)\s*\d+(?:-\d+)?):\d{4}")
+    _BARE = re.compile(r"(OIML\s+(?:R|D|B|G|E|S)\s*\d+(?:-\d+)?):\d{4}")
+    # the V series (vocabularies) and the S series (seminar reports)
+    # are bibliography-only in the corpus today: they do not head a
+    # rendering, but bibliographies cite "OIML V 2-200", "OIML V 1:2013",
+    # "OIML S 6:2011"
     _CITED_OIML = re.compile(
-        r"\bOIML\s+[RDBGEV]\s*\d{1,3}(?:\s*[-–]\s*[0-9A-Za-z]{1,3})?(?:\s*:\s*\d{4})?"
+        r"\bOIML\s+[RDBGEVS]\s*\d{1,3}(?:\s*[-–]\s*[0-9A-Za-z]{1,3})?(?:\s*:\s*\d{4})?"
     )
 
     def extract_identifier(self, text: str) -> str:

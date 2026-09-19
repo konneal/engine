@@ -34,7 +34,7 @@ LANGS = {"eng": "en", "fra": "fr", "deu": "de", "spa": "es", "zho": "zh", "ara":
 BASE = os.environ.get("RAG_BASE", "https://ai.oimlsmart.org").rstrip("/")
 
 # docidentifier "OIML R 60-1:2017 (E)" → doc_number "R 60-1", edition 2017
-_REF = re.compile(r"OIML\s+([RDBGE])\s*0*(\d{1,3}(?:-\d+)?)\s*(?::(\d{4}))?")
+_REF = re.compile(r"OIML\s+([RDBGES])\s*0*(\d{1,3}(?:-\d+)?)\s*(?::(\d{4}))?")
 
 
 def _doc_number(ref: str) -> str:

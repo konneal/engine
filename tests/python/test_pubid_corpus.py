@@ -15,7 +15,7 @@ CORPUS = Path("node_modules/@oimlsmart/oiml-pubid/conformance/identifiers.json")
 
 # family letters the ingest scan grammar owns (mirrors the pub series;
 # the CS family PD/OD/CID is outside the retrieval plane)
-FAMILY_RE = re.compile(r"OIML ([RDBGEV]) (\d+)(?:-(\d+))?")
+FAMILY_RE = re.compile(r"OIML ([RDBGEVS]) (\d+)(?:-(\d+))?")
 
 codec = OimlPubidCodec()
 
@@ -47,7 +47,7 @@ def test_the_scan_grammar_matches_every_pub_case():
 def test_shape_rejections_never_match():
     for rej in json.loads(CORPUS.read_text())["rejections"]:
         m = FAMILY_RE.search(rej.upper())
-        valid_shape = bool(m and m.group(1) in "RDBGEV")
+        valid_shape = bool(m and m.group(1) in "RDBGEVS")
         # whole-string prose rejections ("... extra words here") are
         # PARSE semantics; our cited_refs is a SEARCH — a valid pubid
         # inside prose legitimately extracts. Only family-invalid and
