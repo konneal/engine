@@ -7,7 +7,7 @@ import {
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-FWKTHH3R.js";
+} from "../../chunk-6XAEBKLY.js";
 import "../../chunk-AWT7DWFJ.js";
 import {
   buildMessages,
@@ -610,7 +610,13 @@ async function handleCaption(env, req) {
     }
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
     if (!text?.trim()) return err(502, "generation_failed", "vision model returned no description");
-    const desc = text.trim().slice(0, 600);
+    const trimmed = text.trim();
+    const cap = 900;
+    const desc = trimmed.length <= cap ? trimmed : (() => {
+      const cut = trimmed.slice(0, cap);
+      const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+      return end === -1 ? cut.slice(0, cut.lastIndexOf(" ")) : cut.slice(0, end + 1);
+    })();
     await env.DB.prepare("UPDATE unit_payloads SET payload = json_set(payload, '$.description', ?1) WHERE unit_id = ?2").bind(desc, unitId).run();
     return json({ ok: true, unit_id: unitId, description: desc });
   } catch (e) {
@@ -889,7 +895,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-AQOVFVU3.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-BD2LEEFO.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-Z3TZ3LT5.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-BD2LEEFO.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });

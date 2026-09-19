@@ -251,7 +251,19 @@ export async function handleCaption(env: Env, req: Request): Promise<Response> {
     }
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
     if (!text?.trim()) return err(502, "generation_failed", "vision model returned no description");
-    const desc = text.trim().slice(0, 600);
+    // store complete sentences: a description cut mid-word reads as an
+    // error to the reader, so the cap trims to the last sentence
+    // boundary instead of guillotining the text
+    const trimmed = text.trim();
+    const cap = 900;
+    const desc =
+      trimmed.length <= cap
+        ? trimmed
+        : (() => {
+            const cut = trimmed.slice(0, cap);
+            const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+            return end === -1 ? cut.slice(0, cut.lastIndexOf(" ")) : cut.slice(0, end + 1);
+          })();
     await env.DB.prepare("UPDATE unit_payloads SET payload = json_set(payload, '$.description', ?1) WHERE unit_id = ?2").bind(desc, unitId).run();
     return json({ ok: true, unit_id: unitId, description: desc });
   } catch (e) {
