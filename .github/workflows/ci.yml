@@ -26,6 +26,10 @@ jobs:
           repository: pubid/pubid-testsuite
           path: pubid-testsuite
       - run: npm ci
+      - name: openapi surface freshness (the generated route table must match the yaml)
+        run: |
+          node scripts/gen-openapi-routes.mjs
+          git diff --exit-code workers/worker_public/src/openapi-surface.gen.ts || (echo "openapi-surface.gen.ts is stale — regenerate: node scripts/gen-openapi-routes.mjs"; exit 1)
       - run: npm run typecheck
       - run: npm run lint:wrangler
       - run: npm run lint:ports
