@@ -85,12 +85,25 @@ async function attachFigureImages(env: Env, messages: { role: string; content: s
     .filter((h) => figIntent || (!!h.metadata.clause_anchor && h.metadata.clause_anchor === topProseAnchor))
     .slice(0, 1);
   if (!figures.length) return;
+  // the figure is understood together with its context: its own caption,
+  // the clause it belongs to, and the same publication's prose that
+  // references a figure (where the reader is sent from)
+  const fig = figures[0];
+  const figAnchor = fig.metadata.clause_anchor ?? "";
+  const figTitle = fig.metadata.clause_title ?? "";
+  const referencing = usedHits
+    .filter((h) => !h.metadata.unit_id && h.metadata.docidentifier === fig.metadata.docidentifier && /\bfig(ure)?s?\.?\s*\d/i.test(h.text ?? ""))
+    .slice(0, 2)
+    .map((h) => `clause ${h.metadata.clause_anchor ?? ""}${h.metadata.clause_title ? ` (${h.metadata.clause_title})` : ""}: ${(h.text ?? "").slice(0, 400)}`);
   const parts: unknown[] = [];
   const names: string[] = [];
+  let figCaption = "";
   for (const h of figures) {
     try {
       const row = await env.DB.prepare("SELECT payload FROM unit_payloads WHERE unit_id = ?1").bind(h.metadata.unit_id!).first<any>();
-      const uri = row ? (JSON.parse(String(row.payload)).uri ?? "") : "";
+      const payload = row ? JSON.parse(String(row.payload)) : {};
+      const uri = typeof payload.uri === "string" ? payload.uri : "";
+      if (typeof payload.caption === "string" && payload.caption.trim()) figCaption = payload.caption.trim();
       const m = typeof uri === "string" ? uri.match(/^\/assets\/(.+)/) : null;
       if (!m) continue;
       const obj = await env.UNIT_ASSETS.get(m[1]);
@@ -107,10 +120,19 @@ async function attachFigureImages(env: Env, messages: { role: string; content: s
     }
   }
   if (!parts.length) return;
+  const context: string[] = [];
+  if (figCaption) context.push(`Its caption reads: \"${figCaption}\".`);
+  if (figAnchor) context.push(`It belongs to clause ${figAnchor}${figTitle ? ` (${figTitle})` : ""} of its publication.`);
+  if (referencing.length) context.push(`The publication's prose references it from — ${referencing.join(" — and from — ")}.`);
   messages.push({
     role: "user",
     content: [
-      { type: "text", text: `The original image of figure unit ${names.join(", ")} is attached; interpret it directly when answering about this figure.` },
+      {
+        type: "text",
+        text:
+          `The original image of figure unit ${names.join(", ")} is attached; interpret the drawing directly when answering about this figure.` +
+          (context.length ? ` To understand what the figure is doing: ${context.join(" ")}` : ""),
+      },
       ...parts,
     ] as unknown as string,
   });
