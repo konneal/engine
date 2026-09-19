@@ -755,17 +755,28 @@ async function handleAsk(
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
       sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec,
       datasetScope: narrowed ? corpora : null });
+    stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
     // they consume the same candidate list (grade is coarse: good/weak;
     // listwise reorders survivors). Doc-scoped queries skip the grade
     // entirely (the filter already pins the corpus; grading adds only latency).
     const docScoped = !!(understanding?.doc_number);
+    // the grader rides roleModel with the judges: the GRADER_MODEL secret
+    // governs every grading path, and this one had kept reading the static
+    // config (the retired model) like the judge route did
     const gradePromise = docScoped
       ? Promise.resolve("skipped-doc-scoped" as const)
-      : gradeRetrieval(env.AI, MODELS.grader, q.query, retrieved.hits.map((h: Hit) => h.text)).catch(() => null);
+      : (() => {
+          const tg = Date.now();
+          return gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, retrieved.hits.map((h: Hit) => h.text))
+            .catch(() => null)
+            .finally(() => (stageTiming["grade"] = Date.now() - tg));
+        })();
     if (retrieved.hits.length >= 4 && (member || understanding?.complexity === "complex")) {
+      const tl = Date.now();
       const reordered = await listwiseRerank(env, MODELS.listwise, understanding?.standalone_query || q.query, retrieved.hits);
+      stageTiming.listwise = Date.now() - tl;
       if (reordered) {
         console.log("listwise: reordered", reordered[0]?.metadata?.docidentifier ?? "?", "to top");
         retrieved = { ...retrieved, hits: reordered };
@@ -776,8 +787,10 @@ async function handleAsk(
     console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
+      const tc = Date.now();
       const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null });
-      const grade2 = await gradeRetrieval(env.AI, MODELS.grader, q.query, second.hits.map((h: Hit) => h.text));
+      const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h: Hit) => h.text));
+      stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better
     }
   } catch (e) {
