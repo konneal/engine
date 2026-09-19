@@ -58,6 +58,7 @@
       "types": "./dist/requestScope.d.ts",
       "default": "./dist/worker_public/src/requestScope.js"
     },
+    "./openapi": "./workers/worker_public/openapi.yaml",
     "./mcp": "./dist/worker_mcp/src/index.js"
   },
   "files": [
