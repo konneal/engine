@@ -191,7 +191,7 @@ export const OPENAPI_SURFACE: readonly (Omit<OpenApiRoute, "operationId"> & { op
   },
   {
     "method": "DELETE",
-    "pattern": "/api/projects",
+    "pattern": "/api/projects/:id",
     "operationId": "deleteProject"
   },
   {
