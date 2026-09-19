@@ -174,7 +174,7 @@ paths:
       tags: [Evidence]
       summary: Request a provable absence certificate
       description: >-
-        Enumerates the entire model plane of the named standard and
+        Enumerates the entire machine-readable model of the named standard and
         reports how many nodes were examined and whether any matched the
         topic. A verdict of absent is an enumeration certificate that
         states its scope, not a statement that a search found nothing.

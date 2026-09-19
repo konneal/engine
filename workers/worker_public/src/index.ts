@@ -205,7 +205,7 @@ async function absenceRoute(c: RouteContext): Promise<Response> {
       enumerated: { model_nodes: nodes.length, smart_model_chunks: chunks?.n ?? 0 },
       matches: matches.slice(0, 20),
       verdict: matches.length === 0 ? "absent" : "present",
-      scope: `the model plane of ${standard} (all model nodes) — the enumeration is exhaustive over that scope; prose outside the modeled families is not claimed`,
+      scope: `the machine-readable model of ${standard} (all model nodes) — the enumeration is exhaustive over that scope; prose outside the modeled families is not claimed`,
     });
   } catch (e) {
     return err(502, "absence_failed", String(e).slice(0, 200));
