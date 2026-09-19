@@ -45,7 +45,7 @@ EDGE_KIND = {
     "updates": "amends",
 }
 
-SERIES = re.compile(r"^(OIML\s+)?([RDBGEV])\s*(\d{1,3})")
+SERIES = re.compile(r"^(OIML\s+)?([RDBGEVS])\s*(\d{1,3})")
 
 
 def norm_id(raw: str) -> str | None:
