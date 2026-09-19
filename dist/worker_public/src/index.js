@@ -1060,7 +1060,7 @@ var OPENAPI_SURFACE = [
   },
   {
     "method": "DELETE",
-    "pattern": "/api/projects",
+    "pattern": "/api/projects/:id",
     "operationId": "deleteProject"
   },
   {

@@ -609,6 +609,7 @@ paths:
       responses:
         '200':
           description: The created or renamed context, or the move confirmation.
+  /api/projects/{id}:
     delete:
       tags: [Projects]
       summary: Delete a context
