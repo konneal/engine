@@ -58,6 +58,7 @@ export async function completeFigures(
   db: StoreQuery,
   answer: string,
   alreadyAttached: ResolvedBlock[],
+  used: Hit[] = [],
 ): Promise<ResolvedBlock[]> {
   // the model names figures BOTH ways: unit ids (u:fig-3) and bare
   // producer anchors (fig-2a of D 36) — collect both forms; bare
@@ -65,7 +66,29 @@ export async function completeFigures(
   // that is not a real unit (a bare mention can never fabricate a block)
   const unitForm = (answer.match(/u:fig[\w.-]*/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, ""));
   const bareForm = (answer.match(/\bfig-[\w.-]+\b/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, ""));
-  const mentioned = [...new Set([...unitForm, ...bareForm.map((x) => (x.startsWith("u:") ? x : "u:" + x))])].slice(0, 6);
+  let mentioned = [...new Set([...unitForm, ...bareForm.map((x) => (x.startsWith("u:") ? x : "u:" + x))])].slice(0, 6);
+  // natural prose names figures without any identifier at all — "Figure 3
+  // of R 60-2 shows…" (the #172 residual): resolve those by number within
+  // the publications the answer used, never across the corpus at large
+  const proseNums = new Set(
+    (answer.match(/\bFig(?:ure|\.)s?\s*([0-9]{1,2}[a-z]?)/g) ?? [])
+      .map((x) => x.replace(/\bFig(?:ure|\.)s?\s*/i, "").toLowerCase()),
+  );
+  if (proseNums.size) {
+    const fams = [...new Set(used.map((h) => h.metadata.docidentifier).filter(Boolean))].slice(0, 3);
+    for (const fam of fams) {
+      const base = String(fam).replace(/\s*\([A-Z]\)\s*$/, "").split(":")[0].trim();
+      const rows = await db
+        .prepare("SELECT unit_id FROM unit_payloads WHERE type = 'figure' AND docidentifier LIKE ?1 LIMIT 24")
+        .bind(`%${base}%`)
+        .all<{ unit_id: string }>();
+      for (const r of rows.results ?? []) {
+        const m = r.unit_id.match(/fig-?([0-9]{1,2}[a-z]?)/i);
+        if (m && proseNums.has(m[1].toLowerCase())) mentioned.push(r.unit_id);
+      }
+    }
+    mentioned = [...new Set(mentioned)].slice(0, 6);
+  }
   const have = new Set(alreadyAttached.map((b) => b.unit_id));
   const missing = mentioned.filter((id) => !have.has(id));
   if (!missing.length) return [];

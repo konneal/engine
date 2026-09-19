@@ -313,10 +313,25 @@ async function completeTables(db, answer, used) {
   }
   return blocks;
 }
-async function completeFigures(db, answer, alreadyAttached) {
+async function completeFigures(db, answer, alreadyAttached, used = []) {
   const unitForm = (answer.match(/u:fig[\w.-]*/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, ""));
   const bareForm = (answer.match(/\bfig-[\w.-]+\b/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, ""));
-  const mentioned = [.../* @__PURE__ */ new Set([...unitForm, ...bareForm.map((x) => x.startsWith("u:") ? x : "u:" + x)])].slice(0, 6);
+  let mentioned = [.../* @__PURE__ */ new Set([...unitForm, ...bareForm.map((x) => x.startsWith("u:") ? x : "u:" + x)])].slice(0, 6);
+  const proseNums = new Set(
+    (answer.match(/\bFig(?:ure|\.)s?\s*([0-9]{1,2}[a-z]?)/g) ?? []).map((x) => x.replace(/\bFig(?:ure|\.)s?\s*/i, "").toLowerCase())
+  );
+  if (proseNums.size) {
+    const fams = [...new Set(used.map((h) => h.metadata.docidentifier).filter(Boolean))].slice(0, 3);
+    for (const fam of fams) {
+      const base = String(fam).replace(/\s*\([A-Z]\)\s*$/, "").split(":")[0].trim();
+      const rows = await db.prepare("SELECT unit_id FROM unit_payloads WHERE type = 'figure' AND docidentifier LIKE ?1 LIMIT 24").bind(`%${base}%`).all();
+      for (const r of rows.results ?? []) {
+        const m = r.unit_id.match(/fig-?([0-9]{1,2}[a-z]?)/i);
+        if (m && proseNums.has(m[1].toLowerCase())) mentioned.push(r.unit_id);
+      }
+    }
+    mentioned = [...new Set(mentioned)].slice(0, 6);
+  }
   const have = new Set(alreadyAttached.map((b) => b.unit_id));
   const missing = mentioned.filter((id) => !have.has(id));
   if (!missing.length) return [];
@@ -1203,6 +1218,8 @@ async function* sseTokens(stream) {
 async function handleAsk(env, ctx, req, tier, key) {
   const tStart = Date.now();
   const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null });
+  const stageTiming = {};
+  const serverTiming = () => Object.entries(stageTiming).map(([k, v]) => `${k};dur=${v}`).concat([`total;dur=${Date.now() - tStart}`]).join(", ");
   const body = await readJson(req);
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
@@ -1309,6 +1326,7 @@ async function handleAsk(env, ctx, req, tier, key) {
     } catch {
     }
     understanding = await understandingP;
+    stageTiming.understand = Date.now() - t0;
     console.log("stage: understand+optimistic", Date.now() - t0, "ms");
   }
   const docScope = declaredCtx && declaredCtx.kind !== "account" ? await resolveDocScope(env, declaredCtx) : null;
@@ -1545,6 +1563,7 @@ Answer account questions from these records ONLY: name the record when you use i
       }
     }
     const grade = await gradePromise;
+    stageTiming.retrieve = Date.now() - tR;
     console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
@@ -1726,7 +1745,7 @@ Answer account questions from these records ONLY: name the record when you use i
     completionBlocks = await completeTables(env.DB, answer, used);
     if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
   }
-  completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks]));
+  completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
   const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
@@ -1743,7 +1762,7 @@ Answer account questions from these records ONLY: name the record when you use i
     clause_anchor: h.metadata.clause_anchor,
     text: h.text.slice(0, 1200)
   }));
-  return json({ ...out, context: contextOut, quota, ...corsHeaders(req) });
+  return json({ ...out, context: contextOut, quota }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
 }
 function sseResponse(events, cors) {
   const encoder = new TextEncoder();
