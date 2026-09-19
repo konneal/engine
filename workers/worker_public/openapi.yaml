@@ -1,0 +1,1144 @@
+openapi: 3.1.0
+info:
+  title: OIML SMART AI API
+  version: 1.0.0
+  description: >-
+    The HTTP API of the question-answering service over OIML publications.
+    The service answers questions with clause-level citations over a corpus
+    of OIML Recommendations, Documents, Basic publications, Guides and
+    Expert reports, together with the machine-readable model derived from
+    the publications. The same pipeline serves the chat interface at
+    https://ai.oimlsmart.org. Anonymous callers may use the /api endpoints
+    with a daily allowance of 20 questions per IP address; machine callers
+    authenticate to the /v1 endpoints with an API key issued by an
+    administrator; signed-in members obtain a higher allowance together
+    with conversation synchronisation, project memory and research mode.
+servers:
+  - url: https://ai.oimlsmart.org
+    description: Production
+tags:
+  - name: Ask
+    description: Ask a question and receive a citation-grounded answer.
+  - name: Search
+    description: Retrieve ranked clauses without generating an answer.
+  - name: Evidence
+    description: Provable absence certificates and answer verification.
+  - name: Research
+    description: Bounded iterative research over the corpus.
+  - name: Conversations
+    description: >-
+      The signed-in member's conversations: list, create, read, rename,
+      delete, append messages and create shareable permalinks. These
+      endpoints authenticate with the session cookie.
+  - name: Memory
+    description: >-
+      The signed-in member's personal memory notes, which the assistant
+      consults in later conversations. At most ten notes of eight
+      thousand characters each are kept.
+  - name: Projects
+    description: >-
+      The signed-in member's contexts: named groups of conversations
+      with their attached files. A conversation may be filed into a
+      context, and the retrieval is then scoped by the context's files.
+  - name: MCP
+    description: The Model Context Protocol server for agent ecosystems.
+  - name: Service
+    description: Datasets, health and authentication.
+  - name: Experimental
+    description: >-
+      The comparison-lane query endpoint, which retrieves from one named
+      experimental corpus. These endpoints exist to support the
+      measurement work and carry no stability promise.
+  - name: Administration
+    description: >-
+      Operational endpoints guarded by the administrator token, covering
+      service statistics, the issuance and management of API keys, and
+      the index-maintenance battery (enrichment, section units, vectors
+      and figure captions).
+paths:
+  /api/ask:
+    post:
+      tags: [Ask]
+      summary: Ask a question anonymously
+      description: >-
+        Asks a question over the OIML corpus and receives an answer with
+        clause-level citations. The anonymous allowance is 20 questions per
+        day per IP address. The request body and the response are identical
+        to /v1/ask.
+      operationId: askAnonymous
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AskRequest'
+            examples:
+              definition:
+                value:
+                  query: What is a load cell according to OIML R 60?
+                  stream: false
+              verdict:
+                value:
+                  query: >-
+                    For OIML R 60, /constraint/dead_load_max_geometry:
+                    with E_max 30000 v, is testing to D_max 26000 v valid?
+                  stream: false
+      responses:
+        '200':
+          description: The answer with citations and typed blocks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AskResponse'
+        '429':
+          description: The daily allowance is exhausted.
+        '400':
+          description: The query is missing or exceeds 8000 characters.
+  /v1/ask:
+    post:
+      tags: [Ask]
+      summary: Ask a question with an API key
+      description: >-
+        Identical to /api/ask, with authentication by API key and a
+        per-key daily allowance. Streaming responses are available by
+        setting stream to true, which returns a server-sent event stream
+        whose events carry citations, tokens and the completion marker.
+      operationId: askKeyed
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AskRequest'
+      responses:
+        '200':
+          description: The answer with citations and typed blocks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AskResponse'
+  /api/search:
+    post:
+      tags: [Search]
+      summary: Search ranked clauses
+      description: >-
+        Retrieves the ranked clauses for a query without generating an
+        answer. Each hit carries its document identifier, edition, clause
+        anchor, status and a link into the rendered document.
+      operationId: search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  description: The search text, at most 8000 characters.
+                k:
+                  type: integer
+                  default: 5
+                  description: The number of hits to return.
+      responses:
+        '200':
+          description: The ranked hits.
+  /v1/search:
+    post:
+      tags: [Search]
+      summary: Search ranked clauses with an API key
+      description: >-
+        Identical to /api/search, with authentication by API key and a
+        per-key daily allowance.
+      operationId: searchKeyed
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string }
+                k: { type: integer, default: 5 }
+      responses:
+        '200':
+          description: The ranked hits.
+  /api/absence:
+    post:
+      tags: [Evidence]
+      summary: Request a provable absence certificate
+      description: >-
+        Enumerates the entire model plane of the named standard and
+        reports how many nodes were examined and whether any matched the
+        topic. A verdict of absent is an enumeration certificate that
+        states its scope, not a statement that a search found nothing.
+      operationId: absence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [standard, topic]
+              properties:
+                standard:
+                  type: string
+                  description: The publication, for example R 60.
+                topic:
+                  type: string
+                  description: The topic whose absence is to be proven.
+            examples:
+              packaging:
+                value:
+                  standard: R 60
+                  topic: packaging
+      responses:
+        '200':
+          description: The enumeration certificate.
+  /v1/absence:
+    post:
+      tags: [Evidence]
+      summary: Request a provable absence certificate with an API key
+      operationId: absenceKeyed
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [standard, topic]
+              properties:
+                standard: { type: string }
+                topic: { type: string }
+      responses:
+        '200':
+          description: The enumeration certificate.
+  /api/verify:
+    post:
+      tags: [Evidence]
+      summary: Verify an answer
+      description: >-
+        Applies the deterministic verification battery to any answer,
+        whether generated by this service or by another system: every
+        quoted span must be contained verbatim in a passage retrieved for
+        the query, and every object reference must resolve to a served
+        object. A judged faithfulness score is reported separately and is
+        labelled as judged.
+      operationId: verify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query, answer]
+              properties:
+                query:
+                  type: string
+                  description: The question the answer claims to answer.
+                answer:
+                  type: string
+                  description: The answer to verify.
+      responses:
+        '200':
+          description: The verification results.
+  /v1/verify:
+    post:
+      tags: [Evidence]
+      summary: Verify an answer with an API key
+      operationId: verifyKeyed
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query, answer]
+              properties:
+                query: { type: string }
+                answer: { type: string }
+      responses:
+        '200':
+          description: The verification results.
+  /api/research:
+    post:
+      tags: [Research]
+      summary: Run a bounded research loop with the session cookie
+      description: >-
+        Identical to /v1/research, with authentication by the signed-in
+        member's session cookie; research spend stays with signed-in
+        members.
+      operationId: research
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  description: The research question.
+                max_iterations:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+                  description: The iteration bound, at most 3.
+      responses:
+        '200':
+          description: >-
+            The research result, carrying the answer, the citations, the
+            typed blocks and the research metadata.
+  /v1/research:
+    post:
+      tags: [Research]
+      summary: Run a bounded research loop
+      description: >-
+        Runs a bounded iterative loop over the corpus. In each pass the
+        service retrieves evidence, and an independent judge evaluates
+        whether the evidence is sufficient and names what is missing; the
+        next pass retrieves specifically for the missing parts, and the
+        final answer is generated from the accumulated evidence. The
+        response carries the answer, citations, typed blocks and the
+        research metadata, including iterations, passages and elapsed
+        time.
+      operationId: researchKeyed
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query:
+                  type: string
+                  description: The research question.
+                max_iterations:
+                  type: integer
+                  minimum: 1
+                  maximum: 3
+                  description: The iteration bound, at most 3.
+      responses:
+        '200':
+          description: >-
+            The research result, carrying the answer, the citations, the
+            typed blocks and the research metadata, which includes the
+            iteration count, the passages and the elapsed time.
+  /mcp:
+    post:
+      tags: [MCP]
+      summary: The Model Context Protocol server
+      description: >-
+        Serves the Model Context Protocol over streamable HTTP for agent
+        ecosystems, behind the same authentication as the /v1 endpoints.
+        The protocol follows JSON-RPC 2.0 with the 2025-06-18 revision.
+        The tools are ask, which asks a question and returns the answer
+        with its citations, and retrieve, which returns ranked passages.
+      operationId: mcp
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jsonrpc, method]
+              properties:
+                jsonrpc: { type: string, enum: [2.0] }
+                id: { description: The request identifier. }
+                method:
+                  type: string
+                  enum: [initialize, ping, notifications/initialized, tools/list, tools/call]
+                params:
+                  type: object
+                  description: The method parameters; tools/call carries name and arguments.
+            examples:
+              toolsList:
+                value:
+                  jsonrpc: '2.0'
+                  id: 1
+                  method: tools/list
+      responses:
+        '200':
+          description: The JSON-RPC response.
+        '202':
+          description: The notification was accepted without a payload.
+  /api/datasets:
+    get:
+      tags: [Service]
+      summary: List the datasets
+      description: >-
+        Lists the available corpora with their access status. The OIML
+        publications and the OIML SMART models are open to everyone; the
+        ISO/IEC corpus requires a role that is managed in the identity
+        service.
+      operationId: datasets
+      responses:
+        '200':
+          description: The dataset list.
+  /health:
+    get:
+      tags: [Service]
+      summary: Service health
+      description: Reports service identity and index version.
+      operationId: health
+      responses:
+        '200':
+          description: The health document.
+  /api/conversations:
+    get:
+      tags: [Conversations]
+      summary: List the member's conversations
+      operationId: listConversations
+      responses:
+        '200':
+          description: The conversation list with each conversation's context grouping.
+    post:
+      tags: [Conversations]
+      summary: Create a conversation
+      operationId: createConversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  description: The conversation's title, at most 120 characters.
+      responses:
+        '200':
+          description: The created conversation, with its identifier.
+  /api/conversations/{id}:
+    get:
+      tags: [Conversations]
+      summary: Read a conversation with its messages
+      operationId: getConversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The conversation with its messages.
+    patch:
+      tags: [Conversations]
+      summary: Rename a conversation
+      operationId: renameConversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                  description: The new title, between 1 and 120 characters.
+      responses:
+        '200':
+          description: The updated conversation.
+    delete:
+      tags: [Conversations]
+      summary: Delete a conversation
+      operationId: deleteConversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The conversation is deleted.
+  /api/conversations/{id}/messages:
+    post:
+      tags: [Conversations]
+      summary: Append a message to a conversation
+      operationId: appendMessage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role, content]
+              properties:
+                role: { type: string, enum: [user, assistant] }
+                content: { type: string }
+      responses:
+        '200':
+          description: The appended message.
+  /api/conversations/{id}/share:
+    post:
+      tags: [Conversations]
+      summary: Create a public permalink for a conversation
+      operationId: shareConversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The permalink slug.
+  /api/shared/{slug}:
+    get:
+      tags: [Conversations]
+      summary: Read a shared conversation by its permalink
+      operationId: getShared
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The shared conversation, without member identity.
+  /api/memories:
+    get:
+      tags: [Memory]
+      summary: List the member's memory notes
+      operationId: listMemories
+      responses:
+        '200':
+          description: The memory notes.
+    post:
+      tags: [Memory]
+      summary: Create a memory note, or replace one by supplying its identifier
+      description: >-
+        Creates a note from a name and a content of at most 8000
+        characters. When the body carries the identifier of an existing
+        note, that note is replaced instead and no new note is created.
+        At most ten notes are kept per member.
+      operationId: createMemory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, content]
+              properties:
+                name: { type: string, description: The note's name, at most 64 characters. }
+                content: { type: string, description: The note's text, at most 8000 characters. }
+                id:
+                  type: string
+                  description: The identifier of the note to replace; when absent, a new note is created.
+      responses:
+        '200':
+          description: The created or replaced note.
+  /api/memories/{id}:
+    delete:
+      tags: [Memory]
+      summary: Delete a memory note
+      operationId: deleteMemory
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The note is deleted.
+  /api/projects:
+    get:
+      tags: [Projects]
+      summary: List the member's contexts
+      operationId: listProjects
+      responses:
+        '200':
+          description: The contexts with their conversation counts and file counts.
+    post:
+      tags: [Projects]
+      summary: Create a context, rename one, or file a conversation into one
+      description: >-
+        The body selects the behaviour: a name alone creates a context; an
+        identifier together with a name renames that context; a conversation
+        identifier together with a context identifier (or null to unfile)
+        moves the conversation into or out of the context. Filing a
+        conversation into a context scopes its later retrieval to the
+        context's files.
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: The context's name, at most 64 characters; creates or renames.
+                id:
+                  type: string
+                  description: The identifier of the context to rename; when absent, a new context is created.
+                conversation_id:
+                  type: string
+                  description: The conversation to file; selects the move behaviour.
+                project_id:
+                  type: [string, 'null']
+                  description: The target context, or null to unfile the conversation.
+      responses:
+        '200':
+          description: The created or renamed context, or the move confirmation.
+    delete:
+      tags: [Projects]
+      summary: Delete a context
+      description: >-
+        Deletes the context, detaches its files and returns its
+        conversations to the general list.
+      operationId: deleteProject
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The context is deleted.
+  /api/projects/{id}/files:
+    get:
+      tags: [Projects]
+      summary: List a context's files
+      operationId: listProjectFiles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The context's files.
+    post:
+      tags: [Projects]
+      summary: Attach a file to a context, or replace one by supplying its identifier
+      description: >-
+        Attaches a text file to the context named by project_id in the
+        body. When the body carries the identifier of an existing file,
+        that file is replaced instead and no new file is attached. At most
+        ten files of 8000 characters are kept per context.
+      operationId: attachProjectFile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_id, name, content]
+              properties:
+                project_id: { type: string, description: The context to attach the file to. }
+                name: { type: string, description: The file's name, at most 64 characters. }
+                content: { type: string, description: The file's text, at most 8000 characters. }
+                id:
+                  type: string
+                  description: The identifier of the file to replace; when absent, a new file is attached.
+      responses:
+        '200':
+          description: The attached or replaced file.
+  /api/project-files/{id}:
+    delete:
+      tags: [Projects]
+      summary: Detach a file from its context
+      operationId: detachProjectFile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The file is detached.
+  /api/lane:
+    post:
+      tags: [Experimental]
+      summary: Query one named experimental lane
+      description: >-
+        Retrieves from a single named experimental corpus (the comparison
+        levels of the annealment measurement) without touching the
+        production index.
+      operationId: laneQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lane, query]
+              properties:
+                lane:
+                  type: string
+                  description: The experimental corpus to query.
+                query: { type: string }
+      responses:
+        '200':
+          description: The lane's ranked hits.
+  /v1/lane:
+    post:
+      tags: [Experimental]
+      summary: Query one named experimental lane with an API key
+      description: >-
+        Identical to /api/lane, with authentication by API key and a
+        per-key daily allowance.
+      operationId: laneKeyed
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lane, query]
+              properties:
+                lane: { type: string }
+                query: { type: string }
+      responses:
+        '200':
+          description: The lane's ranked hits.
+  /api/feedback:
+    post:
+      tags: [Ask]
+      summary: Rate an answer
+      description: >-
+        Records a thumbs rating against the query hash, which the
+        feedback triage clusters for review.
+      operationId: feedback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query_hash, rating]
+              properties:
+                query_hash: { type: string }
+                rating: { type: integer, enum: [1, -1] }
+      responses:
+        '200':
+          description: The rating is recorded.
+  /v1/admin/enrich:
+    post:
+      tags: [Administration]
+      summary: The enrichment driver
+      description: >-
+        Batches chunks through the contextual-enrichment lane, with the
+        per-chunk contexts cached server-side. The default mode writes to
+        the production index; callers that only want the generated
+        contexts pass mode context.
+      operationId: adminEnrich
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chunks: { type: array, description: The chunks to enrich. }
+                mode: { type: string, enum: [default, context, ab] }
+                effort: { type: string, enum: [low, high] }
+      responses:
+        '200':
+          description: The enrichment results.
+  /admin/enrich:
+    post:
+      tags: [Administration]
+      summary: The enrichment driver (the operational path)
+      description: >-
+        The operational alias of /v1/admin/enrich, which the ingestion
+        tooling calls; the behaviour and the credential are identical.
+      operationId: adminEnrichAlias
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                chunks: { type: array, description: The chunks to enrich. }
+                mode: { type: string, enum: [default, context, ab] }
+                effort: { type: string, enum: [low, high] }
+      responses:
+        '200':
+          description: The enrichment results.
+  /v1/admin/section:
+    post:
+      tags: [Administration]
+      summary: Write the section-summary units
+      description: >-
+        Generates a summary of each named top-level clause from its child
+        chunks' excerpts, embeds it together with the table-of-contents
+        path and upserts it as a navigation node, so that retrieval can
+        descend from the summary to the quotable leaf clauses. Accepts at
+        most six units per call; the credential and the batching mirror
+        the enrichment driver.
+      operationId: adminSection
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [units]
+              properties:
+                units:
+                  type: array
+                  maxItems: 6
+                  description: The section units to write.
+      responses:
+        '200':
+          description: The written units with their usage.
+  /admin/section:
+    post:
+      tags: [Administration]
+      summary: Write the section-summary units (the operational path)
+      description: >-
+        The operational alias of /v1/admin/section; the behaviour and the
+        credential are identical.
+      operationId: adminSectionAlias
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [units]
+              properties:
+                units: { type: array, maxItems: 6 }
+      responses:
+        '200':
+          description: The written units with their usage.
+  /admin/vectors:
+    post:
+      tags: [Administration]
+      summary: The vector admin route
+      description: >-
+        Embeds, upserts or reads index vectors by identifier through the
+        binding lane, in batches of at most twenty identifiers; the
+        binding is the credential, gated by the administrator token like
+        the enrichment driver.
+      operationId: adminVectors
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode: { type: string, enum: [get, upsert, embed] }
+                ids: { type: array, items: { type: string } }
+                vectors: { type: array }
+      responses:
+        '200':
+          description: The requested vectors or the operation result.
+  /admin/caption:
+    post:
+      tags: [Administration]
+      summary: Caption one figure asset
+      description: >-
+        Fetches the named unit's figure asset from the object store,
+        describes it with the vision-capable answer model and stores the
+        description into the unit's payload. The operation is
+        idempotent.
+      operationId: adminCaption
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [unit_id]
+              properties:
+                unit_id: { type: string, description: The figure unit to caption. }
+                context:
+                  type: string
+                  description: Surrounding clause text, at most 400 characters, to steer the description.
+      responses:
+        '200':
+          description: The stored description.
+  /v1/admin/judge:
+    post:
+      tags: [Administration]
+      summary: Judge one answer against its passages
+      description: >-
+        Scores an answer's faithfulness and relevancy against the
+        passages it claims to rest on, with a model that took no part in
+        generating the answer. The promotion gate and the evaluation
+        harness call this lane.
+      operationId: adminJudge
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question, answer]
+              properties:
+                question: { type: string, description: The question, at most 2000 characters. }
+                answer: { type: string, description: The answer, at most 4000 characters. }
+                passages:
+                  type: array
+                  maxItems: 8
+                  items: { type: string }
+                  description: The passages, each at most 600 characters.
+      responses:
+        '200':
+          description: The verdict with its scores.
+  /admin/judge:
+    post:
+      tags: [Administration]
+      summary: Judge one answer against its passages (the operational path)
+      description: >-
+        The operational alias of /v1/admin/judge; the behaviour and the
+        credential are identical.
+      operationId: adminJudgeAlias
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question, answer]
+              properties:
+                question: { type: string }
+                answer: { type: string }
+                passages: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: The verdict with its scores.
+  /v1/admin/keys/{id}:
+    delete:
+      tags: [Administration]
+      summary: Revoke an API key
+      operationId: adminRevokeKey
+      security: [{ adminAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The key is revoked.
+  /auth/me:
+    get:
+      tags: [Service]
+      summary: Report the caller's session state
+      description: >-
+        Reports whether the caller is signed in, together with the
+        display name, the email and the estate roles when a session is
+        present. The console uses this endpoint to state who is signed
+        in.
+      operationId: authMe
+      responses:
+        '200':
+          description: The session state.
+  /auth/login:
+    get:
+      tags: [Service]
+      summary: Begin sign-in
+      description: >-
+        Redirects to the estate's identity service with the OIDC
+        authorization-code and PKCE parameters; the callback completes
+        the sign-in and mints the session cookie.
+      operationId: authLogin
+      responses:
+        '302':
+          description: The redirect to the identity service.
+  /auth/callback:
+    get:
+      tags: [Service]
+      summary: Complete sign-in
+      description: >-
+        The identity service's redirect target; completes the
+        authorization-code exchange, mints the session cookie and returns
+        the caller to the page they began from.
+      operationId: authCallback
+      responses:
+        '302':
+          description: The redirect after sign-in completes.
+  /auth/logout:
+    post:
+      tags: [Service]
+      summary: End the session
+      operationId: authLogout
+      responses:
+        '200':
+          description: The session is ended and the cookie is cleared.
+    get:
+      tags: [Service]
+      summary: End the session (the link form)
+      description: >-
+        The same operation as the post, provided so that a plain link can
+        end the session.
+      operationId: authLogoutLink
+      responses:
+        '200':
+          description: The session is ended and the cookie is cleared.
+  /v1/admin/stats:
+    get:
+      tags: [Administration]
+      summary: Service statistics
+      description: >-
+        Reports the query volume by day and tier, the spend by model, the
+        feedback counts, the answer-cache mix and the conversation count
+        over a seven-day window.
+      operationId: adminStats
+      security:
+        - adminAuth: []
+      responses:
+        '200':
+          description: The statistics document.
+  /v1/admin/keys:
+    get:
+      tags: [Administration]
+      summary: List the issued API keys
+      operationId: adminListKeys
+      security: [{ adminAuth: [] }]
+      responses:
+        '200':
+          description: The key registry, without plaintext.
+    post:
+      tags: [Administration]
+      summary: Issue an API key
+      description: >-
+        Issues an API key carrying its own daily allowance. The plaintext
+        key is returned once and the store holds its hash only.
+      operationId: adminCreateKey
+      security:
+        - adminAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, description: The key's label. }
+                day_limit: { type: integer, description: The per-day allowance. }
+      responses:
+        '200':
+          description: The issued key, with the plaintext returned once.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        An API key issued by an administrator or a personal access token,
+        sent as the bearer token. Anonymous callers use the /api
+        endpoints without a key.
+    adminAuth:
+      type: http
+      scheme: bearer
+      description: The administrator token, sent as the bearer token.
+  schemas:
+    AskRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          description: The question, at most 8000 characters.
+        stream:
+          type: boolean
+          default: false
+          description: >-
+            When true, the response is a server-sent event stream whose
+            events carry citations, tokens and the completion marker.
+        lang:
+          type: string
+          description: Forces the answer language, for example en or fr.
+        prev:
+          type: string
+          description: The previous question, for conversational context.
+        history:
+          type: array
+          description: Recent turns, for conversational context.
+          items:
+            type: object
+            properties:
+              role: { type: string, enum: [user, assistant] }
+              content: { type: string }
+        context:
+          type: object
+          description: >-
+            An application context, such as a certificate entity, that
+            scopes the retrieval to the document the context names.
+    AskResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+          description: The generated answer.
+        citations:
+          type: array
+          description: The passages the answer rests on.
+          items:
+            type: object
+            properties:
+              docidentifier: { type: string, description: 'For example, OIML R 60-1.' }
+              edition: { type: string }
+              clause_anchor: { type: string, description: The clause, for example 4.5.1. }
+              clause_title: { type: string }
+              corpus: { type: string, description: clean, dirty or smart-model. }
+              status: { type: string, description: in-force, superseded or withdrawn. }
+              url: { type: string, format: uri }
+        blocks:
+          type: array
+          description: >-
+            The typed objects the answer carries, such as tables, verdicts
+            and unit blocks.
+          items:
+            type: object
+        model:
+          type: string
+          description: The model that generated the answer.
+        query_hash:
+          type: string
+          description: The hash of the question, used for feedback.
+        quota:
+          type: object
+          description: The remaining daily allowance.
