@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS queries (
   ok           INTEGER,
   answer_chars INTEGER,
   query_hash   TEXT,
-  lang         TEXT
+  lang         TEXT,
+  duration_ms  INTEGER,
+  key_id       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS spend (

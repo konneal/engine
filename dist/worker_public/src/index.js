@@ -1,13 +1,13 @@
 import {
   handleSearch
-} from "../../chunk-SUIO6HSX.js";
+} from "../../chunk-R5M7XPPX.js";
 import {
   checkQuoteAnchors,
   handleAsk,
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-6XAEBKLY.js";
+} from "../../chunk-2T537G73.js";
 import "../../chunk-AWT7DWFJ.js";
 import {
   buildMessages,
@@ -30,7 +30,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-QKU4PRLG.js";
+} from "../../chunk-PVNRB4QM.js";
 import {
   authenticate,
   corsHeaders,
@@ -689,6 +689,23 @@ ${passagesText}`) : Promise.resolve(null)
     context_precision: precision
   });
 }
+async function handleKeyUsage(env, req) {
+  const key = await authenticate(env, req);
+  if (!key) return err(401, "unauthorized", "Provide the key's own credential as the bearer token");
+  const today2 = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const [row, week] = await Promise.all([
+    env.DB.prepare("SELECT name, day_limit FROM api_keys WHERE id = ?1").bind(key.id).first(),
+    env.DB.prepare(
+      "SELECT day, COUNT(*) AS requests, SUM(ok) AS ok FROM queries WHERE key_id = ?1 AND day >= date('now','-7 days') GROUP BY day ORDER BY day DESC"
+    ).bind(key.id).all()
+  ]);
+  const usedUnits = Number(await env.CACHE.get(`q:ask:key:${key.id}`) ?? "0");
+  return json({
+    key: { name: row?.name ?? key.name, day_limit: row?.day_limit ?? key.day_limit },
+    today: { date: today2, used_units: usedUnits },
+    week: week.results ?? []
+  });
+}
 async function handleCreateKey(env, req) {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
@@ -895,7 +912,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-Z3TZ3LT5.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-BD2LEEFO.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-M4VGL32R.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-YHK3KKRX.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -993,6 +1010,11 @@ var OPENAPI_SURFACE = [
     "method": "GET",
     "pattern": "/api/datasets",
     "operationId": "datasets"
+  },
+  {
+    "method": "GET",
+    "pattern": "/v1/usage",
+    "operationId": "keyUsage"
   },
   {
     "method": "GET",
@@ -1276,13 +1298,16 @@ async function adminStatsRoute(c) {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
   if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
-  const [byDay, byModel, feedback, convCount, cacheMix] = await Promise.all([
+  const [byDay, byModel, feedback, convCount, cacheMix, durations] = await Promise.all([
     env.DB.prepare("SELECT day, tier, COUNT(*) as n, SUM(ok) as ok FROM queries WHERE day >= date('now','-7 days') GROUP BY day, tier ORDER BY day DESC").all(),
     env.DB.prepare("SELECT model, SUM(requests) as requests FROM spend WHERE day >= date('now','-7 days') GROUP BY model ORDER BY requests DESC").all(),
     env.DB.prepare("SELECT rating, COUNT(*) as n FROM feedback GROUP BY rating").all(),
     env.DB.prepare("SELECT COUNT(*) as n FROM conversations").first(),
-    env.DB.prepare("SELECT COALESCE(cache, 'miss') AS cache, COUNT(*) AS n FROM queries WHERE day >= date('now','-7 days') AND route = 'ask' GROUP BY cache").all()
+    env.DB.prepare("SELECT COALESCE(cache, 'miss') AS cache, COUNT(*) AS n FROM queries WHERE day >= date('now','-7 days') AND route = 'ask' GROUP BY cache").all(),
+    env.DB.prepare("SELECT duration_ms FROM queries WHERE day >= date('now','-7 days') AND route = 'ask' AND duration_ms IS NOT NULL").all()
   ]);
+  const ds = durations.results.map((r) => r.duration_ms).sort((a, b) => a - b);
+  const pct = (q) => ds.length ? ds[Math.min(ds.length - 1, Math.floor(q * ds.length))] : null;
   const totalQueries = byDay.results.reduce((a, r) => a + (r.n || 0), 0) || 0;
   const totalOk = byDay.results.reduce((a, r) => a + (r.ok || 0), 0) || 0;
   const errorRate = totalQueries > 0 ? ((totalQueries - totalOk) / totalQueries * 100).toFixed(1) : "0";
@@ -1297,6 +1322,7 @@ async function adminStatsRoute(c) {
     spend_by_model: byModel.results,
     feedback: feedback.results,
     cache_mix_7d: cacheMix.results,
+    latency_ms: ds.length ? { n: ds.length, p50: pct(0.5), p95: pct(0.95) } : null,
     conversations: convCount?.n ?? 0,
     error_rate_pct: errorRate,
     index_version: env.INDEX_VERSION,
@@ -1515,6 +1541,7 @@ var OPENAPI_HANDLERS = {
   mcp: mcpRoute,
   feedback: feedbackRoute,
   datasets: datasetsRoute,
+  keyUsage: async (c) => withCors(await handleKeyUsage(c.env, c.req), corsHeaders(c.req)),
   health: healthRoute,
   authLogin: (c) => handleLogin(c.env, c.req),
   authCallback: (c) => handleCallback(c.env, c.req),

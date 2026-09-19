@@ -230,6 +230,10 @@ async function handleAsk(
   tier: "anon" | "key" | "member",
   key: ApiKey | null,
 ): Promise<Response> {
+  // the latency program's clock: every telemetry write below reports the
+  // wall time from request entry to its own exit
+  const tStart = Date.now();
+  const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null });
   const body = await readJson(req);
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
@@ -329,7 +333,7 @@ async function handleAsk(
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
-    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact");
+    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact", telemetryMeta());
     // echo the context the CACHED answer was computed under — the payload
     // stores it (cacheable excludes declared-context answers, but a model
     // node named in the question binds WITHOUT a chip and its echo must
@@ -378,7 +382,7 @@ async function handleAsk(
       const sc0 = await semanticCacheGet(env, gen, wv0, salt);
       if (sc0) {
         console.log("semantic cache hit (pre-understanding)");
-        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang, "semantic");
+        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang, "semantic", telemetryMeta());
         const cctx0 = sc0.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
           return sseResponse([{ type: "citations", citations: sc0.citations ?? [], context_applied: cctx0 }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true, context_applied: cctx0 }], corsHeaders(req));
@@ -521,7 +525,7 @@ async function handleAsk(
       const sc = await semanticCacheGet(env, gen, warmVec, salt);
       if (sc) {
         console.log("semantic cache hit");
-        telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang, "semantic");
+        telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang, "semantic", telemetryMeta());
         const cctx = sc.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
           return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: cctx }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, context_applied: cctx }], corsHeaders(req));
@@ -563,7 +567,7 @@ async function handleAsk(
               // stream ended prematurely — deliver what we have
             }
             send({ type: "done", model, query_hash: queryHash, context_applied: NO_CONTEXT });
-            telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang);
+            telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang, undefined, telemetryMeta());
             controller.close();
           },
         });
@@ -575,10 +579,10 @@ async function handleAsk(
     let answer = await generateOnce(env, model, messages, effort);
     if (answer === null) answer = await generateOnce(env, MODELS.fallback, messages, effort);
     if (answer === null) {
-      telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
+      telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, undefined, telemetryMeta());
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
-    telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
+    telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang, undefined, telemetryMeta());
     return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: NO_CONTEXT, quota, });
   }
 
@@ -621,7 +625,7 @@ async function handleAsk(
     console.log("draft act:", draftAct, "→", verdict.status === "draft" ? `draft (${Object.keys(verdict.draft.fields).length} fields)` : `refused (${verdict.reason})`);
     const citations = verdict.citation ? [{ ...verdict.citation, corpus: P().publisher.id }] : [];
     const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
-    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash, q.lang);
+    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash, q.lang, undefined, telemetryMeta());
     if (wantsStream) {
       return sseResponse(
         [
@@ -768,14 +772,14 @@ async function handleAsk(
     }
   } catch (e) {
     console.log("ask: retrieval failed:", String(e).slice(0, 300));
-    telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q.query), q.lang);
+    telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q.query), q.lang, undefined, telemetryMeta());
     return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
   }
   const { hits } = retrieved;
   if (hits.length === 0 && !liveRecords?.length && !boundModel) {
     const answer = refusalAnswer();
     const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
-    telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang);
+    telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang, undefined, telemetryMeta());
     return json({ ...out, quota, });
   }
 
@@ -861,7 +865,7 @@ async function handleAsk(
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
             : await contractV2(env.DB, canonical0, usedHits);
           send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: verdictBlock ? [...c2.blocks, verdictBlock] : c2.blocks, context_applied: ctxApplied });
-          telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang);
+          telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang, undefined, telemetryMeta());
           const canonical = c2.text;
           // streamed answers can't be regenerated mid-flight; enforcement
           // is that an unverified answer is never served from cache again
@@ -1000,7 +1004,7 @@ async function handleAsk(
   }
 
   if (answer === null) {
-    telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
+    telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, undefined, telemetryMeta());
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
   const finalCites = boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used);
@@ -1040,7 +1044,7 @@ async function handleAsk(
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }
-  telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
+  telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang, undefined, telemetryMeta());
   // grounding transparency for integrators (and the eval battery): the
   // passages the answer was actually built from — response-only, never
   // stored in the answer cache

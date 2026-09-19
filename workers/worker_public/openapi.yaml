@@ -391,6 +391,22 @@ paths:
       responses:
         '200':
           description: The dataset list.
+  /v1/usage:
+    get:
+      tags: [Service]
+      summary: The presenting key's own usage
+      description: >-
+        Reports the key's own daily allowance consumption together with
+        its seven-day request ledger. The identity is the presented
+        credential itself, so a key can never read another key's usage.
+      operationId: keyUsage
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The key's allowance and usage.
+        '401':
+          description: No valid key was presented.
   /health:
     get:
       tags: [Service]
@@ -1089,6 +1105,14 @@ components:
           description: >-
             When true, the response is a server-sent event stream whose
             events carry citations, tokens and the completion marker.
+        fresh:
+          type: boolean
+          default: false
+          description: >-
+            Regenerates the answer and skips the answer caches, so the
+            response also carries the grounding passages in context.
+            Evaluation callers use it to observe what the answer was
+            built from.
         lang:
           type: string
           description: Forces the answer language, for example en or fr.
