@@ -672,12 +672,12 @@ async function handleJudge(env, req) {
   if (!question || !answer) return err(400, "invalid_input", "question and answer required");
   const passagesText = passages.map((p, i) => `[${i + 1}] ${p}`).join("\n");
   const [faith, relevancy, precision] = await Promise.all([
-    passages.length ? scoreFaithfulness(env.AI, MODELS.grader, answer, passages) : Promise.resolve(null),
-    scoreJudge(env.AI, MODELS.grader, relevancy_default, `Question: ${question}
+    passages.length ? scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, passages) : Promise.resolve(null),
+    scoreJudge(env.AI, roleModel(env, "grader"), relevancy_default, `Question: ${question}
 
 Answer:
 ${answer}`),
-    passages.length ? scoreJudge(env.AI, MODELS.grader, fill(precision_default, promptVars()), `Question: ${question}
+    passages.length ? scoreJudge(env.AI, roleModel(env, "grader"), fill(precision_default, promptVars()), `Question: ${question}
 
 Passages:
 ${passagesText}`) : Promise.resolve(null)

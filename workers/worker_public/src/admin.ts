@@ -1,7 +1,7 @@
 // Admin-surface handlers: enrichment, section units, captions, vector
 // ops, judging, API-key management — every ADMIN_TOKEN-gated route's
 // behavior lives here (TODO.impl/23); index.ts only registers them.
-import { MODELS, num, sha256Hex, today } from "./config";
+import { MODELS, num, roleModel, sha256Hex, today } from "./config";
 import { embed } from "./ai";
 import { err, json, corsHeaders, readJson, authenticate } from "./lib/http";
 import type { Env } from "./env";
@@ -337,10 +337,14 @@ export async function handleJudge(env: Env, req: Request): Promise<Response> {
   if (!question || !answer) return err(400, "invalid_input", "question and answer required");
 
   const passagesText = passages.map((p: string, i: number) => `[${i + 1}] ${p}`).join("\n");
+  // the grader rides roleModel: the GRADER_MODEL secret flipped the
+  // judge lane off deepseek-v4-flash (specific bodies returned empty),
+  // and this route was the one path the flip never reached — it judged
+  // on with the retired model and the scores collapsed
   const [faith, relevancy, precision] = await Promise.all([
-    passages.length ? scoreFaithfulness(env.AI, MODELS.grader, answer, passages) : Promise.resolve(null),
-    scoreJudge(env.AI, MODELS.grader, relevancyPrompt, `Question: ${question}\n\nAnswer:\n${answer}`),
-    passages.length ? scoreJudge(env.AI, MODELS.grader, fill(precisionPrompt, promptVars()), `Question: ${question}\n\nPassages:\n${passagesText}`) : Promise.resolve(null),
+    passages.length ? scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, passages) : Promise.resolve(null),
+    scoreJudge(env.AI, roleModel(env, "grader"), relevancyPrompt, `Question: ${question}\n\nAnswer:\n${answer}`),
+    passages.length ? scoreJudge(env.AI, roleModel(env, "grader"), fill(precisionPrompt, promptVars()), `Question: ${question}\n\nPassages:\n${passagesText}`) : Promise.resolve(null),
   ]);
   return json({
     question_hash: await sha256Hex(question),
