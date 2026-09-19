@@ -24,14 +24,20 @@ import { handleResearch } from "./research";
 import { handleAsk } from "./ask";
 import { handleMcp } from "./mcp";
 
-// One named handler per HTTP route, declared in ROUTES below and
-// dispatched by lib/router.ts's matchRoute. Adding a route = one entry +
-// its handler; entry order is irrelevant (every pattern is
-// segment-exact). Dual-published routes (/api for the browser, /v1 for
-// keyed integrators) point at the SAME handler — the tier split is the
-// handler's, derived from the path. Mirrored in docs/spec-api.md.
+// The HTTP surface is the OpenAPI document (workers/worker_public/openapi.yaml):
+// scripts/gen-openapi-routes.mjs generates openapi-surface.gen.ts from it,
+// and OPENAPI_HANDLERS below binds every operation to its handler. The
+// Record<OpenApiOperationId, …> type makes the binding exhaustive at
+// typecheck, and tests/openapi-surface.test.ts pins the bijection. Adding
+// an endpoint = the yaml entry + one binding + regenerate. Dual-published
+// routes (/api for the browser, /v1 for keyed integrators) bind the SAME
+// handler — the tier split is the handler's, derived from the path.
+// Non-API routes (pages, unit assets, rendered documents) live in
+// INFRA_ROUTES. Mirrored in docs/spec-api.md.
 
-import { matchRoute, type RouteContext, type Route } from "./lib/router";
+import { matchRoute, type RouteContext, type Route, type RouteHandler } from "./lib/router";
+import { OPENAPI_SURFACE } from "./openapi-surface.gen";
+import type { OpenApiOperationId } from "./openapi-surface.gen";
 import { P } from "./profile.ts";
 
 async function serveIndexPage(c: RouteContext): Promise<Response> {
@@ -384,55 +390,77 @@ async function researchRoute(c: RouteContext): Promise<Response> {
   return handleResearch(c.env, c.ctx, c.req, session);
 }
 
-export const ROUTES: Route[] = [
+// The non-API routes: the HTML pages, the unit-keyed figure assets and
+// the rendered publication documents. Everything else is generated from
+// the OpenAPI document.
+const INFRA_ROUTES: Route[] = [
   { method: "GET", pattern: "/", handler: serveIndexPage },
   { method: "GET", pattern: "/api/", handler: serveIndexPage },
   { method: "GET", pattern: "/index.html", handler: serveIndexPage },
-  { method: "GET", pattern: "/auth/login", handler: (c) => handleLogin(c.env as any, c.req) },
-  { method: "GET", pattern: "/auth/callback", handler: (c) => handleCallback(c.env as any, c.req) },
-  { method: "GET", pattern: "/auth/me", handler: async (c) => withCors(await handleMe(c.env as any, c.req), corsHeaders(c.req)) },
-  { method: "GET", pattern: "/auth/logout", handler: (c) => handleLogout(c.env as any, c.req) },
-  { method: "POST", pattern: "/auth/logout", handler: (c) => handleLogout(c.env as any, c.req) },
-  { method: "*", pattern: "/api/conversations", handler: conversationsRoute },
-  { method: "*", pattern: "/api/memories", handler: memoriesRoute },
-  { method: "*", pattern: "/api/projects", handler: projectsRoute },
-  { method: "*", pattern: "/api/projects/:id/files", handler: projectFilesRoute },
-  { method: "DELETE", pattern: "/api/project-files/:id", handler: projectFilesRoute },
-  { method: "*", pattern: "/api/memories/:id", handler: memoriesRoute },
-  { method: "*", pattern: "/api/conversations/:id", handler: conversationsRoute },
-  { method: "POST", pattern: "/api/conversations/:id/messages", handler: appendMessageRoute },
-  { method: "POST", pattern: "/api/conversations/:id/share", handler: shareRoute },
-  { method: "GET", pattern: "/api/shared/:slug", handler: getSharedRoute },
-  { method: "GET", pattern: "/api/datasets", handler: datasetsRoute },
-  { method: "GET", pattern: "/health", handler: healthRoute },
-  { method: "GET", pattern: "/v1/admin/stats", handler: adminStatsRoute },
-  { method: "POST", pattern: "/api/ask", handler: askRoute },
-  { method: "POST", pattern: "/v1/ask", handler: askRoute },
-  { method: "POST", pattern: "/mcp", handler: mcpRoute },
-  { method: "POST", pattern: "/api/absence", handler: absenceRoute },
-  { method: "POST", pattern: "/v1/absence", handler: absenceRoute },
-  { method: "POST", pattern: "/api/verify", handler: verifyRoute },
-  { method: "POST", pattern: "/v1/verify", handler: verifyRoute },
-  { method: "POST", pattern: "/api/lane", handler: laneRoute },
-  { method: "POST", pattern: "/v1/lane", handler: laneRoute },
-  { method: "POST", pattern: "/api/search", handler: searchRoute },
-  { method: "POST", pattern: "/v1/search", handler: searchRoute },
-  { method: "POST", pattern: "/api/feedback", handler: feedbackRoute },
-  { method: "POST", pattern: "/admin/enrich", handler: (c) => handleEnrich(c.env, c.ctx, c.req) },
-  { method: "POST", pattern: "/v1/admin/enrich", handler: (c) => handleEnrich(c.env, c.ctx, c.req) },
-  { method: "POST", pattern: "/admin/section", handler: (c) => handleSectionUnit(c.env, c.ctx, c.req) },
-  { method: "POST", pattern: "/v1/admin/section", handler: (c) => handleSectionUnit(c.env, c.ctx, c.req) },
-  { method: "POST", pattern: "/admin/vectors", handler: (c) => handleVectors(c.env, c.req) },
-  { method: "POST", pattern: "/admin/caption", handler: (c) => handleCaption(c.env, c.req) },
   { method: "GET", pattern: "/assets/*", handler: unitAssetRoute },
   { method: "GET", pattern: "/docs/*", handler: docsRoute },
-  { method: "POST", pattern: "/api/research", handler: researchRoute },
-  { method: "POST", pattern: "/v1/research", handler: researchRoute },
-  { method: "POST", pattern: "/admin/judge", handler: (c) => handleJudge(c.env, c.req) },
-  { method: "POST", pattern: "/v1/admin/judge", handler: (c) => handleJudge(c.env, c.req) },
-  { method: "POST", pattern: "/v1/admin/keys", handler: (c) => handleCreateKey(c.env, c.req) },
-  { method: "GET", pattern: "/v1/admin/keys", handler: (c) => handleListKeys(c.env, c.req) },
-  { method: "DELETE", pattern: "/v1/admin/keys/:id", handler: (c) => handleRevokeKey(c.env, c.req, c.params.id) },
+];
+
+const OPENAPI_HANDLERS: Record<OpenApiOperationId, RouteHandler> = {
+  askAnonymous: askRoute,
+  askKeyed: askRoute,
+  search: searchRoute,
+  searchKeyed: searchRoute,
+  absence: absenceRoute,
+  absenceKeyed: absenceRoute,
+  verify: verifyRoute,
+  verifyKeyed: verifyRoute,
+  research: researchRoute,
+  researchKeyed: researchRoute,
+  laneQuery: laneRoute,
+  laneKeyed: laneRoute,
+  mcp: mcpRoute,
+  feedback: feedbackRoute,
+  datasets: datasetsRoute,
+  health: healthRoute,
+  authLogin: (c) => handleLogin(c.env as any, c.req),
+  authCallback: (c) => handleCallback(c.env as any, c.req),
+  authMe: async (c) => withCors(await handleMe(c.env as any, c.req), corsHeaders(c.req)),
+  authLogout: (c) => handleLogout(c.env as any, c.req),
+  authLogoutLink: (c) => handleLogout(c.env as any, c.req),
+  listConversations: conversationsRoute,
+  createConversation: conversationsRoute,
+  getConversation: conversationsRoute,
+  renameConversation: conversationsRoute,
+  deleteConversation: conversationsRoute,
+  appendMessage: appendMessageRoute,
+  shareConversation: shareRoute,
+  getShared: getSharedRoute,
+  listMemories: memoriesRoute,
+  createMemory: memoriesRoute,
+  deleteMemory: memoriesRoute,
+  listProjects: projectsRoute,
+  createProject: projectsRoute,
+  deleteProject: projectsRoute,
+  listProjectFiles: projectFilesRoute,
+  attachProjectFile: projectFilesRoute,
+  detachProjectFile: projectFilesRoute,
+  adminStats: adminStatsRoute,
+  adminListKeys: (c) => handleListKeys(c.env, c.req),
+  adminCreateKey: (c) => handleCreateKey(c.env, c.req),
+  adminRevokeKey: (c) => handleRevokeKey(c.env, c.req, c.params.id),
+  adminEnrich: (c) => handleEnrich(c.env, c.ctx, c.req),
+  adminEnrichAlias: (c) => handleEnrich(c.env, c.ctx, c.req),
+  adminSection: (c) => handleSectionUnit(c.env, c.ctx, c.req),
+  adminSectionAlias: (c) => handleSectionUnit(c.env, c.ctx, c.req),
+  adminVectors: (c) => handleVectors(c.env, c.req),
+  adminCaption: (c) => handleCaption(c.env, c.req),
+  adminJudge: (c) => handleJudge(c.env, c.req),
+  adminJudgeAlias: (c) => handleJudge(c.env, c.req),
+};
+
+export const ROUTES: Route[] = [
+  ...INFRA_ROUTES,
+  ...OPENAPI_SURFACE.map((r) => ({
+    method: r.method,
+    pattern: r.pattern,
+    handler: OPENAPI_HANDLERS[r.operationId],
+  })),
 ];
 
 export default {
@@ -446,6 +474,11 @@ export default {
     const matched = matchRoute(ROUTES, req.method, path);
     if (matched) {
       return matched.route.handler({ env, req, ctx, url, path, params: matched.params });
+    }
+    // the surface declares methods per path; a path that exists under
+    // another method is a 405, not a 404
+    if (matchRoute(ROUTES, "*", path)) {
+      return err(405, "method_not_allowed", `The path is served, but not with ${req.method}`);
     }
     return err(404, "not_found", "Unknown route");
   },

@@ -924,6 +924,260 @@ function matchRoute(routes, method, path) {
   return null;
 }
 
+// workers/worker_public/src/openapi-surface.gen.ts
+var OPENAPI_SURFACE = [
+  {
+    "method": "POST",
+    "pattern": "/api/ask",
+    "operationId": "askAnonymous"
+  },
+  {
+    "method": "POST",
+    "pattern": "/v1/ask",
+    "operationId": "askKeyed"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/search",
+    "operationId": "search"
+  },
+  {
+    "method": "POST",
+    "pattern": "/v1/search",
+    "operationId": "searchKeyed"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/absence",
+    "operationId": "absence"
+  },
+  {
+    "method": "POST",
+    "pattern": "/v1/absence",
+    "operationId": "absenceKeyed"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/verify",
+    "operationId": "verify"
+  },
+  {
+    "method": "POST",
+    "pattern": "/v1/verify",
+    "operationId": "verifyKeyed"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/research",
+    "operationId": "research"
+  },
+  {
+    "method": "POST",
+    "pattern": "/v1/research",
+    "operationId": "researchKeyed"
+  },
+  {
+    "method": "POST",
+    "pattern": "/mcp",
+    "operationId": "mcp"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/datasets",
+    "operationId": "datasets"
+  },
+  {
+    "method": "GET",
+    "pattern": "/health",
+    "operationId": "health"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/conversations",
+    "operationId": "listConversations"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/conversations",
+    "operationId": "createConversation"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/conversations/:id",
+    "operationId": "getConversation"
+  },
+  {
+    "method": "PATCH",
+    "pattern": "/api/conversations/:id",
+    "operationId": "renameConversation"
+  },
+  {
+    "method": "DELETE",
+    "pattern": "/api/conversations/:id",
+    "operationId": "deleteConversation"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/conversations/:id/messages",
+    "operationId": "appendMessage"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/conversations/:id/share",
+    "operationId": "shareConversation"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/shared/:slug",
+    "operationId": "getShared"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/memories",
+    "operationId": "listMemories"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/memories",
+    "operationId": "createMemory"
+  },
+  {
+    "method": "DELETE",
+    "pattern": "/api/memories/:id",
+    "operationId": "deleteMemory"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/projects",
+    "operationId": "listProjects"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/projects",
+    "operationId": "createProject"
+  },
+  {
+    "method": "DELETE",
+    "pattern": "/api/projects",
+    "operationId": "deleteProject"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/projects/:id/files",
+    "operationId": "listProjectFiles"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/projects/:id/files",
+    "operationId": "attachProjectFile"
+  },
+  {
+    "method": "DELETE",
+    "pattern": "/api/project-files/:id",
+    "operationId": "detachProjectFile"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/lane",
+    "operationId": "laneQuery"
+  },
+  {
+    "method": "POST",
+    "pattern": "/v1/lane",
+    "operationId": "laneKeyed"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/feedback",
+    "operationId": "feedback"
+  },
+  {
+    "method": "POST",
+    "pattern": "/v1/admin/enrich",
+    "operationId": "adminEnrich"
+  },
+  {
+    "method": "POST",
+    "pattern": "/admin/enrich",
+    "operationId": "adminEnrichAlias"
+  },
+  {
+    "method": "POST",
+    "pattern": "/v1/admin/section",
+    "operationId": "adminSection"
+  },
+  {
+    "method": "POST",
+    "pattern": "/admin/section",
+    "operationId": "adminSectionAlias"
+  },
+  {
+    "method": "POST",
+    "pattern": "/admin/vectors",
+    "operationId": "adminVectors"
+  },
+  {
+    "method": "POST",
+    "pattern": "/admin/caption",
+    "operationId": "adminCaption"
+  },
+  {
+    "method": "POST",
+    "pattern": "/v1/admin/judge",
+    "operationId": "adminJudge"
+  },
+  {
+    "method": "POST",
+    "pattern": "/admin/judge",
+    "operationId": "adminJudgeAlias"
+  },
+  {
+    "method": "DELETE",
+    "pattern": "/v1/admin/keys/:id",
+    "operationId": "adminRevokeKey"
+  },
+  {
+    "method": "GET",
+    "pattern": "/auth/me",
+    "operationId": "authMe"
+  },
+  {
+    "method": "GET",
+    "pattern": "/auth/login",
+    "operationId": "authLogin"
+  },
+  {
+    "method": "GET",
+    "pattern": "/auth/callback",
+    "operationId": "authCallback"
+  },
+  {
+    "method": "POST",
+    "pattern": "/auth/logout",
+    "operationId": "authLogout"
+  },
+  {
+    "method": "GET",
+    "pattern": "/auth/logout",
+    "operationId": "authLogoutLink"
+  },
+  {
+    "method": "GET",
+    "pattern": "/v1/admin/stats",
+    "operationId": "adminStats"
+  },
+  {
+    "method": "GET",
+    "pattern": "/v1/admin/keys",
+    "operationId": "adminListKeys"
+  },
+  {
+    "method": "POST",
+    "pattern": "/v1/admin/keys",
+    "operationId": "adminCreateKey"
+  }
+];
+
 // workers/worker_public/src/index.ts
 async function serveIndexPage(c) {
   const target = new URL(c.path === "/index.html" ? "/" : c.path, c.url);
@@ -1230,55 +1484,72 @@ async function researchRoute(c) {
   const session = c.env.SESSION_SECRET ? await sessionFrom(c.req, c.env) : null;
   return handleResearch(c.env, c.ctx, c.req, session);
 }
-var ROUTES = [
+var INFRA_ROUTES = [
   { method: "GET", pattern: "/", handler: serveIndexPage },
   { method: "GET", pattern: "/api/", handler: serveIndexPage },
   { method: "GET", pattern: "/index.html", handler: serveIndexPage },
-  { method: "GET", pattern: "/auth/login", handler: (c) => handleLogin(c.env, c.req) },
-  { method: "GET", pattern: "/auth/callback", handler: (c) => handleCallback(c.env, c.req) },
-  { method: "GET", pattern: "/auth/me", handler: async (c) => withCors(await handleMe(c.env, c.req), corsHeaders(c.req)) },
-  { method: "GET", pattern: "/auth/logout", handler: (c) => handleLogout(c.env, c.req) },
-  { method: "POST", pattern: "/auth/logout", handler: (c) => handleLogout(c.env, c.req) },
-  { method: "*", pattern: "/api/conversations", handler: conversationsRoute },
-  { method: "*", pattern: "/api/memories", handler: memoriesRoute },
-  { method: "*", pattern: "/api/projects", handler: projectsRoute },
-  { method: "*", pattern: "/api/projects/:id/files", handler: projectFilesRoute },
-  { method: "DELETE", pattern: "/api/project-files/:id", handler: projectFilesRoute },
-  { method: "*", pattern: "/api/memories/:id", handler: memoriesRoute },
-  { method: "*", pattern: "/api/conversations/:id", handler: conversationsRoute },
-  { method: "POST", pattern: "/api/conversations/:id/messages", handler: appendMessageRoute },
-  { method: "POST", pattern: "/api/conversations/:id/share", handler: shareRoute },
-  { method: "GET", pattern: "/api/shared/:slug", handler: getSharedRoute },
-  { method: "GET", pattern: "/api/datasets", handler: datasetsRoute },
-  { method: "GET", pattern: "/health", handler: healthRoute },
-  { method: "GET", pattern: "/v1/admin/stats", handler: adminStatsRoute },
-  { method: "POST", pattern: "/api/ask", handler: askRoute },
-  { method: "POST", pattern: "/v1/ask", handler: askRoute },
-  { method: "POST", pattern: "/mcp", handler: mcpRoute },
-  { method: "POST", pattern: "/api/absence", handler: absenceRoute },
-  { method: "POST", pattern: "/v1/absence", handler: absenceRoute },
-  { method: "POST", pattern: "/api/verify", handler: verifyRoute },
-  { method: "POST", pattern: "/v1/verify", handler: verifyRoute },
-  { method: "POST", pattern: "/api/lane", handler: laneRoute },
-  { method: "POST", pattern: "/v1/lane", handler: laneRoute },
-  { method: "POST", pattern: "/api/search", handler: searchRoute },
-  { method: "POST", pattern: "/v1/search", handler: searchRoute },
-  { method: "POST", pattern: "/api/feedback", handler: feedbackRoute },
-  { method: "POST", pattern: "/admin/enrich", handler: (c) => handleEnrich(c.env, c.ctx, c.req) },
-  { method: "POST", pattern: "/v1/admin/enrich", handler: (c) => handleEnrich(c.env, c.ctx, c.req) },
-  { method: "POST", pattern: "/admin/section", handler: (c) => handleSectionUnit(c.env, c.ctx, c.req) },
-  { method: "POST", pattern: "/v1/admin/section", handler: (c) => handleSectionUnit(c.env, c.ctx, c.req) },
-  { method: "POST", pattern: "/admin/vectors", handler: (c) => handleVectors(c.env, c.req) },
-  { method: "POST", pattern: "/admin/caption", handler: (c) => handleCaption(c.env, c.req) },
   { method: "GET", pattern: "/assets/*", handler: unitAssetRoute },
-  { method: "GET", pattern: "/docs/*", handler: docsRoute },
-  { method: "POST", pattern: "/api/research", handler: researchRoute },
-  { method: "POST", pattern: "/v1/research", handler: researchRoute },
-  { method: "POST", pattern: "/admin/judge", handler: (c) => handleJudge(c.env, c.req) },
-  { method: "POST", pattern: "/v1/admin/judge", handler: (c) => handleJudge(c.env, c.req) },
-  { method: "POST", pattern: "/v1/admin/keys", handler: (c) => handleCreateKey(c.env, c.req) },
-  { method: "GET", pattern: "/v1/admin/keys", handler: (c) => handleListKeys(c.env, c.req) },
-  { method: "DELETE", pattern: "/v1/admin/keys/:id", handler: (c) => handleRevokeKey(c.env, c.req, c.params.id) }
+  { method: "GET", pattern: "/docs/*", handler: docsRoute }
+];
+var OPENAPI_HANDLERS = {
+  askAnonymous: askRoute,
+  askKeyed: askRoute,
+  search: searchRoute,
+  searchKeyed: searchRoute,
+  absence: absenceRoute,
+  absenceKeyed: absenceRoute,
+  verify: verifyRoute,
+  verifyKeyed: verifyRoute,
+  research: researchRoute,
+  researchKeyed: researchRoute,
+  laneQuery: laneRoute,
+  laneKeyed: laneRoute,
+  mcp: mcpRoute,
+  feedback: feedbackRoute,
+  datasets: datasetsRoute,
+  health: healthRoute,
+  authLogin: (c) => handleLogin(c.env, c.req),
+  authCallback: (c) => handleCallback(c.env, c.req),
+  authMe: async (c) => withCors(await handleMe(c.env, c.req), corsHeaders(c.req)),
+  authLogout: (c) => handleLogout(c.env, c.req),
+  authLogoutLink: (c) => handleLogout(c.env, c.req),
+  listConversations: conversationsRoute,
+  createConversation: conversationsRoute,
+  getConversation: conversationsRoute,
+  renameConversation: conversationsRoute,
+  deleteConversation: conversationsRoute,
+  appendMessage: appendMessageRoute,
+  shareConversation: shareRoute,
+  getShared: getSharedRoute,
+  listMemories: memoriesRoute,
+  createMemory: memoriesRoute,
+  deleteMemory: memoriesRoute,
+  listProjects: projectsRoute,
+  createProject: projectsRoute,
+  deleteProject: projectsRoute,
+  listProjectFiles: projectFilesRoute,
+  attachProjectFile: projectFilesRoute,
+  detachProjectFile: projectFilesRoute,
+  adminStats: adminStatsRoute,
+  adminListKeys: (c) => handleListKeys(c.env, c.req),
+  adminCreateKey: (c) => handleCreateKey(c.env, c.req),
+  adminRevokeKey: (c) => handleRevokeKey(c.env, c.req, c.params.id),
+  adminEnrich: (c) => handleEnrich(c.env, c.ctx, c.req),
+  adminEnrichAlias: (c) => handleEnrich(c.env, c.ctx, c.req),
+  adminSection: (c) => handleSectionUnit(c.env, c.ctx, c.req),
+  adminSectionAlias: (c) => handleSectionUnit(c.env, c.ctx, c.req),
+  adminVectors: (c) => handleVectors(c.env, c.req),
+  adminCaption: (c) => handleCaption(c.env, c.req),
+  adminJudge: (c) => handleJudge(c.env, c.req),
+  adminJudgeAlias: (c) => handleJudge(c.env, c.req)
+};
+var ROUTES = [
+  ...INFRA_ROUTES,
+  ...OPENAPI_SURFACE.map((r) => ({
+    method: r.method,
+    pattern: r.pattern,
+    handler: OPENAPI_HANDLERS[r.operationId]
+  }))
 ];
 var src_default = {
   async fetch(req, env, ctx) {
@@ -1289,6 +1560,9 @@ var src_default = {
     const matched = matchRoute(ROUTES, req.method, path);
     if (matched) {
       return matched.route.handler({ env, req, ctx, url, path, params: matched.params });
+    }
+    if (matchRoute(ROUTES, "*", path)) {
+      return err(405, "method_not_allowed", `The path is served, but not with ${req.method}`);
     }
     return err(404, "not_found", "Unknown route");
   }
