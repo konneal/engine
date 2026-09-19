@@ -19,6 +19,7 @@ export type OpenApiOperationId =
   | "researchKeyed"
   | "mcp"
   | "datasets"
+  | "keyUsage"
   | "health"
   | "listConversations"
   | "createConversation"
@@ -118,6 +119,11 @@ export const OPENAPI_SURFACE: readonly (Omit<OpenApiRoute, "operationId"> & { op
     "method": "GET",
     "pattern": "/api/datasets",
     "operationId": "datasets"
+  },
+  {
+    "method": "GET",
+    "pattern": "/v1/usage",
+    "operationId": "keyUsage"
   },
   {
     "method": "GET",

@@ -2686,13 +2686,13 @@ async function checkQuota(env, bucket, id, limit, weight = 1) {
   const used = await kvIncr(env.CACHE, `q:${today()}:${bucket}:${await sha256Hex(id)}`, weight);
   return { ok: used <= limit, used, limit };
 }
-function telemetry(env, ctx, tier, route, model, ok, answerChars, queryHash, lang, cache) {
+function telemetry(env, ctx, tier, route, model, ok, answerChars, queryHash, lang, cache, meta) {
   const day = today();
   ctx.waitUntil(
     env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO queries (ts, day, tier, route, model, ok, answer_chars, query_hash, lang, cache) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
-      ).bind((/* @__PURE__ */ new Date()).toISOString(), day, tier, route, model, ok ? 1 : 0, answerChars, queryHash, lang ?? null, cache ?? null),
+        "INSERT INTO queries (ts, day, tier, route, model, ok, answer_chars, query_hash, lang, cache, duration_ms, key_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
+      ).bind((/* @__PURE__ */ new Date()).toISOString(), day, tier, route, model, ok ? 1 : 0, answerChars, queryHash, lang ?? null, cache ?? null, meta?.durationMs ?? null, meta?.keyId ?? null),
       env.DB.prepare(
         "INSERT INTO spend (day, tier, model, requests) VALUES (?1,?2,?3,1) ON CONFLICT(day, tier, model) DO UPDATE SET requests = requests + 1"
       ).bind(day, tier, model ?? "none")

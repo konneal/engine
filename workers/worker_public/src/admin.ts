@@ -3,7 +3,7 @@
 // behavior lives here (TODO.impl/23); index.ts only registers them.
 import { MODELS, num, sha256Hex, today } from "./config";
 import { embed } from "./ai";
-import { err, json, corsHeaders, readJson } from "./lib/http";
+import { err, json, corsHeaders, readJson, authenticate } from "./lib/http";
 import type { Env } from "./env";
 import enrichmentPrompt from "../prompts/enrichment.md";
 import sectionSummaryPrompt from "../prompts/section-summary.md";
@@ -340,6 +340,27 @@ export async function handleJudge(env: Env, req: Request): Promise<Response> {
     faithfulness: faith ? faith.score : null,
     answer_relevancy: relevancy,
     context_precision: precision,
+  });
+}
+
+export async function handleKeyUsage(env: Env, req: Request): Promise<Response> {
+  // the presenting key reads its OWN spend: today's units against the
+  // daily allowance, plus the seven-day per-day ledger. No key can read
+  // another's — the identity is the presented credential itself.
+  const key = await authenticate(env, req);
+  if (!key) return err(401, "unauthorized", "Provide the key's own credential as the bearer token");
+  const today = new Date().toISOString().slice(0, 10);
+  const [row, week] = await Promise.all([
+    env.DB.prepare("SELECT name, day_limit FROM api_keys WHERE id = ?1").bind(key.id).first<any>(),
+    env.DB.prepare(
+      "SELECT day, COUNT(*) AS requests, SUM(ok) AS ok FROM queries WHERE key_id = ?1 AND day >= date('now','-7 days') GROUP BY day ORDER BY day DESC",
+    ).bind(key.id).all(),
+  ]);
+  const usedUnits = Number((await env.CACHE.get(`q:ask:key:${key.id}`)) ?? "0");
+  return json({
+    key: { name: row?.name ?? key.name, day_limit: row?.day_limit ?? key.day_limit },
+    today: { date: today, used_units: usedUnits },
+    week: week.results ?? [],
   });
 }
 

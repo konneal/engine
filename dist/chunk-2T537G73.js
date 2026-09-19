@@ -31,7 +31,7 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-QKU4PRLG.js";
+} from "./chunk-PVNRB4QM.js";
 import {
   corsHeaders,
   err,
@@ -1201,6 +1201,8 @@ async function* sseTokens(stream) {
   }
 }
 async function handleAsk(env, ctx, req, tier, key) {
+  const tStart = Date.now();
+  const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null });
   const body = await readJson(req);
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
@@ -1252,7 +1254,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   const wantsStream = body?.stream === true || tier === "anon" && body?.stream !== false;
   if (cached) {
-    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact");
+    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact", telemetryMeta());
     const cctx = cached.value.context_applied ?? NO_CONTEXT;
     if (wantsStream) {
       return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, context_applied: cctx }], corsHeaders(req));
@@ -1279,7 +1281,7 @@ async function handleAsk(env, ctx, req, tier, key) {
       const sc0 = await semanticCacheGet(env, gen, wv0, salt);
       if (sc0) {
         console.log("semantic cache hit (pre-understanding)");
-        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang, "semantic");
+        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang, "semantic", telemetryMeta());
         const cctx0 = sc0.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
           return sseResponse([{ type: "citations", citations: sc0.citations ?? [], context_applied: cctx0 }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true, context_applied: cctx0 }], corsHeaders(req));
@@ -1376,7 +1378,7 @@ async function handleAsk(env, ctx, req, tier, key) {
       const sc = await semanticCacheGet(env, gen, warmVec, salt);
       if (sc) {
         console.log("semantic cache hit");
-        telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang, "semantic");
+        telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang, "semantic", telemetryMeta());
         const cctx = sc.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
           return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: cctx }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, context_applied: cctx }], corsHeaders(req));
@@ -1413,7 +1415,7 @@ ${summary}` }] : [],
             } catch {
             }
             send({ type: "done", model, query_hash: queryHash2, context_applied: NO_CONTEXT });
-            telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash2, q.lang);
+            telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash2, q.lang, void 0, telemetryMeta());
             controller.close();
           }
         });
@@ -1425,10 +1427,10 @@ ${summary}` }] : [],
     let answer2 = await generateOnce(env, model, messages2, effort);
     if (answer2 === null) answer2 = await generateOnce(env, MODELS.fallback, messages2, effort);
     if (answer2 === null) {
-      telemetry(env, ctx, tier, "ask", model, false, 0, queryHash2, q.lang);
+      telemetry(env, ctx, tier, "ask", model, false, 0, queryHash2, q.lang, void 0, telemetryMeta());
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
-    telemetry(env, ctx, tier, "ask", model, true, answer2.length, queryHash2, q.lang);
+    telemetry(env, ctx, tier, "ask", model, true, answer2.length, queryHash2, q.lang, void 0, telemetryMeta());
     return json({ answer: answer2, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: NO_CONTEXT, quota });
   }
   if (draftAct) {
@@ -1455,7 +1457,7 @@ ${summary}` }] : [],
     console.log("draft act:", draftAct, "\u2192", verdict.status === "draft" ? `draft (${Object.keys(verdict.draft.fields).length} fields)` : `refused (${verdict.reason})`);
     const citations2 = verdict.citation ? [{ ...verdict.citation, corpus: P().publisher.id }] : [];
     const draftPayload = verdict.status === "draft" ? verdict.draft : void 0;
-    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash2, q.lang);
+    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash2, q.lang, void 0, telemetryMeta());
     if (wantsStream) {
       return sseResponse(
         [
@@ -1552,14 +1554,14 @@ Answer account questions from these records ONLY: name the record when you use i
     }
   } catch (e) {
     console.log("ask: retrieval failed:", String(e).slice(0, 300));
-    telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q.query), q.lang);
+    telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q.query), q.lang, void 0, telemetryMeta());
     return err(503, "retrieval_unavailable", "Search is briefly busy \u2014 please retry in a moment.");
   }
   const { hits } = retrieved;
   if (hits.length === 0 && !liveRecords?.length && !boundModel) {
     const answer2 = refusalAnswer();
     const out2 = { answer: answer2, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
-    telemetry(env, ctx, tier, "ask", model, true, answer2.length, out2.query_hash, q.lang);
+    telemetry(env, ctx, tier, "ask", model, true, answer2.length, out2.query_hash, q.lang, void 0, telemetryMeta());
     return json({ ...out2, quota });
   }
   const processNote = understanding?.process_intent ? P().retrieval.process_note : void 0;
@@ -1621,7 +1623,7 @@ Answer account questions from these records ONLY: name the record when you use i
           const canonical0 = canonicalRefusal(full);
           const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
           send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: verdictBlock ? [...c2.blocks, verdictBlock] : c2.blocks, context_applied: ctxApplied });
-          telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang);
+          telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang, void 0, telemetryMeta());
           const canonical = c2.text;
           const streamedAnchors = checkQuoteAnchors(canonical, usedHits.map((h) => h.text));
           const streamedRetyped = tableRetyped(canonical, usedHits.some((h) => h.metadata.unit_id && h.metadata.block === "table"));
@@ -1709,7 +1711,7 @@ Answer account questions from these records ONLY: name the record when you use i
     }
   }
   if (answer === null) {
-    telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang);
+    telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, void 0, telemetryMeta());
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
   const finalCites = boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used);
@@ -1735,7 +1737,7 @@ Answer account questions from these records ONLY: name the record when you use i
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }
-  telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang);
+  telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang, void 0, telemetryMeta());
   const contextOut = used.map((h) => ({
     doc_id: h.metadata.doc_id,
     clause_anchor: h.metadata.clause_anchor,

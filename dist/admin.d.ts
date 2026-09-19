@@ -22,6 +22,7 @@ export declare function handleSectionUnit(env: Env, ctx: ExecutionContext, req: 
 export declare function handleCaption(env: Env, req: Request): Promise<Response>;
 export declare function handleVectors(env: Env, req: Request): Promise<Response>;
 export declare function handleJudge(env: Env, req: Request): Promise<Response>;
+export declare function handleKeyUsage(env: Env, req: Request): Promise<Response>;
 export declare function handleCreateKey(env: Env, req: Request): Promise<Response>;
 export declare function handleListKeys(env: Env, req: Request): Promise<Response>;
 /** Revoke an API key (soft: revoked = 1 — the hash row stays for
