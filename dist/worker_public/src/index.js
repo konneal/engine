@@ -668,7 +668,7 @@ async function handleJudge(env, req) {
   const body = await readJson(req);
   const question = typeof body?.question === "string" ? body.question.slice(0, 2e3) : "";
   const answer = typeof body?.answer === "string" ? body.answer.slice(0, 4e3) : "";
-  const passages = Array.isArray(body?.passages) ? body.passages.filter((p) => typeof p === "string").map((p) => p.slice(0, 600)).slice(0, 8) : [];
+  const passages = Array.isArray(body?.passages) ? body.passages.filter((p) => typeof p === "string").map((p) => p.slice(0, 2e3)).slice(0, 8) : [];
   if (!question || !answer) return err(400, "invalid_input", "question and answer required");
   const passagesText = passages.map((p, i) => `[${i + 1}] ${p}`).join("\n");
   const [faith, relevancy, precision] = await Promise.all([

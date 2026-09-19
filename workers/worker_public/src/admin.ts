@@ -325,7 +325,14 @@ export async function handleJudge(env: Env, req: Request): Promise<Response> {
   const question = typeof body?.question === "string" ? body.question.slice(0, 2000) : "";
   const answer = typeof body?.answer === "string" ? body.answer.slice(0, 4000) : "";
   const passages = Array.isArray(body?.passages)
-    ? body.passages.filter((p: unknown) => typeof p === "string").map((p: string) => p.slice(0, 600)).slice(0, 8)
+    ? body.passages
+      .filter((p: unknown) => typeof p === "string")
+      // the judge must see what the answer rests on: a 600-character
+      // clip of each passage starved it on long grounded answers, whose
+      // support sits past the clip — every claim then read as
+      // unsupported and the score collapsed to zero
+      .map((p: string) => p.slice(0, 2000))
+      .slice(0, 8)
     : [];
   if (!question || !answer) return err(400, "invalid_input", "question and answer required");
 
