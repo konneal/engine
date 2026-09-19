@@ -901,25 +901,27 @@ async function handleMcp(env, ctx, req, tier, key) {
 }
 
 // workers/shared/router.ts
-function matchRoute(routes, method, path) {
+function routeMatchesPath(pattern, path) {
   const segments = path.split("/").filter(Boolean);
+  const patternSegs = pattern.split("/").filter(Boolean);
+  if (patternSegs.length !== segments.length && !patternSegs[patternSegs.length - 1]?.startsWith("*")) return null;
+  const params = {};
+  for (let i = 0; i < patternSegs.length; i++) {
+    const ps = patternSegs[i];
+    if (ps.startsWith("*")) return params;
+    if (ps.startsWith(":")) {
+      params[ps.slice(1)] = segments[i];
+    } else if (ps !== segments[i]) {
+      return null;
+    }
+  }
+  return params;
+}
+function matchRoute(routes, method, path) {
   for (const route of routes) {
     if (route.method !== method && route.method !== "*") continue;
-    const patternSegs = route.pattern.split("/").filter(Boolean);
-    if (patternSegs.length !== segments.length && !patternSegs[patternSegs.length - 1]?.startsWith("*")) continue;
-    const params = {};
-    let matched = true;
-    for (let i = 0; i < patternSegs.length; i++) {
-      const ps = patternSegs[i];
-      if (ps.startsWith("*")) break;
-      if (ps.startsWith(":")) {
-        params[ps.slice(1)] = segments[i];
-      } else if (ps !== segments[i]) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) return { route, params };
+    const params = routeMatchesPath(route.pattern, path);
+    if (params) return { route, params };
   }
   return null;
 }
@@ -1561,7 +1563,7 @@ var src_default = {
     if (matched) {
       return matched.route.handler({ env, req, ctx, url, path, params: matched.params });
     }
-    if (matchRoute(ROUTES, "*", path)) {
+    if (ROUTES.some((r) => routeMatchesPath(r.pattern, path))) {
       return err(405, "method_not_allowed", `The path is served, but not with ${req.method}`);
     }
     return err(404, "not_found", "Unknown route");

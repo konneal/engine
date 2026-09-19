@@ -21,25 +21,32 @@ export interface Route {
   handler: RouteHandler;
 }
 
-export function matchRoute(routes: Route[], method: string, path: string): { route: Route; params: Record<string, string> } | null {
+/** The path half of the match, method-blind: segment-exact with :param
+ *  capture and a trailing * wildcard. Returns the captured params when
+ *  the pattern fits, null otherwise. The 405 probe uses it to tell a
+ *  known path under a wrong method from an unknown path. */
+export function routeMatchesPath(pattern: string, path: string): Record<string, string> | null {
   const segments = path.split("/").filter(Boolean);
+  const patternSegs = pattern.split("/").filter(Boolean);
+  if (patternSegs.length !== segments.length && !patternSegs[patternSegs.length - 1]?.startsWith("*")) return null;
+  const params: Record<string, string> = {};
+  for (let i = 0; i < patternSegs.length; i++) {
+    const ps = patternSegs[i];
+    if (ps.startsWith("*")) return params; // wildcard matches rest
+    if (ps.startsWith(":")) {
+      params[ps.slice(1)] = segments[i];
+    } else if (ps !== segments[i]) {
+      return null;
+    }
+  }
+  return params;
+}
+
+export function matchRoute(routes: Route[], method: string, path: string): { route: Route; params: Record<string, string> } | null {
   for (const route of routes) {
     if (route.method !== method && route.method !== "*") continue;
-    const patternSegs = route.pattern.split("/").filter(Boolean);
-    if (patternSegs.length !== segments.length && !patternSegs[patternSegs.length - 1]?.startsWith("*")) continue;
-    const params: Record<string, string> = {};
-    let matched = true;
-    for (let i = 0; i < patternSegs.length; i++) {
-      const ps = patternSegs[i];
-      if (ps.startsWith("*")) break; // wildcard matches rest
-      if (ps.startsWith(":")) {
-        params[ps.slice(1)] = segments[i];
-      } else if (ps !== segments[i]) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) return { route, params };
+    const params = routeMatchesPath(route.pattern, path);
+    if (params) return { route, params };
   }
   return null;
 }

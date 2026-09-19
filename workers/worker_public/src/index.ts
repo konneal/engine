@@ -35,7 +35,7 @@ import { handleMcp } from "./mcp";
 // Non-API routes (pages, unit assets, rendered documents) live in
 // INFRA_ROUTES. Mirrored in docs/spec-api.md.
 
-import { matchRoute, type RouteContext, type Route, type RouteHandler } from "./lib/router";
+import { matchRoute, routeMatchesPath, type RouteContext, type Route, type RouteHandler } from "./lib/router";
 import { OPENAPI_SURFACE } from "./openapi-surface.gen";
 import type { OpenApiOperationId } from "./openapi-surface.gen";
 import { P } from "./profile.ts";
@@ -477,7 +477,7 @@ export default {
     }
     // the surface declares methods per path; a path that exists under
     // another method is a 405, not a 404
-    if (matchRoute(ROUTES, "*", path)) {
+    if (ROUTES.some((r) => routeMatchesPath(r.pattern, path))) {
       return err(405, "method_not_allowed", `The path is served, but not with ${req.method}`);
     }
     return err(404, "not_found", "Unknown route");
