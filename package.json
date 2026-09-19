@@ -14,7 +14,8 @@
     "test:ui": "node tests/ui.mjs",
     "test:bridge": "node --test tests/bridge.test.mjs",
     "test:units": "node --test --experimental-strip-types tests/*.test.ts",
-    "build": "rm -rf dist dist-types && esbuild workers/worker_mcp/src/index.ts workers/worker_public/src/index.ts workers/worker_public/src/config.ts workers/worker_public/src/refusal.ts workers/worker_public/src/profile.ts workers/worker_public/src/requestScope.ts --bundle --format=esm --splitting --platform=neutral --outdir=dist --loader:.md=text && tsc -p tsconfig.build.json && cp dist-types/worker_public/src/*.d.ts dist/ && mkdir -p dist/worker_mcp/src && cp dist-types/worker_mcp/src/*.d.ts dist/worker_mcp/src/ && mkdir -p dist/prompts && cp workers/worker_public/prompts/*.md dist/prompts/",
+    "gen:openapi-types": "node scripts/gen-openapi-types.mjs",
+    "build": "rm -rf dist dist-types && esbuild workers/worker_mcp/src/index.ts workers/worker_public/src/index.ts workers/worker_public/src/config.ts workers/worker_public/src/refusal.ts workers/worker_public/src/profile.ts workers/worker_public/src/requestScope.ts --bundle --format=esm --splitting --platform=neutral --outdir=dist --loader:.md=text && tsc -p tsconfig.build.json && cp dist-types/worker_public/src/*.d.ts dist/ && mkdir -p dist/worker_mcp/src && cp dist-types/worker_mcp/src/*.d.ts dist/worker_mcp/src/ && mkdir -p dist/prompts && cp workers/worker_public/prompts/*.md dist/prompts/ && node scripts/gen-openapi-types.mjs",
     "prepare": "npm run build",
     "lint:ports": "node scripts/lint-ports.mjs",
     "lint:publisher": "node scripts/lint-publisher-leak.mjs",
@@ -24,6 +25,7 @@
     "@cloudflare/workers-types": "^5.20260911.1",
     "esbuild": "^0.28.2",
     "jsdom": "^29.1.1",
+    "openapi-typescript": "^7.13.0",
     "playwright": "^1.62.1",
     "yaml": "^2.9.1"
   },
@@ -59,6 +61,9 @@
       "default": "./dist/worker_public/src/requestScope.js"
     },
     "./openapi": "./workers/worker_public/openapi.yaml",
+    "./openapi-types": {
+      "types": "./dist/openapi-types.d.ts"
+    },
     "./mcp": "./dist/worker_mcp/src/index.js"
   },
   "files": [
