@@ -165,6 +165,10 @@ function datasetsFor(session) {
 function SUGGESTIONS() {
   return [...P().ui.suggestions];
 }
+function STARTERS() {
+  const groups = P().ui.starter_groups;
+  return Array.isArray(groups) && groups.length ? groups.map((g) => ({ label: g.label, q: g.q })) : SUGGESTIONS().map((q) => ({ label: "", q }));
+}
 function num(env, key, fallback) {
   const v = Number(env[key]);
   return Number.isFinite(v) && v > 0 ? v : fallback;
@@ -191,6 +195,7 @@ export {
   datasetAllowed,
   datasetsFor,
   SUGGESTIONS,
+  STARTERS,
   num,
   today,
   sha256Hex

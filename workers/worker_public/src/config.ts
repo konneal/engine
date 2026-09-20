@@ -223,6 +223,16 @@ export function SUGGESTIONS(): string[] {
   return [...P().ui.suggestions];
 }
 
+/** The first-run starters as the publisher structures them: one question
+ *  per capability, labelled, so the interface's first presentation of
+ *  the service shows what it can do rather than a flat cloud of
+ *  definition lookups. Falls back to the flat list when the profile
+ *  declares none. */
+export function STARTERS(): { label: string; q: string }[] {
+  const groups = (P().ui as { starter_groups?: { label: string; q: string }[] }).starter_groups;
+  return Array.isArray(groups) && groups.length ? groups.map((g) => ({ label: g.label, q: g.q })) : SUGGESTIONS().map((q) => ({ label: "", q }));
+}
+
 export function num(env: Record<string, unknown>, key: string, fallback: number): number {
   const v = Number(env[key]);
   return Number.isFinite(v) && v > 0 ? v : fallback;
