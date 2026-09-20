@@ -1220,6 +1220,14 @@ async function handleAsk(env, ctx, req, tier, key) {
   const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null });
   const stageTiming = {};
   let generateRetries = 0;
+  const readAs = () => understanding ? {
+    intent: understanding.intent,
+    doc: understanding.docidentifier,
+    edition: understanding.edition ?? null,
+    term: understanding.term,
+    terms: (understanding.defined_terms ?? []).slice(0, 4),
+    lang: q?.lang ?? null
+  } : void 0;
   const serverTiming = () => Object.entries(stageTiming).map(([k, v]) => `${k};dur=${v}`).concat([`generate-retries;desc=count;dur=${generateRetries ?? 0}`, `total;dur=${Date.now() - tStart}`]).join(", ");
   const body = await readJson(req);
   const q = validateQuery(body);
@@ -1657,6 +1665,7 @@ Answer account questions from these records ONLY: name the record when you use i
             follow_ups: understanding?.follow_ups ?? [],
             blocks: verdictBlock ? [...c2.blocks, verdictBlock] : c2.blocks,
             context_applied: ctxApplied,
+            read: readAs(),
             // the evidence view's ground truth: the exact passages this
             // answer was built from, compact — cache hits carry none,
             // because the cache stores the answer and never the passages
@@ -1786,7 +1795,7 @@ Answer account questions from these records ONLY: name the record when you use i
     clause_anchor: h.metadata.clause_anchor,
     text: h.text.slice(0, 1200)
   }));
-  return json({ ...out, context: contextOut, quota }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
+  return json({ ...out, context: contextOut, read: readAs(), quota }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
 }
 function sseResponse(events, cors) {
   const encoder = new TextEncoder();
