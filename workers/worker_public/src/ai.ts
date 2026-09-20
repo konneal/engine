@@ -61,8 +61,16 @@ export async function generateOnce(env: any, model: string, messages: any[], eff
         temperature: 0.6,
         top_p: 0.95,
       });
-      if (typeof res?.response === "string") return res.response;
-      if (typeof res?.choices?.[0]?.message?.content === "string") return res.choices[0].message.content;
+      // an EMPTY string is a failed generation, not an answer: the
+      // platform intermittently returns empty bodies with a 200 (observed
+      // live 2026-09-20 — answers went blank platform-wide while retrieval
+      // and the deterministic paths kept working). Treating "" as success
+      // shipped blank answers; treating it as a failure falls through to
+      // the retry and then the fallback model, so the service rides out
+      // the mode instead of serving nothing.
+      if (typeof res?.response === "string" && res.response.trim()) return res.response;
+      if (typeof res?.choices?.[0]?.message?.content === "string" && res.choices[0].message.content.trim()) return res.choices[0].message.content;
+      if (attempt === 0) console.error("generate returned empty:", model);
     } catch (e) {
       console.error("generate failed:", model, String(e).slice(0, 120));
     }

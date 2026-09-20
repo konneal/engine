@@ -271,8 +271,9 @@ async function generateOnce(env, model, messages, effort) {
         temperature: 0.6,
         top_p: 0.95
       });
-      if (typeof res?.response === "string") return res.response;
-      if (typeof res?.choices?.[0]?.message?.content === "string") return res.choices[0].message.content;
+      if (typeof res?.response === "string" && res.response.trim()) return res.response;
+      if (typeof res?.choices?.[0]?.message?.content === "string" && res.choices[0].message.content.trim()) return res.choices[0].message.content;
+      if (attempt === 0) console.error("generate returned empty:", model);
     } catch (e) {
       console.error("generate failed:", model, String(e).slice(0, 120));
     }
