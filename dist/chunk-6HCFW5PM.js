@@ -673,7 +673,7 @@ var conversational_default = "You are {{ASSISTANT_IDENTITY}}.\nThis turn is conv
 var listwise_default = "You are a listwise reranker for a legal-metrology Q&A system. Given the question and a numbered list of passage summaries, decide the BEST ORDER of the passages for answering the question: the passages that most directly contain the answer's material come first; background, overview, or tangentially related passages come later. Consider the passages JOINTLY (deduplicate near-repeats \u2014 keep the clearer one first; prefer the edition the question implies; prefer clause content over document overviews for specific questions).\n\nReply with ONLY a JSON array of the passage numbers in best-first order, e.g. [3,1,4,2]. Every input number appears exactly once. No prose, no explanation.\n";
 
 // workers/worker_public/src/tablecontext.ts
-function tableContext(meta, query) {
+function tableSelection(meta, query) {
   const t = meta?.table;
   if (!t || !Array.isArray(t.columns) || !Array.isArray(t.rows) || !t.rows.length) return null;
   const terms = new Set(
@@ -701,8 +701,8 @@ columns: ${colKeep.map((i) => `${t.columns[i]?.label ?? ""}${t.columns[i]?.unit 
   const lines = shown.map((r) => `row: ${r}`);
   const elided = rowHits.length > CAP || rowHits.length < t.rows.length ? `
 (${shown.length} of ${t.rows.length} rows shown; ${t.rows.length - rowHits.length} rows did not match the question terms)` : "";
-  return `${header}
-${lines.join("\n")}${elided}`;
+  return { text: `${header}
+${lines.join("\n")}${elided}`, cols: colKeep.map((i) => `${t.columns[i]?.label ?? ""}${t.columns[i]?.unit ? ` [${t.columns[i].unit}]` : ""}`), rowsShown: shown.length, rowsTotal: t.rows.length };
 }
 
 // workers/worker_public/src/selfquery.ts
@@ -1883,7 +1883,9 @@ Context passages:
     const unitTag = h.metadata.unit_id ? ` unit ${h.metadata.unit_id}${h.metadata.block ? ` (${h.metadata.block})` : ""}` : "";
     const head = `[${usedHits.length + 1}] ${label}${unitTag} ${h.metadata.clause_title ? "\u2014 " + h.metadata.clause_title : ""}
 `;
-    const pruned = h.metadata.block === "table" ? tableContext(h.metadata, query) : null;
+    const tableSel = h.metadata.block === "table" ? tableSelection(h.metadata, query) : null;
+    const pruned = tableSel?.text ?? null;
+    if (tableSel) h.metadata.table_selection = { cols: tableSel.cols, rowsShown: tableSel.rowsShown, rowsTotal: tableSel.rowsTotal };
     const body = clipToTokens(pruned ?? h.text, LIMITS.maxPassageTokens);
     const t = estTokens(head) + estTokens(body);
     if (t <= remain) {

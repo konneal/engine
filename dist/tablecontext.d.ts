@@ -8,4 +8,11 @@
  *  selected column labels. Full table stays available for rendering;
  *  this only shapes the prompt context, and falls back to the stored
  *  text when pruning matches nothing (never worse than baseline). */
+export interface TableSelection {
+    text: string;
+    cols: string[];
+    rowsShown: number;
+    rowsTotal: number;
+}
+export declare function tableSelection(meta: any, query: string): TableSelection | null;
 export declare function tableContext(meta: any, query: string): string | null;
