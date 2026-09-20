@@ -32,9 +32,11 @@
   "dependencies": {
     "@astrojs/markdown-satteri": "^0.4.1",
     "@astrojs/mdx": "^4.3.14",
+    "@konneal/client": "github:konneal/client#22ce599",
+    "@konneal/engine": "github:konneal/engine#2d6c39b",
     "@oimlsmart/oiml-pubid": "^1.2.1"
   },
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "The Konneal engine: the publisher-agnostic build pipeline and API plane for standards intelligence (retrieval, answer contract, verdicts, evaluation).",
   "license": "BSD-3-Clause",
   "type": "module",
