@@ -31,6 +31,47 @@ export async function handleResearch(env: Env, ctx: ExecutionContext, req: Reque
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
   const maxIters = Math.min(Math.max(Number(body?.max_iterations) || 3, 1), 3);
 
+  // the passes, streamed when the caller asks: each retrieval and each
+  // sufficiency judgement is an event, so the reader watches the loop
+  // work instead of watching a spinner — the final event carries the
+  // same result object the JSON path returns
+  if (body?.stream === true) {
+    const enc = new TextEncoder();
+    const started = Date.now();
+    const stream = new ReadableStream({
+      async start(ctrl) {
+        const send = (e: unknown) => ctrl.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+        try {
+          const out = await run(env, ctx, q, maxIters, send);
+          send({ type: "done", ...out });
+        } catch (e: any) {
+          send({ type: "error", message: String(e?.message ?? e).slice(0, 200) });
+        } finally {
+          ctrl.close();
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        "x-accel-buffering": "no",
+        ...corsHeaders(req),
+      },
+    });
+    void started;
+  }
+  const out = await run(env, ctx, q, maxIters);
+  return json({ ...out, ...corsHeaders(req) });
+}
+
+async function run(
+  env: Env,
+  ctx: ExecutionContext,
+  q: { query: string; lang?: string },
+  maxIters: number,
+  emit?: (e: unknown) => void,
+): Promise<{ answer: string; citations: unknown[]; model: string; query_hash: string; research: { iterations: number; passages: number; elapsed_ms: number; sufficient: boolean | null } }> {
   const started = Date.now();
   const queryHash = await sha256Hex(q.query);
   const understanding = await understandQuery(portModelRunner(env), MODELS.understand, q.query, [], []);
@@ -44,6 +85,7 @@ export async function handleResearch(env: Env, ctx: ExecutionContext, req: Reque
 
   for (let i = 0; i < maxIters; i++) {
     iterations = i + 1;
+    emit?.({ type: "pass", n: iterations, of: maxIters, phase: "retrieving" });
     let retrieved: { hits: Hit[] };
     try {
       retrieved = await retrieve(env, q.query, {
@@ -95,6 +137,15 @@ export async function handleResearch(env: Env, ctx: ExecutionContext, req: Reque
       }
     })();
     console.log("research iter", iterations, "passages", passages.length, "sufficient:", judge?.sufficient);
+    emit?.({
+      type: "pass",
+      n: iterations,
+      of: maxIters,
+      phase: "judged",
+      passages: passages.length,
+      sufficient: judge?.sufficient ?? null,
+      ...(judge && !judge.sufficient && judge.missing ? { missing: judge.missing.slice(0, 300) } : {}),
+    });
     if (!judge || judge.sufficient || !judge.missing) break;
     // fold, don't accumulate: appending every round's `missing` compounds
     // stale wants; the next retrieval focuses on the ORIGINAL question plus
@@ -104,14 +155,14 @@ export async function handleResearch(env: Env, ctx: ExecutionContext, req: Reque
 
   const used = [...accumulated.values()];
   if (!used.length) {
-    return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
+    throw new Error("Search is briefly busy — please retry in a moment.");
   }
   const { messages, usedHits } = buildMessages(q.query, used, q.lang, [], eNote || undefined, undefined, LIMITS.inputTokenBudget);
   let answer = await generateOnce(env, MODELS.research, messages);
   if (answer === null) answer = await generateOnce(env, MODELS.fallback, messages);
   if (answer === null) {
     telemetry(env, ctx, "member", "research", MODELS.research, false, 0, queryHash, q.lang);
-    return err(502, "generation_failed", "The generation model is unavailable; please retry.");
+    throw new Error("The generation model is unavailable; please retry.");
   }
   answer = canonicalRefusal(answer);
   const anchors = checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
@@ -124,5 +175,6 @@ export async function handleResearch(env: Env, ctx: ExecutionContext, req: Reque
     research: { iterations, passages: used.length, elapsed_ms: Date.now() - started, sufficient: judge?.sufficient ?? null },
   };
   telemetry(env, ctx, "member", "research", MODELS.research, true, answer.length, queryHash, q.lang);
-  return json({ ...out, ...corsHeaders(req) });
+  emit?.({ type: "pass", n: iterations, of: maxIters, phase: "writing", passages: used.length });
+  return out;
 }
