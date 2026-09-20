@@ -237,10 +237,11 @@ async function handleAsk(
   // the latency anatomy, surfaced as standard Server-Timing headers on
   // the JSON response — the reduction program's per-stage data
   const stageTiming: Record<string, number> = {};
+  let generateRetries = 0;
   const serverTiming = () =>
     Object.entries(stageTiming)
       .map(([k, v]) => `${k};dur=${v}`)
-      .concat([`total;dur=${Date.now() - tStart}`])
+      .concat([`generate-retries;desc=count;dur=${generateRetries ?? 0}`, `total;dur=${Date.now() - tStart}`])
       .join(", ");
   const body = await readJson(req);
   const q = validateQuery(body);
@@ -919,8 +920,10 @@ async function handleAsk(
     }
   }
 
+  const tGen = Date.now();
   let answer = await generateOnce(env, model, messages, effort);
   if (answer === null) {
+    generateRetries += 1;
     // the fallback is a text-only model: image parts must be flattened
     // out first or it errors on (or silently ignores) the pixels the
     // primary was carrying — and the figure-attach NOTE with them: a
@@ -941,6 +944,7 @@ async function handleAsk(
     answer = await generateOnce(env, MODELS.fallback, flat, effort);
   }
   if (answer) answer = canonicalRefusal(answer);
+  stageTiming.generate = Date.now() - tGen;
 
   // ── Deterministic quote-anchor + table-retyping check ──
   // One corrective regeneration when an anchor quotes text absent from
@@ -974,6 +978,7 @@ async function handleAsk(
       const note = retyped || unreferenced
         ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.`
         : ANCHOR_CORRECTION_NOTE;
+      generateRetries += 1;
       const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], effort);
       if (corrected) {
         const correctedAnswer = canonicalRefusal(corrected);

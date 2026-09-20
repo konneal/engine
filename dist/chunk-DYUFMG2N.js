@@ -1219,7 +1219,8 @@ async function handleAsk(env, ctx, req, tier, key) {
   const tStart = Date.now();
   const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null });
   const stageTiming = {};
-  const serverTiming = () => Object.entries(stageTiming).map(([k, v]) => `${k};dur=${v}`).concat([`total;dur=${Date.now() - tStart}`]).join(", ");
+  let generateRetries = 0;
+  const serverTiming = () => Object.entries(stageTiming).map(([k, v]) => `${k};dur=${v}`).concat([`generate-retries;desc=count;dur=${generateRetries ?? 0}`, `total;dur=${Date.now() - tStart}`]).join(", ");
   const body = await readJson(req);
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
@@ -1678,8 +1679,10 @@ Answer account questions from these records ONLY: name the record when you use i
       });
     }
   }
+  const tGen = Date.now();
   let answer = await generateOnce(env, model, messages, effort);
   if (answer === null) {
+    generateRetries += 1;
     const isFigureAttachMessage = (m) => Array.isArray(m.content) && m.content.some((part) => part?.type === "text" && /^The original image of figure unit /.test(part.text ?? ""));
     const flat = messages.filter((m) => !isFigureAttachMessage(m)).map(
       (m) => typeof m.content === "string" ? m : { ...m, content: m.content.filter((p) => p?.type === "text").map((p) => (p?.text ?? "").replace(/\n?\(The user attached an image with this question; interpret it directly when answering\.\)/, "")).join("\n") }
@@ -1687,6 +1690,7 @@ Answer account questions from these records ONLY: name the record when you use i
     answer = await generateOnce(env, MODELS.fallback, flat, effort);
   }
   if (answer) answer = canonicalRefusal(answer);
+  stageTiming.generate = Date.now() - tGen;
   let used = usedHits;
   if (answer && !answer.includes(refusalAnswer())) {
     const anchors = checkQuoteAnchors(answer, used.map((h) => h.text));
@@ -1706,6 +1710,7 @@ Answer account questions from these records ONLY: name the record when you use i
       console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "\u2014 regenerating");
       const tableUnitId = unreferenced ? used.find((h) => h.metadata.unit_id && h.metadata.block === "table")?.metadata.unit_id : void 0;
       const note = retyped || unreferenced ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.` : ANCHOR_CORRECTION_NOTE;
+      generateRetries += 1;
       const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], effort);
       if (corrected) {
         const correctedAnswer = canonicalRefusal(corrected);
