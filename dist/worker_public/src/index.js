@@ -1,14 +1,14 @@
 import {
   handleSearch
-} from "../../chunk-R5M7XPPX.js";
+} from "../../chunk-XWUJHFGA.js";
 import {
   checkQuoteAnchors,
   handleAsk,
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-DYUFMG2N.js";
-import "../../chunk-AWT7DWFJ.js";
+} from "../../chunk-ZCISGOSR.js";
+import "../../chunk-LNSDBEKS.js";
 import {
   buildMessages,
   citations,
@@ -30,7 +30,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-PVNRB4QM.js";
+} from "../../chunk-BCWZEOX4.js";
 import {
   authenticate,
   corsHeaders,
@@ -39,20 +39,21 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-ZT5QFTX6.js";
+} from "../../chunk-SN3ANQ3Y.js";
 import {
   canonicalRefusal
 } from "../../chunk-WGXATDXY.js";
 import {
   LIMITS,
   MODELS,
+  STARTERS,
   SUGGESTIONS,
   datasetsFor,
   num,
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-QH3RSODB.js";
+} from "../../chunk-Q6LI4T7M.js";
 import {
   P,
   setProfile
@@ -912,7 +913,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-XWC25X6H.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-YHK3KKRX.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-OGF6FTRO.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-WJT47XVK.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1262,7 +1263,7 @@ async function getSharedRoute(c) {
 }
 async function datasetsRoute(c) {
   const session = await sessionFrom(c.req, c.env);
-  return json({ datasets: datasetsFor(session), suggestions: SUGGESTIONS() }, 200, corsHeaders(c.req));
+  return json({ datasets: datasetsFor(session), suggestions: SUGGESTIONS(), starters: STARTERS() }, 200, corsHeaders(c.req));
 }
 async function healthRoute(c) {
   return json({ ok: true, service: "rag-public", index_version: c.env.INDEX_VERSION, ...corsHeaders(c.req) });

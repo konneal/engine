@@ -1,4 +1,4 @@
-import { MODELS, datasetsFor, SUGGESTIONS, roleModel } from "./config";
+import { MODELS, datasetsFor, SUGGESTIONS, STARTERS, roleModel } from "./config";
 export { setProfile } from "./profile.ts";
 import { retrieve } from "./pipeline";
 import type { Hit } from "./pipeline";
@@ -104,7 +104,7 @@ async function getSharedRoute(c: RouteContext): Promise<Response> {
 
 async function datasetsRoute(c: RouteContext): Promise<Response> {
   const session = await sessionFrom(c.req, c.env as any);
-  return json({ datasets: datasetsFor(session), suggestions: SUGGESTIONS() }, 200, corsHeaders(c.req));
+  return json({ datasets: datasetsFor(session), suggestions: SUGGESTIONS(), starters: STARTERS() }, 200, corsHeaders(c.req));
 }
 
 async function healthRoute(c: RouteContext): Promise<Response> {

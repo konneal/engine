@@ -149,6 +149,15 @@ export declare function datasetsFor(session: unknown): unknown[];
 /** Empty-state starter questions, served by /api/datasets — UI content
  *  comes from the API, never hardcoded in the client. */
 export declare function SUGGESTIONS(): string[];
+/** The first-run starters as the publisher structures them: one question
+ *  per capability, labelled, so the interface's first presentation of
+ *  the service shows what it can do rather than a flat cloud of
+ *  definition lookups. Falls back to the flat list when the profile
+ *  declares none. */
+export declare function STARTERS(): {
+    label: string;
+    q: string;
+}[];
 export declare function num(env: Record<string, unknown>, key: string, fallback: number): number;
 export declare function today(): string;
 export declare function sha256Hex(s: string): Promise<string>;

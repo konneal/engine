@@ -1,7 +1,7 @@
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-ZT5QFTX6.js";
+} from "./chunk-SN3ANQ3Y.js";
 import {
   DATASETS,
   LIMITS,
@@ -12,7 +12,7 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-QH3RSODB.js";
+} from "./chunk-Q6LI4T7M.js";
 import {
   P,
   __commonJS,
