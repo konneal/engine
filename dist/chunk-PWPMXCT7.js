@@ -1660,7 +1660,7 @@ Answer account questions from these records ONLY: name the record when you use i
             // the evidence view's ground truth: the exact passages this
             // answer was built from, compact — cache hits carry none,
             // because the cache stores the answer and never the passages
-            passages: used.slice(0, 8).map((h) => ({ d: h.metadata.docidentifier ?? "", a: h.metadata.clause_anchor ?? "", t: (h.text ?? "").slice(0, 600) }))
+            passages: usedHits.slice(0, 8).map((h) => ({ d: h.metadata.docidentifier ?? "", a: h.metadata.clause_anchor ?? "", t: (h.text ?? "").slice(0, 600) }))
           });
           telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang, void 0, telemetryMeta());
           const canonical = c2.text;
