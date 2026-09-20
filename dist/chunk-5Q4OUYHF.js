@@ -1275,7 +1275,7 @@ async function handleAsk(env, ctx, req, tier, key) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact", telemetryMeta());
     const cctx = cached.value.context_applied ?? NO_CONTEXT;
     if (wantsStream) {
-      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, context_applied: cctx }], corsHeaders(req));
+      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, served_from: "cache", context_applied: cctx }], corsHeaders(req));
     }
     return json({ ...cached.value, cached: true, quota, context_applied: cctx });
   }
@@ -1302,7 +1302,7 @@ async function handleAsk(env, ctx, req, tier, key) {
         telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang, "semantic", telemetryMeta());
         const cctx0 = sc0.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
-          return sseResponse([{ type: "citations", citations: sc0.citations ?? [], context_applied: cctx0 }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true, context_applied: cctx0 }], corsHeaders(req));
+          return sseResponse([{ type: "citations", citations: sc0.citations ?? [], context_applied: cctx0 }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true, served_from: "similar", context_applied: cctx0 }], corsHeaders(req));
         }
         return json({ ...sc0, similar: true, context_applied: cctx0, quota });
       }
@@ -1400,7 +1400,7 @@ async function handleAsk(env, ctx, req, tier, key) {
         telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang, "semantic", telemetryMeta());
         const cctx = sc.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
-          return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: cctx }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, context_applied: cctx }], corsHeaders(req));
+          return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: cctx }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, served_from: "similar", context_applied: cctx }], corsHeaders(req));
         }
         return json({ ...sc, similar: true, context_applied: cctx, quota });
       }
@@ -1650,7 +1650,18 @@ Answer account questions from these records ONLY: name the record when you use i
           }
           const canonical0 = canonicalRefusal(full);
           const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
-          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: verdictBlock ? [...c2.blocks, verdictBlock] : c2.blocks, context_applied: ctxApplied });
+          send({
+            type: "done",
+            model,
+            query_hash: queryHash,
+            follow_ups: understanding?.follow_ups ?? [],
+            blocks: verdictBlock ? [...c2.blocks, verdictBlock] : c2.blocks,
+            context_applied: ctxApplied,
+            // the evidence view's ground truth: the exact passages this
+            // answer was built from, compact — cache hits carry none,
+            // because the cache stores the answer and never the passages
+            passages: used.slice(0, 8).map((h) => ({ d: h.metadata.docidentifier ?? "", a: h.metadata.clause_anchor ?? "", t: (h.text ?? "").slice(0, 600) }))
+          });
           telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang, void 0, telemetryMeta());
           const canonical = c2.text;
           const streamedAnchors = checkQuoteAnchors(canonical, usedHits.map((h) => h.text));
