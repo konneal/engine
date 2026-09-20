@@ -4,7 +4,7 @@ import { LIMITS, MODELS, DATASETS, THRESHOLDS, processExpansion } from "./config
 import systemPromptText from "../prompts/system.md";
 import conversationalPromptText from "../prompts/conversational.md";
 import listwisePromptText from "../prompts/listwise.md";
-import { tableContext } from "./tablecontext";
+import { tableSelection } from "./tablecontext";
 
 // the pinned refusal sentence lives with the canonicalizer in ./refusal
 // (refusals are never cached: a refusal says "retrieval found nothing",
@@ -337,7 +337,9 @@ export function buildMessages(
     const head = `[${usedHits.length + 1}] ${label}${unitTag} ${h.metadata.clause_title ? "— " + h.metadata.clause_title : ""}\n`;
     // tables: schema-aware pruning from the producer payload; the
     // stored text is the fallback (pruning never goes below baseline)
-    const pruned = (h.metadata as any).block === "table" ? tableContext(h.metadata, query) : null;
+    const tableSel = (h.metadata as any).block === "table" ? tableSelection(h.metadata, query) : null;
+    const pruned = tableSel?.text ?? null;
+    if (tableSel) (h.metadata as any).table_selection = { cols: tableSel.cols, rowsShown: tableSel.rowsShown, rowsTotal: tableSel.rowsTotal };
     const body = clipToTokens(pruned ?? h.text, LIMITS.maxPassageTokens);
     const t = estTokens(head) + estTokens(body);
     if (t <= remain) {

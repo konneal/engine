@@ -905,7 +905,7 @@ async function handleAsk(
             // the evidence view's ground truth: the exact passages this
             // answer was built from, compact — cache hits carry none,
             // because the cache stores the answer and never the passages
-            passages: usedHits.slice(0, 8).map((h: Hit) => ({ d: h.metadata.docidentifier ?? "", a: h.metadata.clause_anchor ?? "", t: (h.text ?? "").slice(0, 600) })) });
+            passages: usedHits.slice(0, 8).map((h: Hit) => ({ d: h.metadata.docidentifier ?? "", a: h.metadata.clause_anchor ?? "", t: (h.text ?? "").slice(0, 600), ...((h.metadata as any).table_selection ? { s: (h.metadata as any).table_selection } : {}) })) });
           telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang, undefined, telemetryMeta());
           const canonical = c2.text;
           // streamed answers can't be regenerated mid-flight; enforcement
@@ -1097,6 +1097,7 @@ async function handleAsk(
     doc_id: h.metadata.doc_id,
     clause_anchor: h.metadata.clause_anchor,
     text: h.text.slice(0, 1200),
+    ...((h.metadata as any).table_selection ? { sel: (h.metadata as any).table_selection } : {}),
   }));
   return json({ ...out, context: contextOut, read: readAs(), quota }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
 }

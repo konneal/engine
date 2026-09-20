@@ -8,7 +8,14 @@
  *  selected column labels. Full table stays available for rendering;
  *  this only shapes the prompt context, and falls back to the stored
  *  text when pruning matches nothing (never worse than baseline). */
-export function tableContext(meta: any, query: string): string | null {
+export interface TableSelection {
+  text: string;
+  cols: string[];
+  rowsShown: number;
+  rowsTotal: number;
+}
+
+export function tableSelection(meta: any, query: string): TableSelection | null {
   const t: any = meta?.table;
   if (!t || !Array.isArray(t.columns) || !Array.isArray(t.rows) || !t.rows.length) return null;
   const terms = new Set(
@@ -37,5 +44,9 @@ export function tableContext(meta: any, query: string): string | null {
     rowHits.length > CAP || rowHits.length < t.rows.length
       ? `\n(${shown.length} of ${t.rows.length} rows shown; ${t.rows.length - rowHits.length} rows did not match the question terms)`
       : "";
-  return `${header}\n${lines.join("\n")}${elided}`;
+  return { text: `${header}\n${lines.join("\n")}${elided}`, cols: colKeep.map((i: number) => `${t.columns[i]?.label ?? ""}${t.columns[i]?.unit ? ` [${t.columns[i].unit}]` : ""}`), rowsShown: shown.length, rowsTotal: t.rows.length };
+}
+
+export function tableContext(meta: any, query: string): string | null {
+  return tableSelection(meta, query)?.text ?? null;
 }
