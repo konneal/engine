@@ -886,6 +886,9 @@ async function handleAsk(
       const sse = new ReadableStream({
         async start(controller) {
           const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+          // the reading arrives first: the interpretation that steered
+          // retrieval, before a single token of the answer
+          send({ type: "read", read: readAs() });
           send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), quota, });
           let full = "";
           try {

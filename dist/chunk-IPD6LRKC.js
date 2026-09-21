@@ -1647,6 +1647,7 @@ Answer account questions from these records ONLY: name the record when you use i
           const send = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}
 
 `));
+          send({ type: "read", read: readAs() });
           send({ type: "citations", citations: cites, context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, quota });
           let full = "";
           try {
