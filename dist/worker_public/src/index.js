@@ -7,7 +7,7 @@ import {
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-3OXSQH7Y.js";
+} from "../../chunk-PVHSBXZD.js";
 import "../../chunk-LNSDBEKS.js";
 import {
   buildMessages,
@@ -282,11 +282,31 @@ async function handleShareConversation(env, ownerSub, title, messages) {
   if (count >= 10) return err(429, "rate_limited", "Daily share limit reached");
   await env.CACHE.put(`sh:${day}:${ownerSub.slice(0, 20)}`, String(count + 1), { expirationTtl: 9e4 });
   const slug = makeSlug();
-  const cleanMessages = messages.slice(0, 50).map((m) => ({
-    role: m.role === "user" ? "user" : "assistant",
-    content: (m.content ?? "").slice(0, LIMITS.maxOutputTokens * 2),
-    citations: m.citations ? JSON.parse(m.citations) : null
-  }));
+  const cleanMessages = messages.slice(0, 50).map((m) => {
+    const citations2 = Array.isArray(m.citations) ? m.citations : typeof m.citations === "string" ? (() => {
+      try {
+        return JSON.parse(m.citations);
+      } catch {
+        return null;
+      }
+    })() : null;
+    const read = m.read && typeof m.read === "object" ? {
+      intent: String(m.read.intent ?? ""),
+      doc: m.read.doc ?? null,
+      edition: m.read.edition ?? null,
+      term: m.read.term ?? null,
+      terms: Array.isArray(m.read.terms) ? m.read.terms.slice(0, 4).map(String) : [],
+      lang: m.read.lang ?? null
+    } : void 0;
+    return {
+      role: m.role === "user" ? "user" : "assistant",
+      content: (m.content ?? "").slice(0, LIMITS.maxOutputTokens * 2),
+      citations: citations2,
+      ...m.model ? { model: String(m.model).slice(0, 80) } : {},
+      ...Array.isArray(m.blocks) ? { blocks: m.blocks.slice(0, 12) } : {},
+      ...read ? { read } : {}
+    };
+  });
   await env.DB.prepare(
     "INSERT INTO shared_conversations (slug, owner_sub, title, messages, created_at) VALUES (?1,?2,?3,?4,?5)"
   ).bind(slug, ownerSub, title.slice(0, 120), JSON.stringify(cleanMessages), (/* @__PURE__ */ new Date()).toISOString()).run();
@@ -956,7 +976,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-47RNGK2R.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-OMPBMZT4.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-VFSAF5WG.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-OMPBMZT4.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });

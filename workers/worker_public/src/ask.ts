@@ -551,9 +551,14 @@ async function handleAsk(
         telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang, "semantic", telemetryMeta());
         const cctx = sc.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
-          return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: cctx }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, served_from: "similar", context_applied: cctx }], corsHeaders(req));
+          return sseResponse([
+            ...(readAs() ? [{ type: "read", read: readAs() }] : []),
+            { type: "citations", citations: sc.citations ?? [], context_applied: cctx },
+            { type: "token", v: sc.answer },
+            { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, served_from: "similar", context_applied: cctx, read: readAs() },
+          ], corsHeaders(req));
         }
-        return json({ ...sc, similar: true, context_applied: cctx, quota, });
+        return json({ ...sc, similar: true, context_applied: cctx, read: readAs(), quota, });
       }
     }
   }
@@ -579,6 +584,8 @@ async function handleAsk(
         const sse = new ReadableStream({
           async start(controller) {
             const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+            // the reading arrives first — a conversational turn is still a reading
+            if (readAs()) send({ type: "read", read: readAs() });
             send({ type: "citations", citations: [], context_applied: NO_CONTEXT, quota, });
             let full = "";
             try {
@@ -589,7 +596,7 @@ async function handleAsk(
             } catch {
               // stream ended prematurely — deliver what we have
             }
-            send({ type: "done", model, query_hash: queryHash, context_applied: NO_CONTEXT });
+            send({ type: "done", model, query_hash: queryHash, context_applied: NO_CONTEXT, read: readAs() });
             telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang, undefined, telemetryMeta());
             controller.close();
           },
@@ -606,7 +613,7 @@ async function handleAsk(
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
     telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang, undefined, telemetryMeta());
-    return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: NO_CONTEXT, quota, });
+    return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: NO_CONTEXT, read: readAs(), quota, });
   }
 
   // ── The draft act (TODO.ai-platform/04) — the assistant PREPARES, the
@@ -652,14 +659,15 @@ async function handleAsk(
     if (wantsStream) {
       return sseResponse(
         [
+          ...(readAs() ? [{ type: "read", read: readAs() }] : []),
           { type: "citations", citations, context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, },
           { type: "token", v: verdict.answer },
-          { type: "done", model, query_hash: queryHash, context_applied: draftCtxApplied },
+          { type: "done", model, query_hash: queryHash, context_applied: draftCtxApplied, read: readAs() },
         ],
         corsHeaders(req),
       );
     }
-    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, });
+    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), quota, });
   }
 
   // (declared before the retrieval try: the account block, the refusal
@@ -886,6 +894,9 @@ async function handleAsk(
       const sse = new ReadableStream({
         async start(controller) {
           const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+          // the reading arrives first: the interpretation that steered
+          // retrieval, before a single token of the answer
+          send({ type: "read", read: readAs() });
           send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), quota, });
           let full = "";
           try {

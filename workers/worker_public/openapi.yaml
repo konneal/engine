@@ -102,7 +102,8 @@ paths:
         Identical to /api/ask, with authentication by API key and a
         per-key daily allowance. Streaming responses are available by
         setting stream to true, which returns a server-sent event stream
-        whose events carry citations, tokens and the completion marker.
+        whose first event is the reading, then the citations, then the
+        answer tokens, and finally the completion marker.
       operationId: askKeyed
       security:
         - bearerAuth: []
@@ -1103,8 +1104,10 @@ components:
           type: boolean
           default: false
           description: >-
-            When true, the response is a server-sent event stream whose
-            events carry citations, tokens and the completion marker.
+            When true, the response is a server-sent event stream. The
+            first event is the reading (how the service interpreted the
+            question), then the citations, then the answer tokens, and
+            finally the completion marker.
         fresh:
           type: boolean
           default: false
@@ -1164,6 +1167,28 @@ components:
         query_hash:
           type: string
           description: The hash of the question, used for feedback.
+        read:
+          type: object
+          description: >-
+            How the service read the question — the interpretation that
+            steered retrieval. Present on fresh answers; absent on exact
+            cache hits, which never re-ran understanding.
+          properties:
+            intent: { type: string }
+            doc: { type: string, nullable: true }
+            edition: { type: string, nullable: true }
+            term: { type: string, nullable: true }
+            terms:
+              type: array
+              items: { type: string }
+            lang: { type: string, nullable: true }
+        served_from:
+          type: string
+          enum: [cache, similar]
+          description: >-
+            Present when the answer was served from the answer cache for
+            an identical or similar earlier question. The cache stores the
+            answer and never the passages.
         quota:
           type: object
           description: The remaining daily allowance.
