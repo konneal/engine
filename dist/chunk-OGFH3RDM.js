@@ -1,8 +1,4 @@
 import {
-  requestSalt,
-  resolveRequestScope
-} from "./chunk-LNSDBEKS.js";
-import {
   NO_CONTEXT,
   appliedContext,
   buildMessages,
@@ -31,18 +27,23 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-6GOSMLRH.js";
+} from "./chunk-RLT4W2VX.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-SN3ANQ3Y.js";
+} from "./chunk-EFQALN2Z.js";
 import {
   canonicalRefusal,
   refusalAnswer
-} from "./chunk-WGXATDXY.js";
+} from "./chunk-DBBGOOMZ.js";
+import {
+  entitlementScope,
+  requestSalt,
+  resolveRequestScope
+} from "./chunk-5MBWE7WD.js";
 import {
   LIMITS,
   MODELS,
@@ -52,10 +53,10 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-Q6LI4T7M.js";
+} from "./chunk-ADXV2DPK.js";
 import {
   P
-} from "./chunk-Q327B27J.js";
+} from "./chunk-TJRTVJW5.js";
 
 // workers/worker_public/src/internal_gateway.ts
 async function retrieveInternal(service, auth, query) {
@@ -355,6 +356,30 @@ function standardForDocNumber(docNumber) {
   if (!models?.standards?.length || !models?.standard_prefix) return null;
   return models.standards.includes(docNumber) ? `${models.standard_prefix}${docNumber}` : null;
 }
+function licensedEntryForPackage(packageId) {
+  if (!packageId) return null;
+  return (P().sources?.licensed ?? []).find((l) => l.package === packageId) ?? null;
+}
+function licensedEntryForDocNumber(docNumber) {
+  if (!docNumber) return null;
+  return (P().sources?.licensed ?? []).find((l) => String(l.doc_number ?? "") === docNumber) ?? null;
+}
+function licenseBoundaryNote(docNumber, standardKeys) {
+  const entry = licensedEntryForDocNumber(docNumber);
+  if (!entry || standardKeys && standardKeys.has(entry.key)) return void 0;
+  const pointer = P().prompts?.vars?.license_declare_pointer;
+  return `License boundary \u2014 the question is about ${licenseBoundaryName(entry)}, a licensed publication (entitlement key ${entry.key}). The caller's organization license does not cover its text, so no passage of it was retrieved and NONE of its procedural content (steps, parameters, severities, limits) may be stated, paraphrased or recalled from memory. You MAY answer at the citation level: name the standard and edition, and cite the invoking clause from the PUBLIC passages in context (the Recommendation's own applicability and normative references are public and stay answerable). Then say the organization's license does not cover the standard's text` + (pointer ? ` and point to the declare flow: ${pointer}.` : ".");
+}
+function licenseBoundaryName(entry) {
+  const id = entry.doc_number ? ` ${entry.doc_number}` : ` ${entry.package}`;
+  return `${entry.title ?? "standard"}${entry.edition ? ` (${entry.edition})` : ""} \u2014${id}`;
+}
+function licenseBoundaryRefusal(docNumber, standardKeys) {
+  const entry = licensedEntryForDocNumber(docNumber);
+  if (!entry || standardKeys && standardKeys.has(entry.key)) return void 0;
+  const pointer = P().prompts?.vars?.license_declare_pointer;
+  return `${licenseBoundaryName(entry)} is a licensed publication and your organization's license does not cover its text, so I can't quote or summarize its procedure. I can answer at the citation level \u2014 the standard's title and edition, and the clause your Recommendation invokes \u2014 and the public ${P().publisher.name} content in full.` + (pointer ? ` To unlock the full text, an org admin can declare the license under ${pointer}.` : "");
+}
 async function fetchNode(env, standard, nodeId) {
   try {
     const row = await env.DB.prepare(
@@ -378,11 +403,16 @@ async function fetchNode(env, standard, nodeId) {
 async function bindModelNode(env, opts) {
   const nodeId = modelNodeRefIn(opts.label) ?? modelNodeRefIn(opts.query);
   if (!nodeId) return null;
-  if (opts.standard) return fetchNode(env, opts.standard, nodeId);
+  const gate = (node) => {
+    if (!node) return null;
+    const entry = licensedEntryForPackage(node.standard);
+    return entry && !(opts.standardKeys?.has(entry.key) ?? false) ? { ...node, gated: true, content: {} } : node;
+  };
+  if (opts.standard) return gate(await fetchNode(env, opts.standard, nodeId));
   try {
     const rows = await env.DB.prepare("SELECT standard FROM model_nodes WHERE node_id = ?1 LIMIT 2").bind(nodeId).all();
     const standards = (rows?.results ?? []).map((r) => String(r.standard));
-    if (standards.length === 1) return fetchNode(env, standards[0], nodeId);
+    if (standards.length === 1) return gate(await fetchNode(env, standards[0], nodeId));
     return null;
   } catch {
     return null;
@@ -1257,6 +1287,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   const scope = resolveRequestScope(body, member);
   if ("error" in scope) return err(400, "invalid_input", "datasets: at least one dataset must stay enabled");
   const { corpora, narrowed, isoOn } = scope;
+  const standardKeys = entitlementScope(scope.standardKeys);
   const [memNote, memoryUsed] = member && scope.memoryIds.length ? await memoryNote(env, member.sub, scope.memoryIds) : [null, []];
   const requestSaltStr = requestSalt(scope, memoryUsed);
   const salt = requestSaltStr ? `${requestSaltStr}|effort:${effort}` : `effort:${effort}`;
@@ -1510,14 +1541,15 @@ ${summary}` }] : [],
   const boundModel = P().publisher.features?.model_plane ? await bindModelNode(env, {
     label: declaredCtx?.label,
     query: q.query,
-    standard: standardForDocNumber(modelDocHint?.doc_number)
+    standard: standardForDocNumber(modelDocHint?.doc_number),
+    standardKeys
   }) : null;
   if (boundModel) {
     ctxApplied = { ...ctxApplied, model: modelEcho(boundModel) };
-    console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause");
+    console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause", boundModel.gated ? "(gated: license)" : "");
   }
-  const modelNote = boundModel ? modelGroundingBlock(boundModel) : void 0;
-  const machineVerdict = boundModel ? evaluate(boundModel.content, q.query) : null;
+  const modelNote = boundModel && !boundModel.gated ? modelGroundingBlock(boundModel) : void 0;
+  const machineVerdict = boundModel && !boundModel.gated ? evaluate(boundModel.content, q.query) : null;
   const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : void 0;
   const verdictBlock = machineVerdict ? {
     unit_id: boundModel.node_id,
@@ -1566,7 +1598,8 @@ Answer account questions from these records ONLY: name the record when you use i
       sealScope: declaredScoped ? docScope : null,
       optimisticHits,
       optimisticVec,
-      datasetScope: narrowed ? corpora : null
+      datasetScope: narrowed ? corpora : null,
+      standardKeys
     });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
@@ -1590,7 +1623,7 @@ Answer account questions from these records ONLY: name the record when you use i
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second;
@@ -1601,13 +1634,14 @@ Answer account questions from these records ONLY: name the record when you use i
     return err(503, "retrieval_unavailable", "Search is briefly busy \u2014 please retry in a moment.");
   }
   const { hits } = retrieved;
-  if (hits.length === 0 && !liveRecords?.length && !boundModel) {
-    const answer2 = refusalAnswer();
+  if (hits.length === 0 && !liveRecords?.length && (!boundModel || boundModel.gated)) {
+    const answer2 = licenseBoundaryRefusal(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys) ?? refusalAnswer();
     const out2 = { answer: answer2, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
     telemetry(env, ctx, tier, "ask", model, true, answer2.length, out2.query_hash, q.lang, void 0, telemetryMeta());
     return json({ ...out2, quota });
   }
   const processNote = understanding?.process_intent ? P().retrieval.process_note : void 0;
+  const licenseNote = licenseBoundaryNote(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys);
   const glossaryForNote = (() => {
     const g = retrieved.glossary ?? [];
     if (!g.length) return g;
@@ -1623,7 +1657,7 @@ Answer account questions from these records ONLY: name the record when you use i
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
     summary,
     budget
   );
@@ -1758,7 +1792,8 @@ Answer account questions from these records ONLY: name the record when you use i
         prev,
         understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` },
         sealScope: declaredScoped ? docScope : null,
-        datasetScope: narrowed ? corpora : null
+        datasetScope: narrowed ? corpora : null,
+        standardKeys
       });
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, void 0, summary, budget);

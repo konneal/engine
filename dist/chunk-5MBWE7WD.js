@@ -1,9 +1,25 @@
 import {
   DATASETS,
   datasetAllowed
-} from "./chunk-Q6LI4T7M.js";
+} from "./chunk-ADXV2DPK.js";
+import {
+  P
+} from "./chunk-TJRTVJW5.js";
 
 // workers/worker_public/src/requestScope.ts
+function licenseDeclared() {
+  return (P().sources?.licensed?.length ?? 0) > 0;
+}
+function standardKeysFrom(body) {
+  const declared = new Set((P().sources?.licensed ?? []).map((l) => String(l.key)));
+  const raw = Array.isArray(body?.licensed_standards) ? body.licensed_standards : [];
+  return new Set(
+    raw.filter((x) => typeof x === "string" && declared.has(x))
+  );
+}
+function entitlementScope(keys) {
+  return licenseDeclared() ? keys : null;
+}
 function resolveRequestScope(body, member) {
   const allIds = DATASETS().map((d) => d.id);
   const requested = Array.isArray(body?.datasets) ? body.datasets.filter((x) => typeof x === "string" && allIds.includes(x)) : null;
@@ -25,18 +41,27 @@ function resolveRequestScope(body, member) {
     narrowed: scopeIds.length < permittedIds.length,
     // federation flag: any session-gated (federated) dataset in scope
     isoOn: scopeIds.some((id) => DATASETS().find((x) => x.id === id)?.session === true),
-    memoryIds
+    memoryIds,
+    standardKeys: standardKeysFrom(body)
   };
 }
 function requestSalt(scope, memoryUsed) {
-  if (!scope.narrowed && !memoryUsed.length) return null;
+  const licensed = licenseDeclared();
+  if (!scope.narrowed && !memoryUsed.length && !licensed) return null;
   return JSON.stringify({
     ...scope.narrowed ? { d: [...scope.corpora].sort() } : {},
-    ...memoryUsed.length ? { m: [...memoryUsed].sort() } : {}
+    ...memoryUsed.length ? { m: [...memoryUsed].sort() } : {},
+    // the entitlement set rides whenever the deployment keys content at
+    // all — an unentitled ask and an entitled ask of the same text are
+    // different answers even when the set is empty
+    ...licensed ? { s: [...scope.standardKeys].sort() } : {}
   });
 }
 
 export {
+  licenseDeclared,
+  standardKeysFrom,
+  entitlementScope,
   resolveRequestScope,
   requestSalt
 };

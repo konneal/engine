@@ -54,6 +54,13 @@ export declare const PROFILE: {
         readonly bibliography: {};
         readonly terminology: {};
         readonly models: {};
+        readonly licensed: readonly [{
+            readonly key: "std:fixture-60068-2-30";
+            readonly package: "fixture-60068-2-30";
+            readonly doc_number: "60068-2-30";
+            readonly title: "FIXTURE environmental testing — damp heat, cyclic";
+            readonly edition: "2005";
+        }];
     };
     readonly ui: {
         readonly suggestions: readonly ["What is in the fixture corpus?", "Which documents does the fixture publisher issue?"];
@@ -85,6 +92,8 @@ export declare const PROFILE: {
             readonly docid_example: "FIXTURE 1-2";
             readonly spelling_examples: "\"f1\", \"FIXTURE 1\"";
             readonly process_vocab: "the fixture certification system framework";
+            readonly license_declare_pointer: "org admin → Settings → Standards licenses";
+            readonly license_posture: "Some indexed publications are LICENSED. When a license boundary note names the question's publication, obey it: answer at the citation level only — the standard's title and edition, and the invoking clause the public passages carry — never state, paraphrase or \"summarize from memory\" any procedure of the licensed text, and point at the declare flow the note names. Public content (the Recommendations' own models, applicability and references) stays fully answerable.";
         };
     };
 };
