@@ -36,6 +36,17 @@ export interface RetrieveOptions {
    *  intersects the requested ids with session permissions before
    *  building this set. */
   datasetScope?: Set<string> | null;
+  /** The license entitlement set (TODO.external-refs/08): the standard
+   *  keys the caller's organization is entitled to, resolved
+   *  request-scoped by the deployment (never a client-tunable filter —
+   *  it arrives through the same trusted request context as the session,
+   *  and the profile's declared licensed list is the validation
+   *  whitelist). NON-NULL activates the hard scope: chunks carrying a
+   *  `standard_key` outside the set never reach ranking (an EMPTY set is
+   *  the unentitled caller — licensed content hidden, citation-level
+   *  metadata stays). Null = the deployment declares no licensed
+   *  content, the scope is inert. */
+  standardKeys?: Set<string> | null;
 }
 
 export interface GlossaryEntry {

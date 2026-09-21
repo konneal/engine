@@ -77,7 +77,16 @@ export const PROFILE = {
     },
     "bibliography": {},
     "terminology": {},
-    "models": {}
+    "models": {},
+    "licensed": [
+      {
+        "key": "std:fixture-60068-2-30",
+        "package": "fixture-60068-2-30",
+        "doc_number": "60068-2-30",
+        "title": "FIXTURE environmental testing — damp heat, cyclic",
+        "edition": "2005"
+      }
+    ]
   },
   "ui": {
     "suggestions": [
@@ -115,7 +124,9 @@ export const PROFILE = {
       "parts_example": "FIXTURE 1-1, FIXTURE 1-A",
       "docid_example": "FIXTURE 1-2",
       "spelling_examples": "\"f1\", \"FIXTURE 1\"",
-      "process_vocab": "the fixture certification system framework"
+      "process_vocab": "the fixture certification system framework",
+      "license_declare_pointer": "org admin → Settings → Standards licenses",
+      "license_posture": "Some indexed publications are LICENSED. When a license boundary note names the question's publication, obey it: answer at the citation level only — the standard's title and edition, and the invoking clause the public passages carry — never state, paraphrase or \"summarize from memory\" any procedure of the licensed text, and point at the declare flow the note names. Public content (the Recommendations' own models, applicability and references) stays fully answerable."
     }
   }
 } as const;

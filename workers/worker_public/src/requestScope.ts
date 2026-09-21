@@ -1,10 +1,12 @@
 // The per-request scope model (MECE: ask.ts orchestrates, this module
 // owns the derivation): which DATASETS the request searches (the sidebar
-// toggles, server-intersected with session permissions) and which
-// memory files ride it — plus the answer-cache SALT both selections
+// toggles, server-intersected with session permissions), which memory
+// files ride it, and which LICENSED standards the caller's organization
+// is entitled to — plus the answer-cache SALT all three selections
 // produce. Pure: D1 access stays with the caller (memoryNote); this
 // module only derives.
 import { DATASETS, datasetAllowed } from "./config.ts";
+import { P } from "./profile.ts";
 
 export interface RequestScope {
   /** dataset ids the request may search */
@@ -18,6 +20,37 @@ export interface RequestScope {
   isoOn: boolean;
   /** raw (validated) memory ids from the body — empty for anon */
   memoryIds: string[];
+  /** raw (validated) license entitlement keys from the body — empty for
+   *  anon and for requests that carry none (TODO.external-refs/08) */
+  standardKeys: Set<string>;
+}
+
+/** The deployment's declared licensed standards (profile sources.yaml
+ *  `licensed:` — key/package/doc_number rows). Empty = the deployment
+ *  serves public content only and the entitlement scope is inert. */
+export function licenseDeclared(): boolean {
+  return (P().sources?.licensed?.length ?? 0) > 0;
+}
+
+/** The request's entitlement set, VALIDATED against the declared
+ *  whitelist: unknown keys drop (a forged key can never widen scope past
+ *  the standards the deployment actually keys). Absent field = empty set
+ *  — the fail-closed default for a deployment that declares licensed
+ *  content. */
+export function standardKeysFrom(body: any): Set<string> {
+  const declared = new Set<string>((P().sources?.licensed ?? []).map((l: any) => String(l.key)));
+  const raw = Array.isArray(body?.licensed_standards) ? body.licensed_standards : [];
+  return new Set(
+    raw.filter((x: unknown): x is string => typeof x === "string" && declared.has(x)),
+  );
+}
+
+/** The RetrieveOptions value for the hard scope: null when the
+ *  deployment declares no licensed content (inert — zero behavior
+ *  change); otherwise the caller's validated set, EMPTY INCLUDED (the
+ *  unentitled caller: licensed chunks hidden, citation metadata stays). */
+export function entitlementScope(keys: Set<string>): Set<string> | null {
+  return licenseDeclared() ? keys : null;
 }
 
 /** Validate + intersect. Returns { error } when the request explicitly
@@ -54,18 +87,27 @@ export function resolveRequestScope(body: any, member: unknown): RequestScope | 
     // federation flag: any session-gated (federated) dataset in scope
     isoOn: scopeIds.some((id) => DATASETS().find((x) => x.id === id)?.session === true),
     memoryIds,
+    standardKeys: standardKeysFrom(body),
   };
 }
 
 /** The answer-cache salt: request-scoped context that materially changes
- *  the answer (dataset scope, memory selection). Requests differing only
- *  in salt share query text — an unsalted key would serve a scoped (or
- *  memory-flavored) answer to a plain ask. Null = default scope, no
- *  memory: keys stay byte-identical to the pre-salt era. */
+ *  the answer (dataset scope, memory selection, license entitlements —
+ *  the licensed tier changes the grounding, so two callers asking the
+ *  same question must never share an entry). Requests differing only in
+ *  salt share query text — an unsalted key would serve a scoped (or
+ *  memory-flavored, or licensed-tier) answer to a plain ask. Null =
+ *  default scope, no memory, no entitlement effect: keys stay
+ *  byte-identical to the pre-salt era. */
 export function requestSalt(scope: RequestScope, memoryUsed: string[]): string | null {
-  if (!scope.narrowed && !memoryUsed.length) return null;
+  const licensed = licenseDeclared();
+  if (!scope.narrowed && !memoryUsed.length && !licensed) return null;
   return JSON.stringify({
     ...(scope.narrowed ? { d: [...scope.corpora].sort() } : {}),
     ...(memoryUsed.length ? { m: [...memoryUsed].sort() } : {}),
+    // the entitlement set rides whenever the deployment keys content at
+    // all — an unentitled ask and an entitled ask of the same text are
+    // different answers even when the set is empty
+    ...(licensed ? { s: [...scope.standardKeys].sort() } : {}),
   });
 }

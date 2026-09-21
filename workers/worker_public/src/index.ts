@@ -14,6 +14,7 @@ import { scoreFaithfulness } from "./faithfulness";
 import { checkQuoteAnchors } from "./anchors";
 import { namedDocumentIn } from "./context";
 import { standardForDocNumber } from "./modelplane";
+import { entitlementScope, standardKeysFrom } from "./requestScope";
 import type { Env } from "./env";
 export type { Env };
 import { json, err, corsHeaders, withCors, readJson, authenticate, type ApiKey } from "./lib/http";
@@ -227,7 +228,7 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
   if (!answer || !query) return err(400, "invalid_input", "answer and query are required");
   try {
     const u = await understandQuery(env.AI, roleModel(env, "understand"), query, [], []);
-    const retrieved = await retrieve(env, query, { understanding: u });
+    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)) });
     const passages = retrieved.hits.map((h: Hit) => h.text);
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);

@@ -19,11 +19,11 @@ import { contractV2, tableRetyped } from "./refs";
 import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
-import { bindModelNode, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
+import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { memoryNote } from "./memories";
-import { resolveRequestScope, requestSalt } from "./requestScope";
+import { entitlementScope, resolveRequestScope, requestSalt } from "./requestScope";
 import { rawSessionToken } from "./session";
 import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested, semanticCacheKey } from "./answercache";
 import type { Env } from "./env";
@@ -308,6 +308,13 @@ async function handleAsk(
   const scope = resolveRequestScope(body, member);
   if ("error" in scope) return err(400, "invalid_input", "datasets: at least one dataset must stay enabled");
   const { corpora, narrowed, isoOn } = scope;
+  // The license entitlement set (TODO.external-refs/08): request-scoped,
+  // validated against the profile's declared licensed list; the hard
+  // retrieval scope it feeds is fail-closed (an unentitled ask — empty
+  // set, the anon default — never sees licensed chunks, citation-level
+  // metadata stays). It salts the answer cache with the effort segment
+  // below.
+  const standardKeys = entitlementScope(scope.standardKeys);
   // Personalized memory files (#171): member-scoped, selected per ask;
   // the note rides buildMessages as a trusted-user-facts preamble, and
   // the selections SALT the answer cache (requestScope.requestSalt).
@@ -692,18 +699,23 @@ async function handleAsk(
         label: declaredCtx?.label,
         query: q.query,
         standard: standardForDocNumber(modelDocHint?.doc_number),
+        standardKeys,
       })
     : null;
   if (boundModel) {
     ctxApplied = { ...ctxApplied, model: modelEcho(boundModel) };
-    console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause");
+    console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause", boundModel.gated ? "(gated: license)" : "");
   }
-  const modelNote = boundModel ? modelGroundingBlock(boundModel) : undefined;
+  // A GATED binding (licensed package, unentitled caller) keeps its
+  // citation + echo — metadata the honesty posture keeps — and withholds
+  // the grounding block and the verdict engine: no licensed machine
+  // content enters the prompt by the binding lane either.
+  const modelNote = boundModel && !boundModel.gated ? modelGroundingBlock(boundModel) : undefined;
   // ── the verdict engine (TODO.era3/01) ──
   // the worker EXECUTES the bound node's machine checks against the
   // question's stated values; the model narrates the computed verdict
   // and the verdict BLOCK is server-built — data, never generated prose
-  const machineVerdict = boundModel ? machineEvaluate(boundModel.content, q.query) : null;
+  const machineVerdict = boundModel && !boundModel.gated ? machineEvaluate(boundModel.content, q.query) : null;
   const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : undefined;
   const verdictBlock = machineVerdict
     ? {
@@ -776,7 +788,7 @@ async function handleAsk(
     // publications there).
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
       sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec,
-      datasetScope: narrowed ? corpora : null });
+      datasetScope: narrowed ? corpora : null, standardKeys });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
@@ -810,7 +822,7 @@ async function handleAsk(
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h: Hit) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better
@@ -821,8 +833,13 @@ async function handleAsk(
     return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
   }
   const { hits } = retrieved;
-  if (hits.length === 0 && !liveRecords?.length && !boundModel) {
-    const answer = refusalAnswer();
+  if (hits.length === 0 && !liveRecords?.length && (!boundModel || boundModel.gated)) {
+    // the license boundary refusal (TODO.external-refs/08) outranks the
+    // plain "no information" sentence when the question's publication is
+    // licensed and unentitled: name the standard, state the boundary,
+    // point at the declare flow
+    const answer =
+      licenseBoundaryRefusal(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys) ?? refusalAnswer();
     const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
     telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang, undefined, telemetryMeta());
     return json({ ...out, quota, });
@@ -831,6 +848,11 @@ async function handleAsk(
   const processNote = understanding?.process_intent
     ? P().retrieval.process_note
     : undefined;
+  // the license boundary (TODO.external-refs/08): the question's named or
+  // understood publication is licensed and the caller's set lacks the key
+  // — the refusal-class note rides the retrieval-note channel beside the
+  // other structured facts
+  const licenseNote = licenseBoundaryNote(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys);
   // the vocabulary binding (L2): the corpus's defined-term candidates for
   // the question's subject — the model adjudicates among them and uses
   // the corpus term (with its defining publication) when it names the
@@ -859,7 +881,7 @@ async function handleAsk(
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
@@ -1046,6 +1068,7 @@ async function handleAsk(
         understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` } as any,
         sealScope: declaredScoped ? docScope : null,
         datasetScope: narrowed ? corpora : null,
+        standardKeys,
       });
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);

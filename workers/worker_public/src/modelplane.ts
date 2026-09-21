@@ -52,6 +52,82 @@ export function standardForDocNumber(docNumber: string | undefined): string | nu
   return (models.standards as string[]).includes(docNumber) ? `${models.standard_prefix}${docNumber}` : null;
 }
 
+// ── the license tier (TODO.external-refs/08) ─────────────────────────────
+// The profile's `sources.licensed` rows ({key, package, doc_number,
+// title, edition}) are the deployment's declared licensed standards —
+// the same keys the chunk metadata carries (`standard_key`) and the
+// entitlement set arrives with (requestScope.standardKeysFrom validates
+// against exactly this list).
+
+/** The license entry for a package id (the model-plane standard id, e.g.
+ *  `iec-60068-2-30`), or null when the package is public content. */
+export function licensedEntryForPackage(packageId: string | undefined | null):
+  | { key: string; package: string; doc_number?: string; title?: string; edition?: string }
+  | null {
+  if (!packageId) return null;
+  return (P().sources?.licensed ?? []).find((l: any) => l.package === packageId) ?? null;
+}
+
+/** The license entry for a doc number (the question's named publication,
+ *  e.g. "60068-2-30"), or null when unnamed/public. */
+export function licensedEntryForDocNumber(docNumber: string | undefined | null):
+  | { key: string; package: string; doc_number?: string; title?: string; edition?: string }
+  | null {
+  if (!docNumber) return null;
+  return (P().sources?.licensed ?? []).find((l: any) => String(l.doc_number ?? "") === docNumber) ?? null;
+}
+
+/** The per-question license boundary note: composed ONLY when the
+ *  question's named/understood publication is licensed AND the caller's
+ *  entitlement set does not carry its key. The honesty posture, made
+ *  structural: name the standard, say the organization's license does
+ *  not cover its text, keep every procedural claim out, point at the
+ *  declare flow. Citation-level metadata (title, edition, the invoking
+ *  clause the RECs publicly name) stays answerable from the public
+ *  passages already in context — the note instructs exactly that. */
+export function licenseBoundaryNote(
+  docNumber: string | undefined | null,
+  standardKeys: ReadonlySet<string> | null | undefined,
+): string | undefined {
+  const entry = licensedEntryForDocNumber(docNumber);
+  if (!entry || (standardKeys && standardKeys.has(entry.key))) return undefined;
+  const pointer = P().prompts?.vars?.license_declare_pointer;
+  return (
+    `License boundary — the question is about ${licenseBoundaryName(entry)}, a licensed publication` +
+    ` (entitlement key ${entry.key}). The caller's organization license does not cover its text, so no passage of it was retrieved` +
+    ` and NONE of its procedural content (steps, parameters, severities, limits) may be stated, paraphrased or recalled from memory.` +
+    ` You MAY answer at the citation level: name the standard and edition, and cite the invoking clause from the PUBLIC passages in context` +
+    ` (the Recommendation's own applicability and normative references are public and stay answerable).` +
+    ` Then say the organization's license does not cover the standard's text` +
+    (pointer ? ` and point to the declare flow: ${pointer}.` : ".")
+  );
+}
+
+function licenseBoundaryName(entry: { title?: string; edition?: string; package: string; doc_number?: string }): string {
+  const id = entry.doc_number ? ` ${entry.doc_number}` : ` ${entry.package}`;
+  return `${entry.title ?? "standard"}${entry.edition ? ` (${entry.edition})` : ""} —${id}`;
+}
+
+/** The deterministic boundary answer for the zero-passage case: the
+ *  question's licensed publication has nothing to show an unentitled
+ *  caller — name the standard, state the boundary, point at the declare
+ *  flow. Undefined when the question is not the licensed case (the plain
+ *  refusal applies). */
+export function licenseBoundaryRefusal(
+  docNumber: string | undefined | null,
+  standardKeys: ReadonlySet<string> | null | undefined,
+): string | undefined {
+  const entry = licensedEntryForDocNumber(docNumber);
+  if (!entry || (standardKeys && standardKeys.has(entry.key))) return undefined;
+  const pointer = P().prompts?.vars?.license_declare_pointer;
+  return (
+    `${licenseBoundaryName(entry)} is a licensed publication and your organization's license does not cover its text, ` +
+    `so I can't quote or summarize its procedure. I can answer at the citation level — the standard's title and edition, ` +
+    `and the clause your Recommendation invokes — and the public ${P().publisher.name} content in full.` +
+    (pointer ? ` To unlock the full text, an org admin can declare the license under ${pointer}.` : "")
+  );
+}
+
 export interface BoundModelNode {
   standard: string;
   node_id: string;
@@ -60,6 +136,12 @@ export interface BoundModelNode {
   clause: { doc: string; ref: string; urn: string } | null;
   /** The node's bundle projection (verbatim JSON). */
   content: any;
+  /** True when the node's package is licensed and the caller's
+   *  entitlement set lacks the key (TODO.external-refs/08): the citation
+   *  and the echo stay (metadata), but the grounding block and the
+   *  verdict engine are withheld — no licensed machine content enters
+   *  the prompt. */
+  gated?: boolean;
 }
 
 async function fetchNode(env: any, standard: string, nodeId: string): Promise<BoundModelNode | null> {
@@ -97,18 +179,26 @@ async function fetchNode(env: any, standard: string, nodeId: string): Promise<Bo
  *  model-aware chip), then a node id the question names. The standard
  *  comes from the declared doc scope when it carries one; without a scope
  *  the node binds only when it exists in EXACTLY ONE indexed standard —
- *  ambiguity is refused honestly (retrieval still surfaces the chunks). */
+ *  ambiguity is refused honestly (retrieval still surfaces the chunks).
+ *  A licensed package binds GATED for an unentitled caller (metadata
+ *  only — the grounding block and the verdict engine are the ask path's
+ *  to withhold). */
 export async function bindModelNode(
   env: any,
-  opts: { label?: string; query: string; standard?: string | null },
+  opts: { label?: string; query: string; standard?: string | null; standardKeys?: ReadonlySet<string> | null },
 ): Promise<BoundModelNode | null> {
   const nodeId = modelNodeRefIn(opts.label) ?? modelNodeRefIn(opts.query);
   if (!nodeId) return null;
-  if (opts.standard) return fetchNode(env, opts.standard, nodeId);
+  const gate = (node: BoundModelNode | null): BoundModelNode | null => {
+    if (!node) return null;
+    const entry = licensedEntryForPackage(node.standard);
+    return entry && !(opts.standardKeys?.has(entry.key) ?? false) ? { ...node, gated: true, content: {} } : node;
+  };
+  if (opts.standard) return gate(await fetchNode(env, opts.standard, nodeId));
   try {
     const rows = await env.DB.prepare("SELECT standard FROM model_nodes WHERE node_id = ?1 LIMIT 2").bind(nodeId).all();
     const standards = (rows?.results ?? []).map((r: any) => String(r.standard));
-    if (standards.length === 1) return fetchNode(env, standards[0]!, nodeId);
+    if (standards.length === 1) return gate(await fetchNode(env, standards[0]!, nodeId));
     return null; // zero (not indexed) or ambiguous (several standards) — no silent pick
   } catch {
     return null;

@@ -35,6 +35,12 @@ export interface ChunkMeta {
   model_node?: string;
   model_kind?: string;
   standard?: string;
+  /** The license entitlement key (the package's `license_key` facet, e.g.
+   *  `std:iec-60068-2-30`) — present ONLY when the chunk's content comes
+   *  from a licensed package; public content carries none. The ask path's
+   *  hard scope (stages/licenseScope.ts) drops chunks whose key is absent
+   *  from the caller's entitlement set, before ranking. */
+  standard_key?: string;
   /** section-summary unit (FABLE multi-granularity, arXiv:2601.18116): a
    *  depth-1 clause summary vector — a navigation node whose children
    *  (child_anchors CSV) are quotable leaf clauses. The corpus's real
@@ -83,6 +89,7 @@ export const CHUNK_META_FIELDS = [
   "model_node",
   "model_kind",
   "standard",
+  "standard_key",
   "section_summary",
   "child_anchors",
   "ctx",
