@@ -85,7 +85,7 @@ async function adminSyncRoute(c: RouteContext): Promise<Response> {
     if (Array.isArray(body?.upserts)) {
       for (let i = 0; i < body.upserts.length; i += 100) {
         const batch = body.upserts.slice(i, i + 100).filter((v: any) => v?.id && Array.isArray(v?.values) && v?.metadata);
-        if (batch.length) await env.PUBLIC.upsert(batch);
+        if (batch.length) await env.INTERNAL.upsert(batch);
         out.upserted += batch.length;
       }
     }
@@ -94,14 +94,14 @@ async function adminSyncRoute(c: RouteContext): Promise<Response> {
       for (let i = 0; i < todo.length; i += 16) {
         const batch = todo.slice(i, i + 16);
         const vectors = await Promise.all(batch.map((b: any) => embed(env.AI, b.text.slice(0, 6000))));
-        await env.PUBLIC.upsert(batch.map((b: any, j: number) => ({ id: b.id, values: vectors[j], metadata: b.metadata })));
+        await env.INTERNAL.upsert(batch.map((b: any, j: number) => ({ id: b.id, values: vectors[j], metadata: b.metadata })));
         out.embedded += batch.length;
       }
     }
     if (Array.isArray(body?.deletes)) {
       const ids = body.deletes.filter((x: any) => typeof x === "string");
       for (let i = 0; i < ids.length; i += 100) {
-        await env.PUBLIC.deleteByIds(ids.slice(i, i + 100));
+        await env.INTERNAL.deleteByIds(ids.slice(i, i + 100));
         out.deleted += Math.min(100, ids.length - i);
       }
     }
