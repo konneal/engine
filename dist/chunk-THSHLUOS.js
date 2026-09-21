@@ -7,20 +7,24 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "./chunk-6GOSMLRH.js";
+} from "./chunk-RLT4W2VX.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-SN3ANQ3Y.js";
+} from "./chunk-EFQALN2Z.js";
+import {
+  entitlementScope,
+  standardKeysFrom
+} from "./chunk-5MBWE7WD.js";
 import {
   LIMITS,
   MODELS,
   num,
   sha256Hex
-} from "./chunk-Q6LI4T7M.js";
+} from "./chunk-ADXV2DPK.js";
 
 // workers/worker_public/src/search.ts
 async function handleSearch(env, ctx, req, tier, key) {
@@ -36,9 +40,10 @@ async function handleSearch(env, ctx, req, tier, key) {
   }
   const understanding = await understandQuery(portModelRunner(env), MODELS.understand, q.query, []);
   const graphDocNumbers = await graphExpand(env, understanding);
+  const standardKeys = entitlementScope(standardKeysFrom(body));
   let retrieved;
   try {
-    retrieved = await retrieve(env, q.query, { understanding, graphDocNumbers });
+    retrieved = await retrieve(env, q.query, { understanding, graphDocNumbers, standardKeys });
   } catch {
     return err(503, "retrieval_unavailable", "Search is briefly busy \u2014 please retry in a moment.");
   }

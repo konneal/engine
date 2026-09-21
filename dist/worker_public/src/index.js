@@ -1,14 +1,13 @@
 import {
   handleSearch
-} from "../../chunk-VJZLVU3S.js";
+} from "../../chunk-THSHLUOS.js";
 import {
   checkQuoteAnchors,
   handleAsk,
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-PVHSBXZD.js";
-import "../../chunk-LNSDBEKS.js";
+} from "../../chunk-OGFH3RDM.js";
 import {
   buildMessages,
   citations,
@@ -30,7 +29,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-6GOSMLRH.js";
+} from "../../chunk-RLT4W2VX.js";
 import {
   authenticate,
   corsHeaders,
@@ -39,10 +38,14 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-SN3ANQ3Y.js";
+} from "../../chunk-EFQALN2Z.js";
 import {
   canonicalRefusal
-} from "../../chunk-WGXATDXY.js";
+} from "../../chunk-DBBGOOMZ.js";
+import {
+  entitlementScope,
+  standardKeysFrom
+} from "../../chunk-5MBWE7WD.js";
 import {
   LIMITS,
   MODELS,
@@ -53,11 +56,11 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-Q6LI4T7M.js";
+} from "../../chunk-ADXV2DPK.js";
 import {
   P,
   setProfile
-} from "../../chunk-Q327B27J.js";
+} from "../../chunk-TJRTVJW5.js";
 
 // workers/worker_public/src/conversations.ts
 var ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
@@ -976,7 +979,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-VFSAF5WG.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-OMPBMZT4.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-YCDXMIZ4.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-7TO2RWQE.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1435,7 +1438,7 @@ async function verifyRoute(c) {
   if (!answer || !query) return err(400, "invalid_input", "answer and query are required");
   try {
     const u = await understandQuery(env.AI, roleModel(env, "understand"), query, [], []);
-    const retrieved = await retrieve(env, query, { understanding: u });
+    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)) });
     const passages = retrieved.hits.map((h) => h.text);
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);

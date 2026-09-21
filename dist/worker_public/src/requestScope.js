@@ -1,10 +1,16 @@
 import {
+  entitlementScope,
+  licenseDeclared,
   requestSalt,
-  resolveRequestScope
-} from "../../chunk-LNSDBEKS.js";
-import "../../chunk-Q6LI4T7M.js";
-import "../../chunk-Q327B27J.js";
+  resolveRequestScope,
+  standardKeysFrom
+} from "../../chunk-5MBWE7WD.js";
+import "../../chunk-ADXV2DPK.js";
+import "../../chunk-TJRTVJW5.js";
 export {
+  entitlementScope,
+  licenseDeclared,
   requestSalt,
-  resolveRequestScope
+  resolveRequestScope,
+  standardKeysFrom
 };
