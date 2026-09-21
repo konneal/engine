@@ -37,7 +37,7 @@ export interface paths {
         put?: never;
         /**
          * Ask a question with an API key
-         * @description Identical to /api/ask, with authentication by API key and a per-key daily allowance. Streaming responses are available by setting stream to true, which returns a server-sent event stream whose events carry citations, tokens and the completion marker.
+         * @description Identical to /api/ask, with authentication by API key and a per-key daily allowance. Streaming responses are available by setting stream to true, which returns a server-sent event stream whose first event is the reading, then the citations, then the answer tokens, and finally the completion marker.
          */
         post: operations["askKeyed"];
         delete?: never;
@@ -852,7 +852,7 @@ export interface components {
             /** @description The question, at most 8000 characters. */
             query: string;
             /**
-             * @description When true, the response is a server-sent event stream whose events carry citations, tokens and the completion marker.
+             * @description When true, the response is a server-sent event stream. The first event is the reading (how the service interpreted the question), then the citations, then the answer tokens, and finally the completion marker.
              * @default false
              */
             stream: boolean;
@@ -898,6 +898,20 @@ export interface components {
             model?: string;
             /** @description The hash of the question, used for feedback. */
             query_hash?: string;
+            /** @description How the service read the question — the interpretation that steered retrieval. Present on fresh answers; absent on exact cache hits, which never re-ran understanding. */
+            read?: {
+                intent?: string;
+                doc?: string | null;
+                edition?: string | null;
+                term?: string | null;
+                terms?: string[];
+                lang?: string | null;
+            };
+            /**
+             * @description Present when the answer was served from the answer cache for an identical or similar earlier question. The cache stores the answer and never the passages.
+             * @enum {string}
+             */
+            served_from?: "cache" | "similar";
             /** @description The remaining daily allowance. */
             quota?: Record<string, never>;
         };

@@ -1408,9 +1408,14 @@ async function handleAsk(env, ctx, req, tier, key) {
         telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang, "semantic", telemetryMeta());
         const cctx = sc.context_applied ?? NO_CONTEXT;
         if (wantsStream) {
-          return sseResponse([{ type: "citations", citations: sc.citations ?? [], context_applied: cctx }, { type: "token", v: sc.answer }, { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, served_from: "similar", context_applied: cctx }], corsHeaders(req));
+          return sseResponse([
+            ...readAs() ? [{ type: "read", read: readAs() }] : [],
+            { type: "citations", citations: sc.citations ?? [], context_applied: cctx },
+            { type: "token", v: sc.answer },
+            { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, served_from: "similar", context_applied: cctx, read: readAs() }
+          ], corsHeaders(req));
         }
-        return json({ ...sc, similar: true, context_applied: cctx, quota });
+        return json({ ...sc, similar: true, context_applied: cctx, read: readAs(), quota });
       }
     }
   }
@@ -1432,6 +1437,7 @@ ${summary}` }] : [],
             const send = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}
 
 `));
+            if (readAs()) send({ type: "read", read: readAs() });
             send({ type: "citations", citations: [], context_applied: NO_CONTEXT, quota });
             let full = "";
             try {
@@ -1441,7 +1447,7 @@ ${summary}` }] : [],
               }
             } catch {
             }
-            send({ type: "done", model, query_hash: queryHash2, context_applied: NO_CONTEXT });
+            send({ type: "done", model, query_hash: queryHash2, context_applied: NO_CONTEXT, read: readAs() });
             telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash2, q.lang, void 0, telemetryMeta());
             controller.close();
           }
@@ -1458,7 +1464,7 @@ ${summary}` }] : [],
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
     telemetry(env, ctx, tier, "ask", model, true, answer2.length, queryHash2, q.lang, void 0, telemetryMeta());
-    return json({ answer: answer2, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: NO_CONTEXT, quota });
+    return json({ answer: answer2, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: NO_CONTEXT, read: readAs(), quota });
   }
   if (draftAct) {
     const draftCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
@@ -1488,14 +1494,15 @@ ${summary}` }] : [],
     if (wantsStream) {
       return sseResponse(
         [
+          ...readAs() ? [{ type: "read", read: readAs() }] : [],
           { type: "citations", citations: citations2, context_applied: draftCtxApplied, ...draftPayload ? { draft: draftPayload } : {}, quota },
           { type: "token", v: verdict.answer },
-          { type: "done", model, query_hash: queryHash2, context_applied: draftCtxApplied }
+          { type: "done", model, query_hash: queryHash2, context_applied: draftCtxApplied, read: readAs() }
         ],
         corsHeaders(req)
       );
     }
-    return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, ...draftPayload ? { draft: draftPayload } : {}, quota });
+    return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, quota });
   }
   let liveRecords;
   let accountNote;
