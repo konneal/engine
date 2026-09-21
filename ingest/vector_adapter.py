@@ -97,6 +97,12 @@ class ChunkMetaModel(BaseModel):
     model_node: str | None = None
     model_kind: str | None = None
     standard: str | None = None
+    # the license entitlement key (the package's `license_key` facet, e.g.
+    # `std:iec-60068-2-30`) — set ONLY when the chunk's content comes from
+    # a licensed package; public content carries none. Serving's hard scope
+    # (workers/worker_public/src/stages/licenseScope.ts) drops chunks whose
+    # key is absent from the caller's entitlement set, before ranking.
+    standard_key: str | None = None
     section_summary: str | None = None
     child_anchors: str | None = None
     ctx: str | None = None

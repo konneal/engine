@@ -14,6 +14,7 @@
 import type { Stage } from "./types.ts";
 import { namedDocumentIn } from "../context.ts";
 import { refCodec } from "../codecs.ts";
+import { standardKeyAllowed } from "../selfquery.ts";
 import type { Hit } from "../../../shared/chunk.ts";
 
 const CITE_PATTERN = /\b(?:cite[sd]?|citing|referenc(?:e|es|ed|ing)|list[s]?|quote[sd]?)\b/i;
@@ -123,9 +124,13 @@ export const citationProbe: Stage = {
     const [probes, citeRows] = (await c.lane["citation-probe"]) as [Hit[], CiteRow[]];
     const seen = new Set(c.hits.map((m: any) => m.id));
     let added = 0;
-    // only bibliography-shaped chunks (clause title or text mentions it)
+    // only bibliography-shaped chunks (clause title or text mentions it);
+    // the push rides the entitlement predicate — the probe runs past the
+    // pool-level license scope, and a licensed family's bibliography
+    // passages must obey the same hard scope as everything else
     for (const h of probes) {
       if (seen.has(h.id as any)) continue;
+      if (!standardKeyAllowed(h.metadata as any, c.opts.standardKeys)) continue;
       const title = String((h.metadata as any)?.clause_title ?? "");
       const text = String(h.text ?? "");
       if (/bibliograph|normative reference/i.test(title + " " + text.slice(0, 300))) {

@@ -23,3 +23,29 @@ export function toVectorizeFilter(f: QueryFilters): Record<string, string> | und
   }
   return undefined;
 }
+
+// ── the license entitlement scope (TODO.external-refs/08) ────────────────
+// A chunk's `standard_key` metadata carries the licensed package's
+// entitlement key; public content carries none. The scope is a HARD
+// FILTER (a hit never reaches ranking when its key is outside the
+// caller's set) — but it deliberately does NOT translate into a
+// Vectorize metadata predicate: the wire has no "field missing OR in-set"
+// operator, so a `standard_key $in […]` push-down would exclude every
+// public chunk (they predate the field). The scope binds pool-level
+// (stages/licenseScope.ts, before rerank) and at the lexical lane's
+// source (pipeline.ts, the sealScope posture) instead; the single-doc
+// post-seal fetches (section-descent, typed-pin parent, edition-cover)
+// are doc-scoped and a document's key is a per-document constant, so
+// they cannot re-admit a dropped key.
+
+/** The one entitlement predicate: no key = public = always allowed; a key
+ *  outside the caller's set = never allowed. `null`/undefined keys (the
+ *  deployment declares no licensed content) disable the scope entirely. */
+export function standardKeyAllowed(
+  meta: { standard_key?: string },
+  keys: ReadonlySet<string> | null | undefined,
+): boolean {
+  if (!keys) return true;
+  const k = meta.standard_key;
+  return !k || keys.has(k);
+}

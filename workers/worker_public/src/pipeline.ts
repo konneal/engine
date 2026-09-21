@@ -32,7 +32,7 @@ export function promptVars(extra: Record<string, string> = {}): Record<string, s
 export function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => (k in vars ? vars[k] : ""));
 }
-import { QueryFilters, toVectorizeFilter } from "./selfquery";
+import { QueryFilters, toVectorizeFilter, standardKeyAllowed } from "./selfquery";
 import { lexicalPrefilter } from "./lexical";
 import { positionOrder } from "./structural";
 import { STAGES, runStages } from "./stages";
@@ -125,10 +125,18 @@ export async function retrieve(
   // The declared context's seal binds the lexical lane at the SOURCE: the
   // RRF fusion mixes the full-corpus lexical ranking straight into the
   // final hits — past the pool-level seal — so under a seal the lexical
-  // lane is the FAMILY's lexical hits only.
-  const lexicalHits = opts.sealScope
-    ? lexicalHits0.filter((h) => h.metadata.doc_number === opts.sealScope!.doc_number && (!opts.sealScope!.edition || h.metadata.edition === opts.sealScope!.edition))
-    : lexicalHits0;
+  // lane is the FAMILY's lexical hits only. The license entitlement scope
+  // binds the same lane the same way (it re-enters twice: lexical-union
+  // pre-rerank and lexical-rrf post-rerank — both consume this list).
+  const lexicalHits = (opts.sealScope || opts.standardKeys
+    ? lexicalHits0.filter(
+        (h) =>
+          (!opts.sealScope ||
+            (h.metadata.doc_number === opts.sealScope!.doc_number &&
+              (!opts.sealScope!.edition || h.metadata.edition === opts.sealScope!.edition))) &&
+          standardKeyAllowed(h.metadata, opts.standardKeys),
+      )
+    : lexicalHits0);
   if (lexicalHits.length) console.log("lexical prefilter:", lexicalHits.length, "hits");
 
   const ctx: PipelineContext = {

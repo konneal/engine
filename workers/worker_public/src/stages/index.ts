@@ -23,6 +23,7 @@ import { poolOpen } from "./poolOpen.ts";
 import { lexicalUnion } from "./lexicalUnion.ts";
 import { federate } from "./federate.ts";
 import { seal } from "./seal.ts";
+import { licenseScope } from "./licenseScope.ts";
 import { corpusScope } from "./corpusScope.ts";
 import { editionCover } from "./editionCover.ts";
 import { stdRefNudge } from "./stdRefNudge.ts";
@@ -51,6 +52,7 @@ export const STAGES: Stage[] = [
   lexicalUnion,
   federate,
   seal,
+  licenseScope,
   overviewDemote,
   familyBoost,
   rerankStage,

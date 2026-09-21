@@ -4,6 +4,7 @@ import { portModelRunner } from "./env.ts";
 import type { Background } from "./ports/runtime.ts";
 import { retrieve } from "./pipeline";
 import { understandQuery } from "./understand";
+import { entitlementScope, standardKeysFrom } from "./requestScope";
 import { sessionFrom } from "./auth";
 import { err, json, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
 import { checkQuota, clientIp, telemetry } from "./quota";
@@ -32,9 +33,14 @@ export async function handleSearch(
 
   const understanding = await understandQuery(portModelRunner(env), MODELS.understand, q.query, []);
   const graphDocNumbers = await graphExpand(env, understanding);
+  // the license entitlement set rides the body exactly as it does on the
+  // ask path (TODO.external-refs/08): request-scoped, whitelist-validated,
+  // fail-closed — a retrieval with an empty set returns zero licensed
+  // chunks at the transport level
+  const standardKeys = entitlementScope(standardKeysFrom(body));
   let retrieved;
   try {
-    retrieved = await retrieve(env, q.query, { understanding, graphDocNumbers });
+    retrieved = await retrieve(env, q.query, { understanding, graphDocNumbers, standardKeys });
   } catch {
     return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
   }

@@ -3,3 +3,12 @@ corpora:
 bibliography: {}
 terminology: {}
 models: {}
+# the licensed-standards declaration (TODO.external-refs/08): the
+# entitlement keys the deployment's index may carry (`standard_key` chunk
+# metadata, from the packages' license_key facet) — this list is the
+# whitelist the request's entitlement set validates against, and the
+# package/doc-number mapping the ask path gates model bindings with.
+# Absent or empty = the deployment serves public content only. The
+# fixture declares one so the license scope rides every engine test.
+licensed:
+  - { key: "std:fixture-60068-2-30", package: "fixture-60068-2-30", doc_number: "60068-2-30", title: "FIXTURE environmental testing — damp heat, cyclic", edition: "2005" }

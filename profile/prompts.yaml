@@ -17,3 +17,17 @@ vars:
   docid_example: "FIXTURE 1-2"
   spelling_examples: '"f1", "FIXTURE 1"'
   process_vocab: "the fixture certification system framework"
+  # the license declare flow (TODO.external-refs/08): where an org admin
+  # declares a standards license — the boundary refusal's pointer
+  license_declare_pointer: "org admin → Settings → Standards licenses"
+  # the licensed-content posture (TODO.external-refs/08): how the answer
+  # model behaves when a question hits the license boundary (the
+  # per-question note rides the retrieval-note channel)
+  license_posture: >-
+    Some indexed publications are LICENSED. When a license boundary note
+    names the question's publication, obey it: answer at the citation
+    level only — the standard's title and edition, and the invoking clause
+    the public passages carry — never state, paraphrase or "summarize from
+    memory" any procedure of the licensed text, and point at the declare
+    flow the note names. Public content (the Recommendations' own models,
+    applicability and references) stays fully answerable.
