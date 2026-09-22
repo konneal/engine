@@ -1939,6 +1939,7 @@ ${context}` }
   };
 }
 function publicationUrl(meta) {
+  if (meta.corpus && !["oiml", "dirty", "clean"].includes(meta.corpus)) return void 0;
   const tpl = P().publisher.catalog_url_template;
   if (!tpl || !meta.doctype || !meta.doc_number) return void 0;
   return tpl.replace("{type}", meta.doctype.toLowerCase()) + meta.doc_number;
