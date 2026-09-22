@@ -17,6 +17,7 @@ export interface Env {
   AI: any;
   PUBLIC: any; // idx_oiml_public_v2
   INTERNAL: any; // idx_iso_internal
+  DOCS: any; // rag-internal-docs — the internal renderings
   CACHE: KVNamespace;
   SESSION_SECRET: string;
   INDEX_VERSION: string;
@@ -137,10 +138,38 @@ async function retrieveRoute(c: RouteContext): Promise<Response> {
   }
 }
 
+// The internal corpus's document door: rendered publications and their
+// clause-anchor maps, session-gated like retrieval (the admin token also
+// opens it for ops verification). Only docs/<name> shapes are served —
+// html and the anchors map, nothing else.
+async function docRoute(c: RouteContext): Promise<Response> {
+  const { env, req } = c;
+  const file = c.params.file ?? "";
+  if (!/^docs\/[a-z0-9-]+\.(html|anchors\.json)$/.test(`docs/${file}`)) {
+    return err(400, "invalid_input", "docs/<slug>.html or docs/<slug>.anchors.json");
+  }
+  const session = await sessionFrom(req, env as any);
+  const admin = env.ADMIN_TOKEN && req.headers.get("x-admin-token") === env.ADMIN_TOKEN;
+  if (!session && !admin) return err(401, "unauthorized", "Sign in required — internal corpus documents are member content.");
+  try {
+    const obj = await env.DOCS.get(`docs/${file}`);
+    if (!obj) return err(404, "not_found", "No rendered document at this address.");
+    return new Response(obj.body, {
+      headers: {
+        "content-type": file.endsWith(".json") ? "application/json" : "text/html; charset=utf-8",
+        "cache-control": "private, max-age=86400",
+      },
+    });
+  } catch {
+    return err(503, "docs_unavailable", "The document store is briefly busy.");
+  }
+}
+
 // the same declarative route table the public worker dispatches through
 // (TODO.impl/31) — one HTTP idiom across workers.
 const ROUTES: Route[] = [
   { method: "GET", pattern: "/health", handler: healthRoute },
+  { method: "GET", pattern: "/docs/:file", handler: docRoute },
   { method: "POST", pattern: "/admin/sync", handler: adminSyncRoute },
   { method: "POST", pattern: "/retrieve", handler: retrieveRoute },
   { method: "POST", pattern: "/api/retrieve", handler: retrieveRoute },

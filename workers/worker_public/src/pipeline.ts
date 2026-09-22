@@ -380,6 +380,11 @@ export function buildMessages(
  *  URL template ({type} = lowercase doctype, then the number); no
  *  template, no catalog link. */
 function publicationUrl(meta: ChunkMeta): string | undefined {
+  // the catalog template names THIS publisher's store - an internal or
+  // foreign-corpus chunk has no entry in it, and a fabricated url is
+  // worse than none (the door for internal renderings is the internal
+  // origin, wired by the site's doc-base configuration)
+  if (meta.corpus && !["oiml", "dirty", "clean"].includes(meta.corpus)) return undefined;
   const tpl = P().publisher.catalog_url_template;
   if (!tpl || !meta.doctype || !meta.doc_number) return undefined;
   return tpl.replace("{type}", meta.doctype.toLowerCase()) + meta.doc_number;
