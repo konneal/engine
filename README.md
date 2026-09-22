@@ -1,5 +1,7 @@
 # Konneal Engine
 
+**New here?** Read [docs/ADOPTION.md](docs/ADOPTION.md) — adopt Konneal for your own standards and your own identity service.
+
 The publisher-agnostic serving layer for standards intelligence: hybrid
 retrieval over clause-structured corpora, citation-grounded answers,
 typed tables/formulas/figures, conformance checking by execution, and
