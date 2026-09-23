@@ -67,6 +67,9 @@ export async function scoreJudge(
         ],
         max_tokens: 6144,
         reasoning_effort: "low",
+        // the judge is a measurement: greedy decoding, no sampling
+        temperature: 0,
+        top_p: 1,
       });
       const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
       // reasoning models can emit {...} fragments before the verdict — the
