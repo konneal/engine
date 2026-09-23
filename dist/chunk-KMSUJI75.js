@@ -759,6 +759,84 @@ function verdictNote(v, node) {
   return lines.join("\n");
 }
 
+// workers/worker_public/src/conditions.ts
+var NUM = String.raw`-?\d+(?:[.,]\d+)?`;
+function quantitiesIn(query) {
+  const out = {};
+  const num2 = (s) => Number(s.replace(",", "."));
+  const put = (kind, stated, stated_unit, si) => {
+    if (Number.isFinite(si)) out[kind] = { stated, stated_unit, si };
+  };
+  const tempC = query.match(new RegExp(`(${NUM})\\s*(?:\xB0\\s*)?C\\b`));
+  if (tempC) put("temperature", num2(tempC[1]), "degC", num2(tempC[1]) + 273.15);
+  const tempK = query.match(new RegExp(`(${NUM})\\s*K\\b`));
+  if (tempK && out.temperature === void 0) put("temperature", num2(tempK[1]), "K", num2(tempK[1]));
+  const rh = query.match(new RegExp(`(${NUM})\\s*%\\s*(?:RH\\b|relative\\s+humidity)?`, "i"));
+  if (rh) put("relative_humidity", num2(rh[1]), "%", num2(rh[1]) / 100);
+  const hours = query.match(new RegExp(`(${NUM})\\s*h\\b`, "i"));
+  if (hours) put("duration", num2(hours[1]), "h", num2(hours[1]) * 3600);
+  const days = query.match(new RegExp(`(${NUM})\\s*days?\\b`, "i"));
+  if (days && out.duration === void 0) put("duration", num2(days[1]), "d", num2(days[1]) * 86400);
+  return out;
+}
+function scoreSet(entries, q) {
+  const checks = [];
+  let distance = 0;
+  let stated = 0;
+  for (const e of entries) {
+    const siEntry = e;
+    const statedQ = q[e.quantity_kind];
+    if (!statedQ || !siEntry?.si) continue;
+    const tol = Number(String(siEntry.tolerance ?? "0").replace(",", "."));
+    const tolSi = (Number.isFinite(tol) ? tol : 0) * (siEntry.si.unit === "K" ? 1 : siEntry.si.unit === "1" ? 0.01 : 1);
+    const in_band = statedQ.si >= siEntry.si.value - tolSi && statedQ.si <= siEntry.si.value + tolSi;
+    const gap = Math.max(0, statedQ.si - (siEntry.si.value + tolSi), siEntry.si.value - tolSi - statedQ.si);
+    distance += gap / Math.max(tolSi, 1);
+    stated += 1;
+    checks.push({
+      quantity_kind: e.quantity_kind,
+      band: `${siEntry.si.value} ${siEntry.si.unit} \xB1${tolSi}`,
+      stated: statedQ.stated,
+      stated_unit: statedQ.stated_unit,
+      in_band
+    });
+  }
+  return stated ? { checks, distance, stated } : null;
+}
+function evaluateConditionSets(nodes, query) {
+  const q = quantitiesIn(query);
+  const kinds = Object.keys(q);
+  if (!kinds.length) return null;
+  const scored = [];
+  for (const n of nodes) {
+    const c = n.content && typeof n.content === "object" ? n.content : {};
+    const payload = c.payload ?? {};
+    const entries = Array.isArray(payload.entries) ? payload.entries : [];
+    if (!entries.length) continue;
+    const s = scoreSet(entries, q);
+    if (s) scored.push({ node_id: n.node_id, checks: s.checks, distance: s.distance });
+  }
+  if (!scored.length) return null;
+  const matched = scored.filter((s) => s.checks.every((c) => c.in_band));
+  scored.sort((a, b) => a.distance - b.distance);
+  if (matched.length) {
+    return {
+      verdict: "pass",
+      matched: matched.map((m) => m.node_id),
+      checks: matched[0].checks,
+      note: `VERDICT: PASS \u2014 the stated combination (${kinds.join(", ")}) matches severity set(s) ${matched.map((m) => m.node_id).join(", ")}. Present this verdict and cite the set's clause.`
+    };
+  }
+  const nearest = scored[0];
+  return {
+    verdict: "fail",
+    matched: [],
+    nearest: { node_id: nearest.node_id, distance: Number(nearest.distance.toFixed(2)), bands: nearest.checks.map((c) => c.band) },
+    checks: nearest.checks,
+    note: `VERDICT: FAIL \u2014 no severity set admits the stated combination. The nearest set is ${nearest.node_id} (bands: ${nearest.checks.map((c) => c.band).join("; ")}). Say the combination is outside the menu and name the nearest set; never soften it.`
+  };
+}
+
 // workers/worker_public/src/drafts.ts
 var ACT_VERB = "(?:draft|prepare|pre-?fill|fill\\s+(?:in|out)|start|submit|file|lodge)";
 var ACT_TARGET = "(?:new\\s+)?(?:certification\\s+|type[ -]evaluation\\s+|OIML[- ]CS\\s+)?application";
@@ -1551,6 +1629,32 @@ ${summary}` }] : [],
   const modelNote = boundModel && !boundModel.gated ? modelGroundingBlock(boundModel) : void 0;
   const machineVerdict = boundModel && !boundModel.gated ? evaluate(boundModel.content, q.query) : null;
   const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : void 0;
+  let conditionVerdict = null;
+  let conditionStandard = null;
+  if (!machineVerdict && !boundModel && P().publisher.features?.model_plane) {
+    const ql = q.query.toLowerCase();
+    const severityWord = /\b(severity|test|valid|tolerance|condition|within)\b/.test(ql);
+    const stated = quantitiesIn(q.query);
+    if (severityWord && Object.keys(stated).length >= 1) {
+      const docNum = modelDocHint?.doc_number;
+      const sql = docNum ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' AND standard = ?1" : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' LIMIT 40";
+      const stmt = docNum ? env.DB.prepare(sql).bind(docNum) : env.DB.prepare(sql);
+      const rows = await stmt.all().catch(() => ({ results: [] }));
+      const candidates = (rows.results ?? []).filter((r) => {
+        const entry = licensedEntryForPackage(String(r.standard));
+        return !entry || (standardKeys?.has(entry.key) ?? false);
+      });
+      const v = evaluateConditionSets(
+        candidates.map((r) => ({ node_id: String(r.node_id), content: JSON.parse(String(r.content ?? "{}")) })),
+        q.query
+      );
+      if (v) {
+        conditionVerdict = v;
+        conditionStandard = String(rows.results?.[0]?.standard ?? "");
+      }
+    }
+  }
+  const conditionNote = conditionVerdict && conditionStandard ? `${conditionVerdict.note} (computed from the ${conditionStandard} condition sets \u2014 machine evaluation, cite the package's clause.)` : void 0;
   const verdictBlock = machineVerdict ? {
     unit_id: boundModel.node_id,
     type: "verdict",
@@ -1564,6 +1668,22 @@ ${summary}` }] : [],
     }
   } : null;
   if (machineVerdict) console.log("verdict engine:", boundModel.node_id, "\u2192", machineVerdict.verdict.toUpperCase(), machineVerdict.missing.length ? `(missing ${machineVerdict.missing.join(",")})` : "");
+  const conditionBlock = conditionVerdict ? {
+    unit_id: conditionVerdict.matched[0] ?? conditionVerdict.nearest.node_id,
+    type: "verdict",
+    docidentifier: `IEC SMART model (${conditionStandard})`,
+    payload: {
+      verdict: conditionVerdict.verdict,
+      missing: [],
+      checks: conditionVerdict.checks.map((c) => ({
+        expression: `${c.quantity_kind} within ${c.band}`,
+        values: { stated: c.stated },
+        result: c.in_band
+      })),
+      ...conditionVerdict.nearest ? { nearest: conditionVerdict.nearest } : { matched: conditionVerdict.matched }
+    }
+  } : null;
+  if (conditionVerdict) console.log("condition engine:", conditionVerdict.matched.join("|") || conditionVerdict.nearest.node_id, "\u2192", conditionVerdict.verdict.toUpperCase());
   try {
     const tR = Date.now();
     if (declaredCtx?.kind === "account") {
@@ -1657,7 +1777,7 @@ Answer account questions from these records ONLY: name the record when you use i
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
     summary,
     budget
   );
@@ -1705,7 +1825,7 @@ Answer account questions from these records ONLY: name the record when you use i
             model,
             query_hash: queryHash,
             follow_ups: understanding?.follow_ups ?? [],
-            blocks: verdictBlock ? [...c2.blocks, verdictBlock] : c2.blocks,
+            blocks: [...c2.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : []],
             context_applied: ctxApplied,
             read: readAs(),
             // the evidence view's ground truth: the exact passages this
@@ -1822,7 +1942,7 @@ Answer account questions from these records ONLY: name the record when you use i
     if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
   }
   completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
-  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = await warmEmbed ?? null;
