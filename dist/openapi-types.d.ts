@@ -851,6 +851,8 @@ export interface components {
         AskRequest: {
             /** @description The question, at most 8000 characters. */
             query: string;
+            /** @description The caller's entitlement set: the licensed-standard keys this request may see, validated against the deployment's declared catalog. Absent or unknown keys mean the fail-closed default — an empty set — so licensed content never reaches an unentitled caller. Each key admits the chunks stamped with that standard's license and enables the machine verdicts computed from its condition sets. */
+            licensed_standards?: string[];
             /**
              * @description When true, the response is a server-sent event stream. The first event is the reading (how the service interpreted the question), then the citations, then the answer tokens, and finally the completion marker.
              * @default false
@@ -892,7 +894,7 @@ export interface components {
                 /** Format: uri */
                 url?: string;
             }[];
-            /** @description The typed objects the answer carries, such as tables, verdicts and unit blocks. */
+            /** @description The typed objects the answer carries: tables, figures, condition-set verdicts, conformance verdicts and unit blocks. A verdict block's payload carries the machine evaluation — the verdict (pass, fail or void), one check per machine rule with its expression, the values bound from the question, and the individual result — plus, for condition-set membership, the matched severity set or the nearest set with the violated bands. The verdict is computed server-side; clients render it as data. */
             blocks?: Record<string, never>[];
             /** @description The model that generated the answer. */
             model?: string;
