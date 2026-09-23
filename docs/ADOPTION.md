@@ -42,6 +42,15 @@ request cannot reach internal indexes at all: the public surface holds
 no binding to them, and the internal worker re-verifies every session
 itself.
 
+## Grounded in the literature
+
+The execution pattern (a deterministic evaluator computes; the model
+narrates) adopts the program-aided line — PAL (arXiv:2211.10435) and
+Program of Thoughts (arXiv:2211.12588) — and the structured-numeric
+retrieval lessons of TableRAG (arXiv:2410.04739, arXiv:2506.10380).
+The deployment's research notes map every technique to its source and
+to the code path that implements it.
+
 ## The proof
 
 Your golden suite gates every promotion: content witnesses, refusal
