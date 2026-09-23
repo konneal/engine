@@ -83,6 +83,12 @@ paths:
                     For OIML R 60, /constraint/dead_load_max_geometry:
                     with E_max 30000 v, is testing to D_max 26000 v valid?
                   stream: false
+              severity-membership:
+                value:
+                  query: Is 40 °C at 85 % RH a valid Test Cab severity per IEC 60068-2-78?
+                  stream: false
+                  licensed_standards:
+                  - std:iec-60068-2-78
       responses:
         '200':
           description: The answer with citations and typed blocks.
@@ -1100,6 +1106,19 @@ components:
         query:
           type: string
           description: The question, at most 8000 characters.
+        licensed_standards:
+          type: array
+          description: >-
+            The caller's entitlement set: the licensed-standard keys this
+            request may see, validated against the deployment's declared
+            catalog. Absent or unknown keys mean the fail-closed default —
+            an empty set — so licensed content never reaches an unentitled
+            caller. Each key admits the chunks stamped with that
+            standard's license and enables the machine verdicts computed
+            from its condition sets.
+          items:
+            type: string
+            example: "std:iec-60068-2-78"
         stream:
           type: boolean
           default: false
@@ -1157,8 +1176,15 @@ components:
         blocks:
           type: array
           description: >-
-            The typed objects the answer carries, such as tables, verdicts
-            and unit blocks.
+            The typed objects the answer carries: tables, figures,
+            condition-set verdicts, conformance verdicts and unit blocks.
+            A verdict block's payload carries the machine evaluation —
+            the verdict (pass, fail or void), one check per machine rule
+            with its expression, the values bound from the question, and
+            the individual result — plus, for condition-set membership,
+            the matched severity set or the nearest set with the violated
+            bands. The verdict is computed server-side; clients render it
+            as data.
           items:
             type: object
         model:
