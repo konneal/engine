@@ -19,8 +19,9 @@ import { contractV2, tableRetyped } from "./refs";
 import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
-import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
+import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, licensedEntryForPackage, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
+import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./conditions";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { memoryNote } from "./memories";
 import { entitlementScope, resolveRequestScope, requestSalt } from "./requestScope";
@@ -717,6 +718,42 @@ async function handleAsk(
   // and the verdict BLOCK is server-built — data, never generated prose
   const machineVerdict = boundModel && !boundModel.gated ? machineEvaluate(boundModel.content, q.query) : null;
   const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : undefined;
+  // ── condition-set membership (konneal/engine#90): the test-method
+  // packages' severity menus as machine-verifiable membership. Fires
+  // when no explicit node binding ran and the question states
+  // quantities alongside severity vocabulary; the candidate sets come
+  // from the model node store (kind condition_set), license-gated like
+  // every model lane.
+  let conditionVerdict: ConditionVerdict | null = null;
+  let conditionStandard: string | null = null;
+  if (!machineVerdict && !boundModel && P().publisher.features?.model_plane) {
+    const ql = q.query.toLowerCase();
+    const severityWord = /\b(severity|test|valid|tolerance|condition|within)\b/.test(ql);
+    const stated = quantitiesIn(q.query);
+    if (severityWord && Object.keys(stated).length >= 1) {
+      const docNum = modelDocHint?.doc_number;
+      const sql = docNum
+        ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' AND standard = ?1"
+        : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' LIMIT 40";
+      const stmt = docNum ? env.DB.prepare(sql).bind(docNum) : env.DB.prepare(sql);
+      const rows = await stmt.all().catch(() => ({ results: [] }));
+      const candidates = (rows.results ?? []).filter((r: any) => {
+        const entry = licensedEntryForPackage(String(r.standard));
+        return !entry || (standardKeys?.has(entry.key) ?? false);
+      });
+      const v = evaluateConditionSets(
+        candidates.map((r: any) => ({ node_id: String(r.node_id), content: JSON.parse(String(r.content ?? "{}")) })),
+        q.query,
+      );
+      if (v) {
+        conditionVerdict = v;
+        conditionStandard = String((rows.results?.[0] as any)?.standard ?? "");
+      }
+    }
+  }
+  const conditionNote = conditionVerdict && conditionStandard
+    ? `${conditionVerdict.note} (computed from the ${conditionStandard} condition sets — machine evaluation, cite the package's clause.)`
+    : undefined;
   const verdictBlock = machineVerdict
     ? {
         unit_id: boundModel!.node_id,
@@ -732,6 +769,26 @@ async function handleAsk(
       }
     : null;
   if (machineVerdict) console.log("verdict engine:", boundModel!.node_id, "→", machineVerdict.verdict.toUpperCase(), machineVerdict.missing.length ? `(missing ${machineVerdict.missing.join(",")})` : "");
+  const conditionBlock = conditionVerdict
+    ? {
+        unit_id: conditionVerdict.matched[0] ?? conditionVerdict.nearest!.node_id,
+        type: "verdict",
+        docidentifier: `IEC SMART model (${conditionStandard})`,
+        payload: {
+          verdict: conditionVerdict.verdict,
+          missing: [],
+          checks: conditionVerdict.checks.map((c) => ({
+            expression: `${c.quantity_kind} within ${c.band}`,
+            values: { stated: c.stated },
+            result: c.in_band,
+          })),
+          ...(conditionVerdict.nearest
+            ? { nearest: conditionVerdict.nearest }
+            : { matched: conditionVerdict.matched }),
+        },
+      }
+    : null;
+  if (conditionVerdict) console.log("condition engine:", conditionVerdict.matched.join("|") || conditionVerdict.nearest!.node_id, "→", conditionVerdict.verdict.toUpperCase());
   try {
     const tR = Date.now();
     // ── The "my account" live read (TODO.ai-platform/03) — resolved
@@ -881,7 +938,7 @@ async function handleAsk(
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
@@ -934,7 +991,7 @@ async function handleAsk(
           const c2 = canonical0.includes(refusalAnswer())
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
             : await contractV2(env.DB, canonical0, usedHits);
-          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: verdictBlock ? [...c2.blocks, verdictBlock] : c2.blocks, context_applied: ctxApplied, read: readAs(),
+          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : [])], context_applied: ctxApplied, read: readAs(),
             // the evidence view's ground truth: the exact passages this
             // answer was built from, compact — cache hits carry none,
             // because the cache stores the answer and never the passages
@@ -1113,7 +1170,7 @@ async function handleAsk(
   // figure completion (#172) — see ./completion for the rationale
   completionBlocks.push(...(await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used)));
 
-  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
