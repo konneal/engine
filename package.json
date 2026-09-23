@@ -34,7 +34,7 @@
     "@oimlsmart/oiml-pubid": "^1.2.1"
   },
   "dependencies": {},
-  "version": "0.2.7",
+  "version": "0.2.10",
   "description": "The Konneal engine: the publisher-agnostic build pipeline and API plane for standards intelligence (retrieval, answer contract, verdicts, evaluation).",
   "license": "BSD-3-Clause",
   "type": "module",
