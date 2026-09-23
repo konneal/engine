@@ -398,9 +398,54 @@ async function researchRoute(c: RouteContext): Promise<Response> {
 // The non-API routes: the HTML pages, the unit-keyed figure assets and
 // the rendered publication documents. Everything else is generated from
 // the OpenAPI document.
+
+// The service's own permission catalog (TODO.openapi/03): the identity
+// service FETCHES this endpoint to verify every permission grant for
+// this client — it never holds a copy. The catalog derives from the
+// profile's own declarations (gated datasets, feature flags), so a
+// deployment's catalog cannot drift from what it enforces.
+function permissionsCatalog(): Record<string, unknown> {
+  const groups: Record<string, unknown>[] = [];
+  const perms: Record<string, unknown>[] = [];
+  for (const d of P().datasets ?? []) {
+    if (d.session && d.permission) {
+      perms.push({
+        id: "ai.dataset.externally-licensed",
+        description: `Access the ${d.label} dataset (federated, externally licensed content)`,
+      });
+    }
+  }
+  if (P().publisher.features?.drafts) {
+    perms.push({ id: "ai.drafts", description: "Ask the assistant to prepare draft acts" });
+  }
+  perms.push({ id: "ai.memories", description: "Personalized memory files on the assistant" });
+  perms.push({ id: "ai.research", description: "Deep-research multi-pass questions" });
+  perms.push({ id: "ai.keys.admin", description: "Create and revoke API keys" });
+  groups.push({ id: "ai", description: "The publications assistant's gated capabilities", permissions: perms });
+  return {
+    version: 1,
+    verbs: ["read", "write", "admin"],
+    groups,
+  };
+}
+
+async function openapiCatalogRoute(c: RouteContext): Promise<Response> {
+  return json(
+    {
+      openapi: "3.1.0",
+      info: { title: `${P().publisher.product_name} API`, version: c.env.INDEX_VERSION ?? "0" },
+      paths: {},
+      "x-oiml-permissions-catalog": permissionsCatalog(),
+    },
+    200,
+    corsHeaders(c.req),
+  );
+}
+
 const INFRA_ROUTES: Route[] = [
   { method: "GET", pattern: "/", handler: serveIndexPage },
   { method: "GET", pattern: "/api/", handler: serveIndexPage },
+  { method: "GET", pattern: "/api/openapi.json", handler: openapiCatalogRoute },
   { method: "GET", pattern: "/index.html", handler: serveIndexPage },
   { method: "GET", pattern: "/assets/*", handler: unitAssetRoute },
   { method: "GET", pattern: "/docs/*", handler: docsRoute },
