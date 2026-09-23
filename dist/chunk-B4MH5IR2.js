@@ -1637,7 +1637,7 @@ ${summary}` }] : [],
     const stated = quantitiesIn(q.query);
     if (severityWord && Object.keys(stated).length >= 1) {
       const docNum = modelDocHint?.doc_number;
-      const sql = docNum ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' AND standard = ?1" : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' LIMIT 40";
+      const sql = docNum ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' AND standard LIKE '%' || ?1" : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set'";
       const stmt = docNum ? env.DB.prepare(sql).bind(docNum) : env.DB.prepare(sql);
       const rows = await stmt.all().catch(() => ({ results: [] }));
       const candidates = (rows.results ?? []).filter((r) => {
