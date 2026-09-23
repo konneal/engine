@@ -49,6 +49,10 @@ legs, licensed pairs in both directions (entitled content serves;
 unentitled never appears), context-utilization and verdict legs. The
 nightly runs unattended against production and fails loudly on drift.
 
+## Ask it from your terminal
+
+The konneal CLI ships with the client package: npm i -g @konneal/client, then KONNEAL_BASE and KONNEAL_KEY in the environment give you konneal ask, konneal search and konneal keys list — streaming answers with citations and verdict blocks, the same API the site uses behind the same tiering.
+
 ## The path
 
 `npm create @konneal/publisher` → declare the profile → ingest your
