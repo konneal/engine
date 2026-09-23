@@ -732,9 +732,11 @@ async function handleAsk(
     const stated = quantitiesIn(q.query);
     if (severityWord && Object.keys(stated).length >= 1) {
       const docNum = modelDocHint?.doc_number;
+      // the doc number joins the STANDARD id (iec-60068-2-78), which is
+      // the doc number prefixed with the package-family prefix
       const sql = docNum
-        ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' AND standard = ?1"
-        : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' LIMIT 40";
+        ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' AND standard LIKE '%' || ?1"
+        : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set'";
       const stmt = docNum ? env.DB.prepare(sql).bind(docNum) : env.DB.prepare(sql);
       const rows = await stmt.all().catch(() => ({ results: [] }));
       const candidates = (rows.results ?? []).filter((r: any) => {
