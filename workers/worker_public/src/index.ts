@@ -421,7 +421,7 @@ function permissionsCatalog(): Record<string, unknown> {
   perms.push({ id: "ai.memories", description: "Personalized memory files on the assistant" });
   perms.push({ id: "ai.research", description: "Deep-research multi-pass questions" });
   perms.push({ id: "ai.keys.admin", description: "Create and revoke API keys" });
-  groups.push({ id: "ai", description: "The publications assistant's gated capabilities", permissions: perms });
+  groups.push({ id: "ai", description: `${P().publisher.product_name} gated capabilities`, permissions: perms });
   return {
     version: 1,
     verbs: ["read", "write", "admin"],
