@@ -85,6 +85,7 @@ export async function handleLogin(env: any, req: Request): Promise<Response> {
         expirationTtl: 600,
       },
     );
+    const silent = url0.searchParams.get("prompt") === "none";
     const url = buildAuthorizationUrl(meta, {
       clientId: cfg.clientId,
       redirectUri: cfg.redirectUri,
@@ -92,6 +93,11 @@ export async function handleLogin(env: any, req: Request): Promise<Response> {
       state,
       nonce,
       codeChallenge: pkce.challenge,
+      // silent SSO: the OP answers from its existing session or errors
+      // login_required — the callback then lands quietly, signed in or
+      // still anonymous, and the estate session carries to this site
+      // without a click
+      ...(silent ? { prompt: "none" } : {}),
     });
     return new Response(null, { status: 302, headers: { location: url } });
   } catch (e) {
@@ -104,6 +110,11 @@ export async function handleCallback(env: any, req: Request): Promise<Response> 
   if (!cfg) return redirectWithError("not_configured");
   const url = new URL(req.url);
   const opError = url.searchParams.get("error");
+  if (opError === "login_required") {
+    // the silent probe found no OP session — anonymous is the honest
+    // state, never an error
+    return new Response(null, { status: 302, headers: { location: "/?auth_silent=none" } });
+  }
   if (opError) {
     // the OP redirected back with its own failure (user denied consent,
     // session expired at the OP, …) — fail closed, in plain language

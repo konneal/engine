@@ -131,6 +131,9 @@ export function buildAuthorizationUrl(
     state: string;
     nonce: string;
     codeChallenge: string;
+    /** OIDC prompt ('none' = silent: the OP answers from its session or
+     *  errors login_required — never an interaction). */
+    prompt?: string;
   },
 ): string {
   const url = new URL(metadata.authorization_endpoint);
@@ -142,6 +145,7 @@ export function buildAuthorizationUrl(
   url.searchParams.set("nonce", params.nonce);
   url.searchParams.set("code_challenge", params.codeChallenge);
   url.searchParams.set("code_challenge_method", "S256");
+  if (params.prompt) url.searchParams.set("prompt", params.prompt);
   return url.toString();
 }
 
