@@ -1,13 +1,13 @@
 import {
   handleSearch
-} from "../../chunk-NRC4FBDQ.js";
+} from "../../chunk-YFDWKXEB.js";
 import {
   checkQuoteAnchors,
   handleAsk,
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-7K5XP4PB.js";
+} from "../../chunk-LWEVSMH6.js";
 import {
   buildMessages,
   citations,
@@ -29,7 +29,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-GCL73ZLT.js";
+} from "../../chunk-7UT76RQO.js";
 import {
   authenticate,
   corsHeaders,
@@ -979,7 +979,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-RX3W5JJW.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-OXHXXT5S.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-6V6AJG2V.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-RFKT7ZZY.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1602,7 +1602,7 @@ function permissionsCatalog() {
   perms.push({ id: "ai.memories", description: "Personalized memory files on the assistant" });
   perms.push({ id: "ai.research", description: "Deep-research multi-pass questions" });
   perms.push({ id: "ai.keys.admin", description: "Create and revoke API keys" });
-  groups.push({ id: "ai", description: "The publications assistant's gated capabilities", permissions: perms });
+  groups.push({ id: "ai", description: `${P().publisher.product_name} gated capabilities`, permissions: perms });
   return {
     version: 1,
     verbs: ["read", "write", "admin"],

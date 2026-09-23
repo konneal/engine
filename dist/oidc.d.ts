@@ -30,6 +30,9 @@ export declare function buildAuthorizationUrl(metadata: OidcMetadata, params: {
     state: string;
     nonce: string;
     codeChallenge: string;
+    /** OIDC prompt ('none' = silent: the OP answers from its session or
+     *  errors login_required — never an interaction). */
+    prompt?: string;
 }): string;
 export interface OidcTokenResponse {
     id_token: string;

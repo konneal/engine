@@ -2294,6 +2294,7 @@ function buildAuthorizationUrl(metadata, params) {
   url.searchParams.set("nonce", params.nonce);
   url.searchParams.set("code_challenge", params.codeChallenge);
   url.searchParams.set("code_challenge_method", "S256");
+  if (params.prompt) url.searchParams.set("prompt", params.prompt);
   return url.toString();
 }
 async function exchangeCode(metadata, params) {
@@ -2473,13 +2474,19 @@ async function handleLogin(env, req) {
         expirationTtl: 600
       }
     );
+    const silent = url0.searchParams.get("prompt") === "none";
     const url = buildAuthorizationUrl(meta, {
       clientId: cfg.clientId,
       redirectUri: cfg.redirectUri,
       scopes: "openid profile email roles",
       state,
       nonce,
-      codeChallenge: pkce.challenge
+      codeChallenge: pkce.challenge,
+      // silent SSO: the OP answers from its existing session or errors
+      // login_required — the callback then lands quietly, signed in or
+      // still anonymous, and the estate session carries to this site
+      // without a click
+      ...silent ? { prompt: "none" } : {}
     });
     return new Response(null, { status: 302, headers: { location: url } });
   } catch (e) {
@@ -2491,6 +2498,9 @@ async function handleCallback(env, req) {
   if (!cfg) return redirectWithError("not_configured");
   const url = new URL(req.url);
   const opError = url.searchParams.get("error");
+  if (opError === "login_required") {
+    return new Response(null, { status: 302, headers: { location: "/?auth_silent=none" } });
+  }
   if (opError) {
     const msg = opError === "access_denied" ? "Sign-in was cancelled." : opError === "temporarily_unavailable" ? "The sign-in service is busy. Please try again in a moment." : "The sign-in service reported a problem. Please try again.";
     return new Response(null, {
