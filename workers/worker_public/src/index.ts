@@ -445,6 +445,7 @@ async function openapiCatalogRoute(c: RouteContext): Promise<Response> {
 const INFRA_ROUTES: Route[] = [
   { method: "GET", pattern: "/", handler: serveIndexPage },
   { method: "GET", pattern: "/api/", handler: serveIndexPage },
+  { method: "GET", pattern: "/api/openapi.json", handler: openapiCatalogRoute },
   { method: "GET", pattern: "/index.html", handler: serveIndexPage },
   { method: "GET", pattern: "/assets/*", handler: unitAssetRoute },
   { method: "GET", pattern: "/docs/*", handler: docsRoute },
