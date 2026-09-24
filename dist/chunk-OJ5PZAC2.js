@@ -1,7 +1,7 @@
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-BV7IKH3N.js";
+} from "./chunk-FYGJDJPN.js";
 import {
   DATASETS,
   LIMITS,
@@ -12,230 +12,10 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-RESCBSX6.js";
+} from "./chunk-434NRPSS.js";
 import {
-  P,
-  __commonJS,
-  __toESM
-} from "./chunk-YTWPZE5O.js";
-
-// node_modules/@oimlsmart/oiml-pubid/dist/index.js
-var require_dist = __commonJS({
-  "node_modules/@oimlsmart/oiml-pubid/dist/index.js"(exports) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.parseOimlPubid = parseOimlPubid2;
-    exports.urnForOimlPubid = urnForOimlPubid;
-    exports.urnForIdentifier = urnForIdentifier;
-    function tokenize(src) {
-      const out = [];
-      let i = 0;
-      const s = src.trim();
-      while (i < s.length) {
-        const c = s[i];
-        if (/\s/.test(c)) {
-          i++;
-          continue;
-        }
-        if (/[A-Za-z]/.test(c)) {
-          let j = i;
-          while (j < s.length && /[A-Za-z/]/.test(s[j]))
-            j++;
-          out.push({ kind: "word", value: s.slice(i, j) });
-          i = j;
-        } else if (/[0-9]/.test(c)) {
-          let j = i;
-          while (j < s.length && /[0-9]/.test(s[j]))
-            j++;
-          out.push({ kind: "num", value: s.slice(i, j) });
-          i = j;
-        } else {
-          out.push({ kind: "punct", value: c });
-          i++;
-        }
-      }
-      return out;
-    }
-    var PUB_FAMILIES = /* @__PURE__ */ new Set(["r", "b", "d", "g", "e", "v", "s"]);
-    var CS_FAMILIES = /* @__PURE__ */ new Set(["pd", "od", "cid"]);
-    var LANG_CODE_MAP = {
-      e: "en",
-      f: "fr",
-      a: "ar",
-      en: "en",
-      fr: "fr",
-      ar: "ar",
-      eng: "en",
-      fra: "fr",
-      ara: "ar",
-      sr: "sr",
-      srp: "sr",
-      uk: "uk",
-      ua: "uk",
-      ukr: "uk",
-      zh: "zh",
-      zho: "zh",
-      chi: "zh",
-      cn: "zh",
-      de: "de",
-      deu: "de",
-      ger: "de",
-      ru: "ru",
-      rus: "ru",
-      pl: "pl",
-      pol: "pl",
-      pt: "pt",
-      por: "pt",
-      es: "es",
-      spa: "es",
-      sp: "es",
-      fa: "fa",
-      fas: "fa",
-      fara: "fa",
-      ro: "ro",
-      ron: "ro"
-    };
-    function languageFromMarker(raw) {
-      const segments = raw.toLowerCase().split("/").map((s) => s.trim()).filter(Boolean);
-      if (segments.length === 0)
-        return void 0;
-      if (!segments.every((s) => /^[a-z]+$/.test(s)))
-        return void 0;
-      const mapped = segments.map((s) => LANG_CODE_MAP[s] ?? s);
-      return [...new Set(mapped)].sort().join("-");
-    }
-    function parseOimlPubid2(src, bibdataYear = "") {
-      const t = tokenize(src);
-      let i = 0;
-      const peek = () => t[i];
-      const eat = () => t[i++];
-      const head = eat();
-      if (head?.kind !== "word" || head.value.toUpperCase() !== "OIML")
-        return null;
-      let series = "pub";
-      if (peek()?.kind === "punct" && peek().value === "-" && t[i + 1]?.kind === "word" && t[i + 1].value.toUpperCase() === "CS") {
-        eat();
-        eat();
-        series = "cs";
-      } else if (peek()?.kind === "word" && peek().value.toUpperCase() === "CS") {
-        eat();
-        series = "cs";
-      }
-      const fam = eat();
-      if (fam?.kind !== "word")
-        return null;
-      const family = fam.value.toLowerCase();
-      if (series === "cs" ? !CS_FAMILIES.has(family) : !PUB_FAMILIES.has(family))
-        return null;
-      if (peek()?.kind === "punct" && peek().value === "-")
-        eat();
-      const num = eat();
-      if (num?.kind !== "num")
-        return null;
-      let part;
-      if (peek()?.kind === "punct" && peek().value === "-" && t[i + 1]?.kind === "num") {
-        eat();
-        part = eat().value;
-      }
-      let year;
-      let edition;
-      let amendment;
-      let language;
-      if (peek()?.kind === "punct" && peek().value === ":" && t[i + 1]?.kind === "num" && t[i + 1].value.length === 4) {
-        eat();
-        year = eat().value;
-      }
-      if (peek()?.kind === "num" && t[i + 1]?.kind === "word" && /^(st|nd|rd|th)$/i.test(t[i + 1].value) && t[i + 2]?.kind === "word" && t[i + 2].value.toLowerCase() === "edition" && t[i + 3]?.kind === "num" && t[i + 3].value.length === 4) {
-        edition = eat().value;
-        eat();
-        eat();
-        year = eat().value;
-      }
-      for (; ; ) {
-        if (peek()?.kind === "punct" && peek().value === "(" && t[i + 1]?.kind === "word" && t[i + 1].value.toLowerCase() === "amendment" && t[i + 2]?.kind === "num") {
-          eat();
-          eat();
-          amendment = eat().value;
-          if (peek()?.kind === "punct" && peek().value === ")")
-            eat();
-          continue;
-        }
-        if (peek()?.kind === "punct" && peek().value === "(") {
-          let depth = 0;
-          let j = i;
-          const inner = [];
-          while (j < t.length && !(t[j].kind === "punct" && t[j].value === ")" && depth === 1)) {
-            if (t[j].kind === "punct" && t[j].value === "(") {
-              depth++;
-              j++;
-              continue;
-            }
-            inner.push(t[j].value);
-            j++;
-            if (depth === 1 && t[j]?.kind === "punct" && t[j].value === ")")
-              break;
-          }
-          if (j < t.length) {
-            const lang = languageFromMarker(inner.join(" "));
-            if (lang)
-              language = lang;
-            i = j + 1;
-            continue;
-          }
-        }
-        if (peek()?.kind === "word" && peek().value.toLowerCase() === "amendment") {
-          eat();
-          if (peek()?.kind === "punct" && peek().value === ":" && t[i + 1]?.kind === "num") {
-            eat();
-            amendment = eat().value;
-          } else if (peek()?.kind === "num") {
-            amendment = eat().value;
-          }
-          continue;
-        }
-        if (peek()?.kind === "punct" && peek().value === "," && t[i + 1]?.kind === "word" && t[i + 1].value.toLowerCase() === "edition") {
-          eat();
-          continue;
-        }
-        if (peek()?.kind === "word" && peek().value.toLowerCase() === "edition" && t[i + 1]?.kind === "num") {
-          eat();
-          const v = eat().value;
-          if (v.length === 4)
-            year ??= v;
-          else
-            edition ??= v;
-          continue;
-        }
-        break;
-      }
-      if (i < t.length)
-        return null;
-      return {
-        series,
-        family,
-        number: num.value,
-        ...part ? { part } : {},
-        ...year ? { year } : bibdataYear ? { year: bibdataYear } : {},
-        ...edition ? { edition } : {},
-        ...amendment ? { amendment } : {},
-        ...language ? { language } : {}
-      };
-    }
-    function urnForOimlPubid(pubid) {
-      const year = pubid.year ? `:${pubid.year}` : "";
-      const lang = pubid.language ? `:${pubid.language}` : "";
-      if (pubid.series === "cs") {
-        return `urn:oiml:pub:cs:${pubid.family}-${pubid.number}${year}${lang}`;
-      }
-      const part = pubid.part ? `-${pubid.part}` : "";
-      return `urn:oiml:pub:${pubid.family}:${pubid.number}${part}${year}${lang}`;
-    }
-    function urnForIdentifier(src, bibdataYear = "") {
-      const pubid = parseOimlPubid2(src, bibdataYear);
-      return pubid ? urnForOimlPubid(pubid) : null;
-    }
-  }
-});
+  P
+} from "./chunk-HYI32HMI.js";
 
 // workers/worker_public/src/ai.ts
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -386,9 +166,6 @@ async function lexicalPrefilter(env, query, k = LEXICAL_K) {
     return [];
   }
 }
-
-// workers/worker_public/src/codecs.ts
-var import_oiml_pubid = __toESM(require_dist());
 
 // node_modules/@pubid/pubid/dist/grammar/engine.js
 var ParseFailed = class extends Error {
@@ -1698,9 +1475,9 @@ var TYPE_LETTER = {
   seminar_report: "S",
   "seminar-report": "S"
 };
-function dualOimlSpine(side) {
+function parseOimlSpine(display) {
   try {
-    const h = oimlParser.parse(side.trim()).toHash();
+    const h = oimlParser.parse(display.trim()).toHash();
     if (h.number === void 0) return null;
     const kind = String(h._type ?? "").split(":").pop() ?? "";
     const letter = TYPE_LETTER[kind] ?? "";
@@ -1725,22 +1502,21 @@ var urnToDisplay = (u) => {
   return null;
 };
 var parsePubid = (doc) => {
+  if (!/^urn:/i.test(doc) && doc.includes("|")) {
+    const side = doc.split("|").map((s) => s.trim()).find((s) => /^(?:OIML|oiml)\b/i.test(s));
+    return side ? parseOimlSpine(side) : null;
+  }
   const src = /^urn:/i.test(doc) ? urnToDisplay(doc) : /^(?:OIML|oiml)\b/i.test(doc) ? doc : `OIML ${doc}`;
-  return src ? (0, import_oiml_pubid.parseOimlPubid)(src) : null;
+  return src ? parseOimlSpine(src) : null;
 };
 var oimlPubid = {
   parse(doc, edition) {
-    if (!/^urn:/i.test(doc) && doc.includes("|")) {
-      const side = doc.split("|").map((s) => s.trim()).find((s) => /^(?:OIML|oiml)\b/i.test(s));
-      const dual = side ? dualOimlSpine(side) : null;
-      if (dual) return dual;
-    }
     const p = parsePubid(doc);
-    if (!p || p.series !== "pub") return null;
-    const type = p.family.toUpperCase();
-    const num = String(Number(p.number));
-    const ed = edition ?? p.year ?? void 0;
-    return { doc_number: num, ...ed ? { edition: ed } : {}, label: `OIML ${type} ${num}${p.part ? `-${p.part}` : ""}${ed ? `:${ed}` : ""}` };
+    if (!p) return null;
+    if (edition && p.edition !== edition) {
+      return { ...p, edition, label: p.label.split(":")[0] + `:${edition}` };
+    }
+    return p;
   },
   scanQuestion(query) {
     const re = /\b(OIML\s+)?([RDBGE])(\s*)0*(\d{1,3})(?:\s*[-–]\s*\d+)?(?:\s*:\s*(\d{4}))?/gi;
@@ -1759,7 +1535,10 @@ var oimlPubid = {
   },
   familyOf(di) {
     const p = parsePubid(di);
-    if (p && p.series === "pub") return `${p.family.toUpperCase()}-${String(Number(p.number))}`;
+    if (p) {
+      const m2 = /^OIML ([A-Z]+) (\d{1,3})/.exec(p.label);
+      return m2 ? `${m2[1]}-${m2[2]}` : null;
+    }
     const m = /^(?:OIML\s+)?([A-Z])\s?(\d{1,3})(?:[-–]([0-9A-Za-z]+))?/.exec(di);
     return m ? `${m[1]}-${m[2]}` : null;
   }

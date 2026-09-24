@@ -64,10 +64,6 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install -r ingest/requirements.txt pytest ruff
       - run: python -m compileall -q ingest
-      # the pubid conformance corpus (the shared expectations the
-      # ingest grammar mirrors) ships inside the npm package; the
-      # pubid-testsuite checkout is the second expectation set
-      - run: npm install @oimlsmart/oiml-pubid --no-save
       - uses: actions/checkout@v4
         with:
           repository: pubid/pubid-testsuite

@@ -24,18 +24,15 @@ export interface RefCodec {
   familyOf(docidentifier: string): string | null;
 }
 
-// The OIML grammar is @oimlsmart/oiml-pubid — the estate's single
-// source of truth (real tokenizer: editions, amendments, languages,
-// the CS family — beyond what any regex here carried). This codec's
-// job is the ADAPTATION: the parser takes the prefixed form and
-// returns null for everything else; our callers also send bare forms
-// ("R 60-1:2021") and the URN provenance shape. The ONE construct the
-// strict grammar deliberately does not own is the DUAL-PUBLISHED print
-// ("ISO 4064-1:2024|OIML R 49-1:2024") — that lives in the unified
-// pubid grammar (@pubid/pubid, single-flavor import so the worker
-// bundle carries only the OIML grammar), and the retrieval spine of a
-// dual is its OIML side, whichever side prints first.
-import { parseOimlPubid } from "@oimlsmart/oiml-pubid";
+// The OIML grammar is the unified pubid grammar (@pubid/pubid's oiml
+// flavor — single-flavor import so the worker bundle carries the OIML
+// grammar and nothing else). This codec's job is the ADAPTATION: the
+// grammar takes the prefixed form and returns null for everything
+// else; our callers also send bare forms ("R 60-1:2021"), the URN
+// provenance shape, and the dual-published print ("ISO
+// 4064-1:2024|OIML R 49-1:2024") whose retrieval spine is its OIML
+// side, whichever side prints first. The estate's former grammar
+// (@oimlsmart/oiml-pubid) retired into this one (pubid/pubid-ts#63).
 import { oimlGrammarImplementation } from "@pubid/pubid/dist/flavors/oiml/implementation.js";
 
 const oimlParser = oimlGrammarImplementation();
@@ -55,12 +52,13 @@ interface PubidHash {
   edition?: string;
 }
 
-/** The OIML side of a dual-published print, through the unified
- *  grammar. Singles go through the strict grammar above — this path
- *  exists for the pipe construct and nothing else. */
-function dualOimlSpine(side: string): { doc_number: string; edition?: string; label: string } | null {
+/** The spine of a printed identifier through the unified grammar: the
+ *  type letter, the normalized number, the part and the edition year.
+ *  A dual-published print resolves to its OIML member (the caller picks
+ *  the side); unknown type kinds refuse — never a fabricated letter. */
+function parseOimlSpine(display: string): { doc_number: string; edition?: string; label: string } | null {
   try {
-    const h = oimlParser.parse(side.trim()).toHash() as PubidHash;
+    const h = oimlParser.parse(display.trim()).toHash() as PubidHash;
     if (h.number === undefined) return null;
     const kind = String(h._type ?? "").split(":").pop() ?? "";
     const letter = TYPE_LETTER[kind] ?? "";
@@ -89,8 +87,15 @@ const urnToDisplay = (u: string) => {
 };
 
 const parsePubid = (doc: string) => {
+  // a dual-published print: the OIML side is the spine, whichever side
+  // prints first — pick it before the bare-form normalization, which
+  // would mis-prefix the co-publisher's side
+  if (!/^urn:/i.test(doc) && doc.includes("|")) {
+    const side = doc.split("|").map((s) => s.trim()).find((s) => /^(?:OIML|oiml)\b/i.test(s));
+    return side ? parseOimlSpine(side) : null;
+  }
   const src = /^urn:/i.test(doc) ? urnToDisplay(doc) : /^(?:OIML|oiml)\b/i.test(doc) ? doc : `OIML ${doc}`;
-  return src ? parseOimlPubid(src) : null;
+  return src ? parseOimlSpine(src) : null;
 };
 
 /** OIML's grammar (delegated): type letter + 1–3 digits, optional part,
@@ -98,20 +103,13 @@ const parsePubid = (doc: string) => {
  *  edition is never part of the number. */
 export const oimlPubid: RefCodec = {
   parse(doc, edition) {
-    // the dual-published print: the OIML side is the spine, whichever
-    // side prints first — resolved before the strict grammar, whose
-    // null would otherwise be the whole answer
-    if (!/^urn:/i.test(doc) && doc.includes("|")) {
-      const side = doc.split("|").map((s) => s.trim()).find((s) => /^(?:OIML|oiml)\b/i.test(s));
-      const dual = side ? dualOimlSpine(side) : null;
-      if (dual) return dual;
-    }
     const p = parsePubid(doc);
-    if (!p || p.series !== "pub") return null;
-    const type = p.family.toUpperCase();
-    const num = String(Number(p.number)); // R 060 → R 60 (display and steering agree)
-    const ed = edition ?? p.year ?? undefined;
-    return { doc_number: num, ...(ed ? { edition: ed } : {}), label: `OIML ${type} ${num}${p.part ? `-${p.part}` : ""}${ed ? `:${ed}` : ""}` };
+    if (!p) return null;
+    // the caller's edition is bibdata's truth — it wins over the print's
+    if (edition && p.edition !== edition) {
+      return { ...p, edition, label: p.label.split(":")[0] + `:${edition}` };
+    }
+    return p;
   },
   scanQuestion(query) {
     const re = /\b(OIML\s+)?([RDBGE])(\s*)0*(\d{1,3})(?:\s*[-–]\s*\d+)?(?:\s*:\s*(\d{4}))?/gi;
@@ -131,7 +129,10 @@ export const oimlPubid: RefCodec = {
   },
   familyOf(di) {
     const p = parsePubid(di);
-    if (p && p.series === "pub") return `${p.family.toUpperCase()}-${String(Number(p.number))}`;
+    if (p) {
+      const m = /^OIML ([A-Z]+) (\d{1,3})/.exec(p.label);
+      return m ? `${m[1]}-${m[2]}` : null;
+    }
     const m = /^(?:OIML\s+)?([A-Z])\s?(\d{1,3})(?:[-–]([0-9A-Za-z]+))?/.exec(di);
     return m ? `${m[1]}-${m[2]}` : null;
   },
