@@ -27,23 +27,23 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-4XBU4J6B.js";
+} from "./chunk-OJ5PZAC2.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-BV7IKH3N.js";
+} from "./chunk-FYGJDJPN.js";
 import {
   canonicalRefusal,
   refusalAnswer
-} from "./chunk-FNJ457SE.js";
+} from "./chunk-RZ3UZVRR.js";
 import {
   entitlementScope,
   requestSalt,
   resolveRequestScope
-} from "./chunk-COKARI7O.js";
+} from "./chunk-IOZAZA7Y.js";
 import {
   LIMITS,
   MODELS,
@@ -53,10 +53,10 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-RESCBSX6.js";
+} from "./chunk-434NRPSS.js";
 import {
   P
-} from "./chunk-YTWPZE5O.js";
+} from "./chunk-HYI32HMI.js";
 
 // workers/worker_public/src/internal_gateway.ts
 async function retrieveInternal(service, auth, query) {
