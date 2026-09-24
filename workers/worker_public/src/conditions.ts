@@ -118,7 +118,7 @@ export function evaluateConditionSets(
       verdict: "pass",
       matched: matched.map((m) => m.node_id),
       checks: matched[0]!.checks,
-      note: `VERDICT: PASS — the stated combination (${kinds.join(", ")}) matches severity set(s) ${matched.map((m) => m.node_id).join(", ")}. Present this verdict and cite the set's clause.`,
+      note: `VERDICT: PASS — the stated combination (${kinds.join(", ")}) matches a severity set (${matched[0]!.checks.map((c) => c.band).join("; ")}). Present this verdict and cite the set's clause. The machine set identifier rides the verdict block as data — never write it in your prose.`,
     };
   }
   const nearest = scored[0]!;
@@ -127,6 +127,6 @@ export function evaluateConditionSets(
     matched: [],
     nearest: { node_id: nearest.node_id, distance: Number(nearest.distance.toFixed(2)), bands: nearest.checks.map((c) => c.band) },
     checks: nearest.checks,
-    note: `VERDICT: FAIL — no severity set admits the stated combination. The nearest set is ${nearest.node_id} (bands: ${nearest.checks.map((c) => c.band).join("; ")}). Say the combination is outside the menu and name the nearest set; never soften it.`,
+    note: `VERDICT: FAIL — no severity set admits the stated combination. The nearest set (bands: ${nearest.checks.map((c) => c.band).join("; ")}) is the closest match. Say the combination is outside the menu and describe the nearest set's bands; never soften it. The machine set identifier rides the verdict block as data — never write it in your prose.`,
   };
 }

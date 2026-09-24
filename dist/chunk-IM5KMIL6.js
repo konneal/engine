@@ -827,7 +827,7 @@ function evaluateConditionSets(nodes, query) {
       verdict: "pass",
       matched: matched.map((m) => m.node_id),
       checks: matched[0].checks,
-      note: `VERDICT: PASS \u2014 the stated combination (${kinds.join(", ")}) matches severity set(s) ${matched.map((m) => m.node_id).join(", ")}. Present this verdict and cite the set's clause.`
+      note: `VERDICT: PASS \u2014 the stated combination (${kinds.join(", ")}) matches a severity set (${matched[0].checks.map((c) => c.band).join("; ")}). Present this verdict and cite the set's clause. The machine set identifier rides the verdict block as data \u2014 never write it in your prose.`
     };
   }
   const nearest = scored[0];
@@ -836,7 +836,7 @@ function evaluateConditionSets(nodes, query) {
     matched: [],
     nearest: { node_id: nearest.node_id, distance: Number(nearest.distance.toFixed(2)), bands: nearest.checks.map((c) => c.band) },
     checks: nearest.checks,
-    note: `VERDICT: FAIL \u2014 no severity set admits the stated combination. The nearest set is ${nearest.node_id} (bands: ${nearest.checks.map((c) => c.band).join("; ")}). Say the combination is outside the menu and name the nearest set; never soften it.`
+    note: `VERDICT: FAIL \u2014 no severity set admits the stated combination. The nearest set (bands: ${nearest.checks.map((c) => c.band).join("; ")}) is the closest match. Say the combination is outside the menu and describe the nearest set's bands; never soften it. The machine set identifier rides the verdict block as data \u2014 never write it in your prose.`
   };
 }
 
@@ -985,7 +985,7 @@ function evaluateAggregation(nodes, query) {
   const rawTitle = String(content.name ?? content.definition ?? node.node_id.replace("/table/", ""));
   const cut = rawTitle.indexOf(" (");
   const tableTitle = cut > 0 ? rawTitle.slice(0, cut) : rawTitle.slice(0, 120);
-  const cite = (what) => `COMPUTED (${operation}) \u2014 ${what}, read from the typed table "${tableTitle}" (${node.node_id}). Present this result and cite the table's clause; the value is machine-computed from the table payload, do not recompute or round it differently.`;
+  const cite = (what) => `COMPUTED (${operation}) \u2014 ${what}, read from the typed table "${tableTitle}". Present this result and cite the table's clause; the value is machine-computed from the table payload, do not recompute or round it differently. The machine table identifier rides the verdict block as data \u2014 never write it in your prose.`;
   if (operation === "count") {
     const cc2 = classColumn(cols);
     if (cc2 && /\bclasses?\b/.test(qLower) && tokens(cc2.name).some((t) => t.length >= 3 && qLower.includes(t))) {
