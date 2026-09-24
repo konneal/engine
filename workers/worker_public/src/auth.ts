@@ -14,6 +14,7 @@ import {
   OidcError,
 } from "./oidc";
 import { clearSessionCookie, mintSessionCookie, mintSessionToken, rawSessionToken, readSession, sessionCookieFromToken, SessionClaims } from "./session";
+import { renewSessionClaims, retainRefreshToken } from "./oidc-refresh";
 import { bubbleConfirmPage, isAllowedBubbleOrigin } from "./bubble";
 import { dropOpAccessToken, retainOpAccessToken } from "./livedata";
 
@@ -46,6 +47,9 @@ export interface AuthConfig {
   redirectUri: string;
   sessionSecret: string;
 }
+
+// how long a session serves before renewal re-judges it against the OP
+const RENEW_AFTER_MS = 60 * 60 * 1000;
 
 function authConfig(env: any): AuthConfig | null {
   const issuer = (env.OIDC_ISSUER ?? "").trim().replace(/\/$/, "");
@@ -89,7 +93,7 @@ export async function handleLogin(env: any, req: Request): Promise<Response> {
     const url = buildAuthorizationUrl(meta, {
       clientId: cfg.clientId,
       redirectUri: cfg.redirectUri,
-      scopes: "openid profile email roles",
+      scopes: "openid profile email roles offline_access",
       state,
       nonce,
       codeChallenge: pkce.challenge,
@@ -181,6 +185,11 @@ export async function handleCallback(env: any, req: Request): Promise<Response> 
     if (typeof token.access_token === "string" && typeof token.expires_in === "number") {
       await retainOpAccessToken(env, session.token, token.access_token, token.expires_in);
     }
+    // the session's lifeline (oidc-refresh.ts): the OP's refresh token
+    // is what makes renewal a RE-JUDGMENT instead of a re-stamp
+    if (typeof token.refresh_token === "string" && token.refresh_token) {
+      await retainRefreshToken(env, session.token, token.refresh_token);
+    }
     // Bubble bridge: hand the session to the embedded panel as a Bearer
     // token via the confirm page — postMessage to the validated origin
     // ONLY, and only on the user's explicit click (bubble.ts). The
@@ -211,9 +220,34 @@ export async function handleMe(env: any, req: Request): Promise<Response> {
   const cfg = authConfig(env);
   const session = cfg ? await readSession(req, cfg.sessionSecret) : null;
   const headers: Record<string, string> = { "content-type": "application/json" };
-  // sliding renewal: a session older than a day re-mints on sight, so
-  // active users never hit the 7-day wall mid-conversation
-  if (session && cfg && Date.now() - session.iat > 24 * 3600 * 1000) {
+  // Renewal is a RE-JUDGMENT, not a re-stamp (oidc-refresh.ts): a
+  // session older than the threshold presents the OP's refresh token,
+  // whose grant re-judges the live standing — a deactivated account's
+  // grant family is dead, the OP refuses, and the session ENDS here
+  // instead of silently serving stale claims for a week. A session with
+  // no stored refresh token (pre-offline_access logins) falls back to
+  // the legacy re-stamp; a network refusal keeps the session and
+  // retries on the next load.
+  let effective: SessionClaims | null = session;
+  if (session && cfg && Date.now() - session.iat > RENEW_AFTER_MS) {
+    const raw = rawSessionToken(req);
+    if (raw) {
+      const renewed = await renewSessionClaims(env, { issuer: cfg.issuer, clientId: cfg.clientId, clientSecret: env.OIDC_CLIENT_SECRET, sessionSecret: cfg.sessionSecret }, session, raw);
+      if (renewed.kind === "ok") {
+        const freshClaims = renewed.renewed.claims;
+        const minted = await mintSessionToken(cfg.sessionSecret, freshClaims);
+        effective = { ...freshClaims, iat: Date.now(), exp: minted.expiresAt };
+        headers["set-cookie"] = sessionCookieFromToken(minted.token);
+      } else if (renewed.kind === "revoked") {
+        effective = null;
+        headers["set-cookie"] = clearSessionCookie();
+      }
+    }
+  }
+  if (effective && cfg && session && effective === session && Date.now() - session.iat > 24 * 3600 * 1000) {
+    // the legacy re-stamp: no refresh token available (pre-offline_access
+    // sessions) — the claims are what they were, but the 7-day wall still
+    // slides for active users
     headers["set-cookie"] = await mintSessionCookie(cfg.sessionSecret, {
       sub: session.sub,
       name: session.name,
@@ -224,12 +258,12 @@ export async function handleMe(env: any, req: Request): Promise<Response> {
   }
   return new Response(
     JSON.stringify({
-      authenticated: !!session,
-      name: session?.name ?? null,
-      email: session?.email ?? null,
-      picture: session?.picture ?? null,
-      roles: session?.roles ?? [],
-      tier: session ? "member" : "anon",
+      authenticated: !!effective,
+      name: effective?.name ?? null,
+      email: effective?.email ?? null,
+      picture: effective?.picture ?? null,
+      roles: effective?.roles ?? [],
+      tier: effective ? "member" : "anon",
       sign_in_available: !!cfg,
     }),
     { headers },
