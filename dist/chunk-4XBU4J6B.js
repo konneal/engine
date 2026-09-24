@@ -241,7 +241,7 @@ var require_dist = __commonJS({
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 async function embed(ai, _model, text) {
   let lastError = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt2 = 0; attempt2 < 3; attempt2++) {
     try {
       const vecs = await ai.embed([text]);
       if (vecs?.[0]?.length) return vecs[0];
@@ -249,12 +249,12 @@ async function embed(ai, _model, text) {
     } catch (e) {
       lastError = e;
     }
-    if (attempt < 2) await delay(250 * (attempt + 1));
+    if (attempt2 < 2) await delay(250 * (attempt2 + 1));
   }
   throw new Error(`embed failed after retries: ${String(lastError)}`);
 }
 async function rerank(ai, model, query, texts) {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt2 = 0; attempt2 < 2; attempt2++) {
     const scores = await ai.rerank(model, query, texts);
     if (scores && scores.some((s) => Number.isFinite(s))) return scores;
   }
@@ -262,7 +262,7 @@ async function rerank(ai, model, query, texts) {
   return null;
 }
 async function generateOnce(env, model, messages, effort) {
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt2 = 0; attempt2 < 2; attempt2++) {
     try {
       const res = await env.AI.run(model, {
         messages,
@@ -273,7 +273,7 @@ async function generateOnce(env, model, messages, effort) {
       });
       if (typeof res?.response === "string" && res.response.trim()) return res.response;
       if (typeof res?.choices?.[0]?.message?.content === "string" && res.choices[0].message.content.trim()) return res.choices[0].message.content;
-      if (attempt === 0) console.error("generate returned empty:", model);
+      if (attempt2 === 0) console.error("generate returned empty:", model);
     } catch (e) {
       console.error("generate failed:", model, String(e).slice(0, 120));
     }
@@ -339,8 +339,8 @@ var STOP = /* @__PURE__ */ new Set([
   "there"
 ]);
 async function lexicalPrefilter(env, query, k = LEXICAL_K) {
-  const match = ftsMatchQuery(query);
-  if (!match) return [];
+  const match2 = ftsMatchQuery(query);
+  if (!match2) return [];
   try {
     const res = await env.DB.prepare(
       `SELECT c.id, c.doc_id, c.docidentifier, c.doctype, c.doc_number, c.edition,
@@ -351,7 +351,7 @@ async function lexicalPrefilter(env, query, k = LEXICAL_K) {
         WHERE chunks_fts MATCH ?1
         ORDER BY rank
         LIMIT ?2`
-    ).bind(match, k).all();
+    ).bind(match2, k).all();
     const rows = res.results ?? [];
     return rows.map((r, i) => {
       const meta = {
@@ -389,6 +389,1334 @@ async function lexicalPrefilter(env, query, k = LEXICAL_K) {
 
 // workers/worker_public/src/codecs.ts
 var import_oiml_pubid = __toESM(require_dist());
+
+// node_modules/@pubid/pubid/dist/grammar/engine.js
+var ParseFailed = class extends Error {
+  pos;
+  constructor(message, pos) {
+    super(`${message} at line 1 char ${pos + 1}`);
+    this.name = "ParseFailed";
+    this.pos = pos;
+  }
+};
+var Ctx = class {
+  input;
+  pos = 0;
+  constructor(input) {
+    this.input = input;
+  }
+};
+var Fail = class extends Error {
+};
+function attempt(ctx, fn) {
+  const saved = ctx.pos;
+  try {
+    return fn();
+  } catch (e) {
+    if (e instanceof Fail) {
+      ctx.pos = saved;
+      return void 0;
+    }
+    throw e;
+  }
+}
+function applyAtom(atom, ctx, consumeAll) {
+  const saved = ctx.pos;
+  const result = atom._match(ctx, consumeAll);
+  if (consumeAll && ctx.pos < ctx.input.length) {
+    ctx.pos = saved;
+    throw new Fail(`Don't know what to do with ${JSON.stringify(ctx.input.slice(ctx.pos, ctx.pos + 10))}`);
+  }
+  return result;
+}
+function combine(a, b) {
+  if (a === void 0 || a === null)
+    return b;
+  if (b === void 0 || b === null)
+    return a;
+  if (typeof a === "string" && typeof b === "string")
+    return a + b;
+  if (typeof a === "string" && typeof b === "object")
+    return b;
+  if (typeof b === "string" && typeof a === "object")
+    return a;
+  if (typeof a === "object" && typeof b === "object") {
+    if (!Array.isArray(a) && !Array.isArray(b)) {
+      const out = { ...a };
+      for (const [k, v] of Object.entries(b)) {
+        if (k in out) {
+          console.warn(`Duplicate subtrees while merging result of sequence (keys: :${k}); only the values of the latter will be kept.`);
+        }
+        out[k] = v;
+      }
+      return out;
+    }
+    return [...flatten(a), ...flatten(b)];
+  }
+  return typeof b === "object" ? b : `${a}${b}`;
+}
+function flatten(t) {
+  return Array.isArray(t) ? t : [t];
+}
+var Str = class {
+  s;
+  constructor(s) {
+    this.s = s;
+  }
+  _match(ctx, _consumeAll) {
+    if (ctx.input.startsWith(this.s, ctx.pos)) {
+      ctx.pos += this.s.length;
+      return this.s;
+    }
+    throw new Fail(`Expected ${JSON.stringify(this.s)}`);
+  }
+};
+var Regex = class {
+  re;
+  constructor(pattern) {
+    this.re = new RegExp(`^(?:${pattern})`);
+  }
+  _match(ctx, _consumeAll) {
+    const m = this.re.exec(ctx.input.slice(ctx.pos));
+    if (!m)
+      throw new Fail(`Expected match on ${this.re.source}`);
+    const matched = m[0];
+    ctx.pos += matched.length;
+    return matched;
+  }
+};
+var Seq = class {
+  parts;
+  constructor(parts) {
+    this.parts = parts;
+  }
+  _match(ctx, consumeAll) {
+    let acc = void 0;
+    for (let i = 0; i < this.parts.length; i++) {
+      const r = applyAtom(this.parts[i], ctx, consumeAll && i === this.parts.length - 1);
+      acc = acc === void 0 && r === void 0 ? void 0 : combine(acc, r);
+    }
+    return acc;
+  }
+};
+var Alt = class {
+  options;
+  constructor(options) {
+    this.options = options;
+  }
+  _match(ctx, consumeAll) {
+    let lastFail = "no alternative matched";
+    for (const option of this.options) {
+      const r = attempt(ctx, () => applyAtom(option, ctx, consumeAll));
+      if (r !== void 0)
+        return r;
+      lastFail = "alternative failed";
+    }
+    throw new Fail(lastFail);
+  }
+};
+var Repeat = class {
+  atom;
+  min;
+  max;
+  constructor(atom, min, max) {
+    this.atom = atom;
+    this.min = min;
+    this.max = max;
+  }
+  get inner() {
+    return this.atom instanceof P2 ? this.atom.atom : this.atom;
+  }
+  _match(ctx, consumeAll) {
+    const results = [];
+    let count = 0;
+    while (count < this.max) {
+      const r = attempt(ctx, () => applyAtom(this.inner, ctx, false));
+      if (r === void 0)
+        break;
+      results.push(r);
+      count++;
+      if (ctx.pos >= ctx.input.length && count < this.min)
+        break;
+    }
+    if (count < this.min) {
+      throw new Fail(`Expected at least ${this.min} of repetition`);
+    }
+    if (consumeAll && count < this.max && ctx.pos < ctx.input.length) {
+      throw new Fail("Don't know what to do with trailing input after repetition");
+    }
+    if (results.some((r) => typeof r === "object"))
+      return results;
+    return results.join("");
+  }
+};
+var Maybe = class {
+  atom;
+  constructor(atom) {
+    this.atom = atom;
+  }
+  _match(ctx, consumeAll) {
+    const inner = this.atom instanceof P2 ? this.atom.atom : this.atom;
+    const r = attempt(ctx, () => applyAtom(inner, ctx, consumeAll));
+    if (r === void 0 || r === "")
+      return void 0;
+    return r;
+  }
+};
+var As = class {
+  atom;
+  key;
+  constructor(atom, key) {
+    this.atom = atom;
+    this.key = key;
+  }
+  get inner() {
+    return this.atom instanceof P2 ? this.atom.atom : this.atom;
+  }
+  _match(ctx, consumeAll) {
+    const r = this.inner._match(ctx, consumeAll);
+    return { [this.key]: r === void 0 ? null : r };
+  }
+};
+var Absent = class {
+  atom;
+  constructor(atom) {
+    this.atom = atom;
+  }
+  _match(ctx, _consumeAll) {
+    const inner = this.atom instanceof P2 ? this.atom.atom : this.atom;
+    const r = attempt(ctx, () => inner._match(ctx, false));
+    if (r !== void 0)
+      throw new Fail("unexpectedly matched");
+    return "";
+  }
+};
+var Present = class {
+  atom;
+  constructor(atom) {
+    this.atom = atom;
+  }
+  _match(ctx, _consumeAll) {
+    const inner = this.atom instanceof P2 ? this.atom.atom : this.atom;
+    const saved = ctx.pos;
+    try {
+      inner._match(ctx, false);
+    } catch (e) {
+      if (!(e instanceof Fail))
+        throw e;
+      ctx.pos = saved;
+      throw new Fail("present? probe did not match");
+    }
+    ctx.pos = saved;
+    return "";
+  }
+};
+var Ref = class {
+  rules;
+  name;
+  resolved;
+  constructor(rules, name) {
+    this.rules = rules;
+    this.name = name;
+  }
+  _match(ctx, consumeAll) {
+    if (!this.resolved) {
+      const rule = this.rules[this.name];
+      if (!rule)
+        throw new Error(`unknown rule :${this.name}`);
+      this.resolved = rule instanceof P2 ? rule.atom : rule;
+    }
+    return this.resolved._match(ctx, consumeAll);
+  }
+};
+var P2 = class _P {
+  atom;
+  constructor(atom) {
+    this.atom = atom;
+  }
+  then(...next) {
+    return new _P(new Seq([this.atom, ...next.map(unwrap)]));
+  }
+  or(...others) {
+    return new _P(new Alt([this.atom, ...others.map(unwrap)]));
+  }
+  repeat(min = 0, max = Infinity) {
+    return new _P(new Repeat(this.atom, min, max));
+  }
+  maybe() {
+    return new _P(new Maybe(this.atom));
+  }
+  as(key) {
+    return new _P(new As(this.atom, key));
+  }
+  absent() {
+    return new _P(new Absent(this.atom));
+  }
+  present() {
+    return new _P(new Present(this.atom));
+  }
+};
+function unwrap(p) {
+  return p instanceof P2 ? p.atom : p;
+}
+function str(s) {
+  return new P2(new Str(s));
+}
+function match(pattern) {
+  return new P2(new Regex(pattern));
+}
+function ref(rules, name) {
+  return new P2(new Ref(rules, name));
+}
+function parseGrammar(grammar, input) {
+  const ctx = new Ctx(input);
+  const root = new Ref(grammar.rules, grammar.root);
+  const result = attempt(ctx, () => applyAtom(root, ctx, true));
+  if (result === void 0) {
+    throw new ParseFailed(`Expected one of [${grammar.root.toUpperCase()}]`, ctx.pos);
+  }
+  return result;
+}
+
+// node_modules/@pubid/pubid/dist/flavors/oiml/grammar.js
+function buildRules() {
+  const rules = {};
+  const rule = (name, build) => {
+    rules[name] = build();
+  };
+  rule("space", () => str(" "));
+  rule("space?", () => ref(rules, "space").maybe());
+  rule("digits", () => match("\\d").repeat(1));
+  rule("year", () => match("\\d").repeat(4, 4).as("year"));
+  rule("comma", () => str(", "));
+  rule("comma?", () => ref(rules, "comma").maybe());
+  rule("comma_space", () => ref(rules, "comma").or(ref(rules, "space")));
+  rule("dash", () => str("-"));
+  rule("dot", () => str("."));
+  rule("words_digits", () => match("[\\dA-Za-z]").repeat(1));
+  rule("words", () => match("[A-Za-z]").repeat(1));
+  rule("words?", () => ref(rules, "words").maybe());
+  rule("year_digits", () => str("19").or(str("20")).then(match("\\d").repeat(2, 2), ref(rules, "digits").absent()));
+  rule("month_digits", () => match("\\d").repeat(2, 2));
+  rule("day_digits", () => match("\\d").repeat(2, 2));
+  rule("originator", () => ref(rules, "organization").as("publisher").then(ref(rules, "space?").then(str("/"), ref(rules, "organization").as("copublisher")).repeat(0)));
+  rule("comma_month_year", () => ref(rules, "comma").then(ref(rules, "words").as("month"), str(" "), ref(rules, "year_digits").as("year")));
+  rule("year_month", () => ref(rules, "year_digits").then(ref(rules, "dash"), ref(rules, "month_digits")));
+  rule("organization", () => str("OIML"));
+  rule("colon", () => str(":"));
+  rule("lparen", () => str("("));
+  rule("rparen", () => str(")"));
+  rule("slash", () => str("/"));
+  rule("identifier", () => ref(rules, "amendment_identifier").or(ref(rules, "amendment_short")).or(ref(rules, "annex_letter_identifier")).or(ref(rules, "annex_identifier")).or(ref(rules, "plus_supplement_identifier")).or(ref(rules, "trailing_supplement_identifier")).or(ref(rules, "bulletin_identifier")).or(ref(rules, "base")));
+  rule("publisher", () => str("OIML").as("publisher").then(ref(rules, "space")));
+  rule("doc_type", () => match("[BDEGRSVX]").as("type").then(ref(rules, "space")));
+  rule("bulletin_date", () => ref(rules, "space").then(ref(rules, "year_digits").as("year")).then(ref(rules, "dash").then(ref(rules, "two_digits").as("issue")).maybe()).then(ref(rules, "dash").then(ref(rules, "two_digits").as("sequence")).maybe()));
+  rule("two_digits", () => match("\\d").repeat(2, 2));
+  rule("roman_numeral", () => match("[IVXLCDM]").repeat(1).as("volume_roman"));
+  rule("bulletin_citation", () => ref(rules, "space").then(ref(rules, "roman_numeral")).then(ref(rules, "lparen"), ref(rules, "digits").as("issue_arabic"), ref(rules, "rparen")).then(str(" "), match("\\d").repeat(8, 8).as("article_id")));
+  rule("bulletin_identifier", () => ref(rules, "publisher").then(str("Bulletin").as("type")).then(ref(rules, "bulletin_citation").or(ref(rules, "bulletin_date")).maybe()).then(ref(rules, "language_portion").maybe().as("language")));
+  rule("number_only", () => ref(rules, "digits").as("number"));
+  rule("part_number", () => ref(rules, "dash").then(ref(rules, "digits").then(ref(rules, "slash").then(ref(rules, "dash"), ref(rules, "digits")).repeat(0)).as("part")));
+  rule("subpart_number", () => ref(rules, "dash").then(ref(rules, "digits").as("subpart")));
+  rule("named_suffix", () => ref(rules, "dash").then(str("GUM").then(ref(rules, "space"), ref(rules, "digits")).or(match("[A-Za-z]").repeat(1).then(str("_").maybe(), ref(rules, "digits")).repeat(0)).as("code_suffix")).or(str(" ").then(str("Brochure").as("code_suffix"), str("").as("space_suffix"))));
+  rule("full_number", () => ref(rules, "number_only").then(ref(rules, "part_number"), ref(rules, "subpart_number"), ref(rules, "named_suffix").maybe()).or(ref(rules, "number_only").then(ref(rules, "part_number"), ref(rules, "named_suffix").maybe())).or(ref(rules, "number_only").then(ref(rules, "named_suffix").maybe())));
+  rule("edition_number", () => str("6th").or(str("5th")).or(str("4th")).or(str("3rd")).or(str("2nd")).or(str("1st")).or(match("\\d").repeat(1).then(str("th").or(str("nd")).or(str("rd")).or(str("st")))).as("edition"));
+  rule("edition_text", () => str("Edition").or(str("edition")));
+  rule("edition_portion", () => str(", ").or(ref(rules, "space")).then(ref(rules, "edition_number").maybe(), ref(rules, "space?"), ref(rules, "edition_text"), ref(rules, "space?"), ref(rules, "year_digits").as("year")).as("edition_format"));
+  rule("date", () => ref(rules, "edition_portion").or(ref(rules, "space?").then(ref(rules, "colon"), ref(rules, "space?"), ref(rules, "year_digits").as("year"))).or(ref(rules, "space?").then(ref(rules, "lparen"), ref(rules, "year_digits").as("year"), ref(rules, "rparen"))));
+  rule("stage_iteration", () => match("\\d").repeat(1).then(str("."), match("\\d").repeat(1)).or(match("\\d").repeat(1)).as("iteration"));
+  rule("stage_abbr", () => str("WD").or(str("CD")).as("stage"));
+  rule("draft_stage", () => ref(rules, "space").then(ref(rules, "stage_iteration").maybe(), ref(rules, "stage_abbr")));
+  rule("lang_single", () => match("[EFRXDSCAU]"));
+  rule("lang_multi_oiml", () => str("PO").or(str("PT")).or(str("PE")).or(str("SR")));
+  rule("lang_multi", () => match("[a-z]").repeat(2, 2));
+  rule("language_code", () => ref(rules, "lang_single").then(ref(rules, "slash"), ref(rules, "lang_single")).or(ref(rules, "lang_multi_oiml")).or(ref(rules, "lang_single")).or(ref(rules, "lang_multi")).as("language"));
+  rule("language_with_space", () => ref(rules, "space").then(ref(rules, "lparen"), ref(rules, "language_code"), ref(rules, "rparen")).then(str("").as("space_before_lang")));
+  rule("language_without_space", () => ref(rules, "lparen").then(ref(rules, "language_code"), ref(rules, "rparen")));
+  rule("language_portion", () => ref(rules, "language_with_space").or(ref(rules, "language_without_space")));
+  rule("amendment_identifier", () => str("Amendment").then(ref(rules, "space"), ref(rules, "lparen"), ref(rules, "year_digits").as("year"), ref(rules, "rparen")).then(str(" "), str("to"), str(" ")).then(ref(rules, "base_without_language").as("base")).then(ref(rules, "language_portion").maybe().as("language")));
+  rule("amendment_short", () => ref(rules, "publisher").then(ref(rules, "doc_type")).then(ref(rules, "full_number").as("base_code")).then(str(" "), str("Amendment").as("amd_marker")).then(str(" ").then(ref(rules, "edition_text"), ref(rules, "space?"), ref(rules, "year_digits").as("year")).as("edition_format").or(ref(rules, "colon").then(ref(rules, "space?"), ref(rules, "year_digits").as("year")))).then(ref(rules, "language_portion").maybe().as("language")));
+  rule("trailing_supplement_identifier", () => ref(rules, "base_without_language").as("base").then(str(" "), str("Amendment").or(str("Errata")).as("trailing_marker")).then(ref(rules, "language_portion").maybe().as("language")));
+  rule("plus_supplement_identifier", () => ref(rules, "base_without_language").as("base").then(str("+"), str("Amendment").or(str("Errata")).as("plus_marker")).then(ref(rules, "colon").then(ref(rules, "year_digits").as("year")).maybe()).then(ref(rules, "language_portion").maybe().as("language")));
+  rule("annex_identifier", () => ref(rules, "base_without_language").as("base").then(str(" "), str("Annexes").as("annex_marker")).then(str(" ").then(ref(rules, "edition_text"), str(" "), ref(rules, "year_digits").as("year")).as("edition_format").or(ref(rules, "colon").then(ref(rules, "year_digits").as("year"))).maybe()).then(ref(rules, "language_portion").maybe().as("language")));
+  rule("annex_letter_value", () => match("[A-Z]").then(ref(rules, "dash").then(match("[A-Z]")).maybe()).as("annex_letter"));
+  rule("annex_letter_identifier", () => ref(rules, "base_without_language").as("base").then(str(" "), str("Annex"), str(" "), ref(rules, "annex_letter_value")).then(str(" ").then(ref(rules, "edition_text"), str(" "), ref(rules, "year_digits").as("year")).or(ref(rules, "colon").then(ref(rules, "year_digits").as("year"))).maybe()).then(ref(rules, "language_portion").maybe().as("language")));
+  rule("base_without_language", () => ref(rules, "publisher").then(ref(rules, "doc_type")).then(ref(rules, "full_number")).then(ref(rules, "date").maybe()).then(ref(rules, "draft_stage").maybe()));
+  rule("base", () => ref(rules, "publisher").then(ref(rules, "doc_type")).then(ref(rules, "full_number")).then(ref(rules, "date").maybe()).then(ref(rules, "draft_stage").maybe()).then(ref(rules, "language_portion").maybe()));
+  return rules;
+}
+var oimlGrammar = {
+  rules: buildRules(),
+  root: "identifier"
+};
+
+// node_modules/@pubid/pubid/dist/model/component.js
+function renderComponent(value, context) {
+  if (value === void 0 || value === null)
+    return void 0;
+  if (value instanceof Component)
+    return value.render(context);
+  return String(value);
+}
+var Component = class _Component {
+  /**
+   * The scalar this component degenerates to when `field` is its only
+   * significant value, else undefined (Pubid::Identifier#degenerate_scalar).
+   * A field holding another component never degenerates.
+   */
+  degenerateScalar(field) {
+    let found;
+    for (const [name, value] of Object.entries(this)) {
+      if (value === void 0 || value === null || value === "")
+        continue;
+      if (this.fieldIsDefaulted(name, value))
+        continue;
+      if (name === field) {
+        if (value instanceof _Component)
+          return void 0;
+        found = String(value);
+      } else {
+        return void 0;
+      }
+    }
+    return found;
+  }
+  /** True when `value` equals the field's declared default. */
+  fieldIsDefaulted(_name, _value) {
+    return false;
+  }
+};
+var pad2 = (value) => value.padStart(2, "0");
+var PubidDate = class extends Component {
+  year;
+  month;
+  day;
+  undated;
+  constructor(attrs) {
+    super();
+    this.year = attrs["year"];
+    this.month = attrs["month"];
+    this.day = attrs["day"];
+    this.undated = attrs["undated"] ?? false;
+  }
+  present() {
+    if (this.undated)
+      return true;
+    return this.year !== void 0 && this.year !== "";
+  }
+  render(context) {
+    if (this.undated && (this.year === void 0 || this.year === ""))
+      return "--";
+    if (!this.present())
+      return void 0;
+    if (context === "urn")
+      return this.year;
+    if (this.month === void 0)
+      return this.year;
+    let result = `${this.year}-${pad2(this.month)}`;
+    if (this.day !== void 0)
+      result += `-${pad2(this.day)}`;
+    return result;
+  }
+  toWire() {
+    const wire = {};
+    if (this.year !== void 0)
+      wire["year"] = this.year;
+    if (this.month !== void 0)
+      wire["month"] = this.month;
+    if (this.day !== void 0)
+      wire["day"] = this.day;
+    if (this.undated)
+      wire["undated"] = true;
+    return wire;
+  }
+  fieldIsDefaulted(name, value) {
+    return name === "undated" && value === false;
+  }
+};
+var Publisher = class extends Component {
+  body;
+  constructor(attrs) {
+    super();
+    this.body = attrs["body"];
+  }
+  render(context) {
+    return context === "urn" ? this.body.toLowerCase() : this.body;
+  }
+  toWire() {
+    return { body: this.body };
+  }
+};
+var Language = class extends Component {
+  static CHAR_MAP = {
+    R: "ru",
+    F: "fr",
+    E: "en",
+    A: "ar",
+    S: "es",
+    D: "de"
+  };
+  code;
+  originalCode;
+  constructor(attrs) {
+    super();
+    this.code = attrs["code"];
+    this.originalCode = attrs["originalCode"] ?? attrs["original_code"];
+  }
+  render(context) {
+    if (context === "urn")
+      return this.code.toLowerCase();
+    if (this.originalCode !== void 0) {
+      return this.originalCode.length === 1 ? this.code : this.originalCode;
+    }
+    return this.code;
+  }
+  toWire() {
+    return this.originalCode === void 0 ? { code: this.code } : { code: this.code, original_code: this.originalCode };
+  }
+};
+var Edition = class extends Component {
+  number;
+  phase;
+  constructor(attrs) {
+    super();
+    this.number = attrs["number"];
+    this.phase = attrs["phase"];
+  }
+  render(context) {
+    void context;
+    return this.phase === void 0 ? this.number : `${this.number}${this.phase}`;
+  }
+  toWire() {
+    return this.phase === void 0 ? { number: this.number } : { number: this.number, phase: this.phase };
+  }
+};
+var Iteration = class extends Component {
+  string;
+  constructor(attrs) {
+    super();
+    this.string = attrs["string"];
+  }
+  render(_context) {
+    return this.string;
+  }
+  toWire() {
+    return { string: this.string };
+  }
+};
+
+// node_modules/@pubid/pubid/dist/model/attribute.js
+function extendAttributes(parent, defs) {
+  return { ...parent.attributes, ...defs };
+}
+var BASE_ATTRIBUTES = {
+  number: { type: "string" },
+  part: { type: "string" },
+  subpart: { type: "string" },
+  stage_iteration: { type: Iteration },
+  date: { type: PubidDate },
+  edition: { type: Edition },
+  languages: { type: Language, collection: true },
+  publisher: { type: Publisher },
+  copublishers: { type: Publisher, collection: true },
+  all_parts: { type: "boolean", default: false }
+};
+function keyValue(...fields) {
+  return fields;
+}
+var FLAT_SCALAR_COMPONENTS = {
+  edition: "edition",
+  date: "year",
+  stage_iteration: "stage_iteration"
+};
+var FLAT_SCALAR_FIELDS = {
+  edition: "number",
+  date: "year",
+  stage_iteration: "string"
+};
+
+// node_modules/@pubid/pubid/dist/model/urn-generator.js
+var BaseUrnGenerator = class {
+  identifier;
+  constructor(identifier) {
+    this.identifier = identifier;
+  }
+  generate() {
+    const parts = ["urn", this.urnNamespace()];
+    const push = (v) => {
+      if (v !== void 0 && v !== null && v !== "")
+        parts.push(v);
+    };
+    push(this.urnPublisher());
+    push(this.urnType());
+    push(this.urnNumber());
+    push(this.urnPart());
+    push(this.urnSubpart());
+    push(this.urnYear());
+    push(this.urnEdition());
+    push(this.urnLanguage());
+    return parts.join(":");
+  }
+  /** Template methods — override in subclasses (Ruby precedent). */
+  urnNamespace() {
+    const [, flavor] = this.identifier.constructor.polymorphicName.split(":");
+    return flavor ?? "unknown";
+  }
+  /** Reads a DECLARED attribute only (Base#maybe) — constants never appear. */
+  maybe(name) {
+    const attributes = this.identifier.constructor.attributes;
+    if (!attributes || !(name in attributes))
+      return void 0;
+    return this.identifier[name];
+  }
+  urnPublisher() {
+    const pub = this.maybe("publisher");
+    if (pub === void 0 || pub === null)
+      return void 0;
+    return renderComponent(pub, "urn");
+  }
+  urnType() {
+    return void 0;
+  }
+  urnNumber() {
+    const val = this.maybe("number") ?? this.maybe("code");
+    return val === void 0 || val === null ? void 0 : renderComponent(val, "urn");
+  }
+  urnPart() {
+    const val = this.maybe("part");
+    return val === void 0 || val === null ? void 0 : `-${renderComponent(val, "urn")}`;
+  }
+  urnSubpart() {
+    const val = this.maybe("subpart");
+    return val === void 0 || val === null ? void 0 : `-${renderComponent(val, "urn")}`;
+  }
+  urnYear() {
+    const date = this.maybe("date");
+    if (date !== void 0 && date !== null && typeof date === "object" && "render" in date) {
+      const rendered = date.render("urn");
+      return rendered ?? void 0;
+    }
+    if (date !== void 0 && date !== null)
+      return String(date);
+    const year = this.maybe("year");
+    return year === void 0 || year === null ? void 0 : String(year);
+  }
+  urnEdition() {
+    const ed = this.maybe("edition");
+    if (ed === void 0 || ed === null)
+      return void 0;
+    const num = typeof ed === "object" && "number" in ed ? ed.number : ed;
+    return num === void 0 || num === null || num === "" ? void 0 : `ed.${String(num)}`;
+  }
+  urnLanguage() {
+    const langs = this.maybe("languages");
+    if (!Array.isArray(langs) || langs.length === 0)
+      return void 0;
+    return langs.map((l) => renderComponent(l, "urn")).filter((s) => s !== void 0).join(",");
+  }
+};
+
+// node_modules/@pubid/pubid/dist/model/identifier.js
+var TYPE_REGISTRY = /* @__PURE__ */ new Map();
+function registerType(klass) {
+  TYPE_REGISTRY.set(klass.polymorphicName, klass);
+}
+function resolveType(type) {
+  return TYPE_REGISTRY.get(type);
+}
+function isScalarType(t) {
+  return typeof t === "string";
+}
+function coerce(value, spec) {
+  if (value === void 0 || value === null)
+    return value;
+  if (spec.collection) {
+    const list = Array.isArray(value) ? value : [value];
+    return list.map((v) => coerceOne(v, spec));
+  }
+  return coerceOne(value, spec);
+}
+function coerceOne(value, spec) {
+  if (isScalarType(spec.type)) {
+    if (spec.type === "integer")
+      return Number(value);
+    if (spec.type === "boolean")
+      return Boolean(value);
+    return typeof value === "object" && value !== null ? value : String(value);
+  }
+  if (value instanceof spec.type)
+    return value;
+  if (value instanceof BaseIdentifier)
+    return value;
+  if (typeof value === "object" && value !== null) {
+    if (typeof spec.type === "function" && spec.type.prototype instanceof BaseIdentifier) {
+      const idCtor = spec.type;
+      const v = value;
+      return "_type" in v ? idCtor.fromHash(v) : idCtor.fromHash({ ...v, _type: idCtor.polymorphicName });
+    }
+    return new spec.type(value);
+  }
+  return value;
+}
+function isEmptyValue(value) {
+  if (value === "")
+    return true;
+  if (Array.isArray(value) && value.length === 0)
+    return true;
+  return false;
+}
+function resolveDefault(spec) {
+  return typeof spec.default === "function" ? spec.default() : spec.default;
+}
+var BaseIdentifier = class _BaseIdentifier {
+  /** The root table; subclasses compose via extendAttributes(BaseIdentifier, …). */
+  static attributes = BASE_ATTRIBUTES;
+  constructor(attrs = {}) {
+    for (const [name, spec] of Object.entries(this.classAttributes())) {
+      const value = attrs[name];
+      if (value !== void 0) {
+        this[name] = coerce(value, spec);
+      } else if (spec.initializeEmpty && spec.collection) {
+        this[name] = [];
+      }
+    }
+  }
+  /** The human form (Ruby render(format: :human) → the flavor renderer). */
+  toHuman() {
+    return this.render();
+  }
+  /** Ruby to_urn: the flavor's UrnGenerator, else the base template. */
+  toUrn() {
+    const Generator = this.constructor.urnGenerator ?? BaseUrnGenerator;
+    return new Generator(this).generate();
+  }
+  fromHash(hash) {
+    return this.constructor.fromHash(hash);
+  }
+  classAttributes() {
+    return this.constructor.attributes;
+  }
+  /** Wire key for an attribute: custom mapping or the attribute name. */
+  wireKeyFor(name) {
+    const mappings = this.constructor.mappings;
+    const found = mappings?.find((m) => m.to === name);
+    return found ?? { wire: name };
+  }
+  attrValue(name) {
+    return this[name];
+  }
+  /** Serialize one attribute's value (component → toWire, nested identifier → toHash, scalars as-is). */
+  serializeValue(value) {
+    if (value instanceof _BaseIdentifier)
+      return value.toHashNested();
+    if (value instanceof Component)
+      return value.toWire();
+    if (Array.isArray(value))
+      return value.map((v) => this.serializeValue(v));
+    return value;
+  }
+  /** Nested serialization: same as toHash but with the unfiltered mappings. */
+  toHashNested() {
+    const ctor = this.constructor;
+    if (ctor.mappingsNested === void 0)
+      return this.toHash();
+    return this.toHashWith(ctor.mappingsNested);
+  }
+  toHash() {
+    return this.toHashWith(this.constructor.mappings);
+  }
+  toHashWith(mappings) {
+    const hash = { _type: this.constructor.polymorphicName };
+    const emitted = mappings ? mappings.map((m) => [m.to, m.wire, m.toWire]) : Object.keys(this.classAttributes()).map((name) => [name, name, void 0]);
+    for (const [name, wire, toWire] of emitted) {
+      const value = this.attrValue(name);
+      if (value === void 0 || value === null)
+        continue;
+      const spec = this.classAttributes()[name];
+      if (spec && isEmptyValue(value))
+        continue;
+      if (spec?.default !== void 0 && deepEqual(value, resolveDefault(spec)))
+        continue;
+      const serialized = toWire ? toWire(this) : this.serializeValue(value);
+      if (serialized === void 0 || serialized === null)
+        continue;
+      hash[wire] = serialized;
+    }
+    this.flattenScalars(hash);
+    this.constructor.compactHash?.(this, hash);
+    return hash;
+  }
+  /**
+   * Degenerate single-field components collapse to their scalar
+   * (identifier.rb flatten_scalar_components): `date` RENAMES to `year`,
+   * `edition` keeps its name; guards: never overwrite an emitted wire
+   * key, never rename onto a declared attribute name.
+   */
+  flattenScalars(hash) {
+    const table = { ...FLAT_SCALAR_COMPONENTS, ...this.constructor.flatScalarComponents };
+    for (const [attrName, flatKey] of Object.entries(table)) {
+      const key = attrName in hash ? attrName : void 0;
+      if (key === void 0)
+        continue;
+      const value = hash[key];
+      const field = FLAT_SCALAR_FIELDS[attrName] ?? this.constructor.flatScalarFields?.[attrName];
+      if (field === void 0)
+        continue;
+      const model = this.attrValue(attrName);
+      if (Array.isArray(value) && Array.isArray(model)) {
+        if (model.every((c) => c instanceof Component) && model.length === value.length) {
+          const scalars = model.map((c) => c.degenerateScalar(field));
+          if (scalars.every((s) => s !== void 0))
+            hash[key] = scalars;
+        }
+        continue;
+      }
+      if (!(model instanceof Component))
+        continue;
+      const scalar = model.degenerateScalar(field);
+      if (scalar === void 0)
+        continue;
+      if (flatKey !== key) {
+        if (flatKey in hash || flatKey in this.classAttributes())
+          continue;
+        delete hash[key];
+        hash[flatKey] = scalar;
+      } else {
+        hash[key] = scalar;
+      }
+    }
+  }
+  static fromHash(hash) {
+    const klass = typeof hash["_type"] === "string" ? resolveType(hash["_type"]) : void 0;
+    if (klass && klass !== this) {
+      return klass.fromHash(hash);
+    }
+    const inflated = this.inflateScalarComponents(hash);
+    return new this(this.applyMappings(inflated));
+  }
+  /** Re-nest flat scalars into component hashes (identifier.rb inflate_scalar_components). */
+  static inflateScalarComponents(data) {
+    const klass = this;
+    if (!klass.attributes)
+      return data;
+    const convertedKeys = new Set((klass.mappings ?? []).map((m) => m.wire));
+    const out = { ...data };
+    for (const [attrName, flatKey] of Object.entries({ ...FLAT_SCALAR_COMPONENTS, ...klass.flatScalarComponents })) {
+      const spec = klass.attributes[attrName];
+      if (!spec || typeof spec.type === "string")
+        continue;
+      if (convertedKeys.has(flatKey))
+        continue;
+      if (flatKey !== attrName && flatKey in klass.attributes)
+        continue;
+      const value = out[flatKey];
+      if (value === void 0 || value === null || typeof value === "object")
+        continue;
+      const field = FLAT_SCALAR_FIELDS[attrName];
+      if (Array.isArray(value))
+        continue;
+      delete out[flatKey];
+      out[attrName] = { [field]: String(value) };
+    }
+    return out;
+  }
+  /** Apply custom `fromWire` converters to the inflated hash. */
+  static applyMappings(data) {
+    const klass = this;
+    const mappings = klass.mappings;
+    if (!mappings)
+      return data;
+    const out = { ...data };
+    for (const m of mappings) {
+      if (m.fromWire && m.wire in out) {
+        const value = m.fromWire(out);
+        if (value !== void 0 && value !== null)
+          out[m.to] = value;
+      } else if (m.wire !== m.to && m.wire in out) {
+        out[m.to] = out[m.wire];
+        delete out[m.wire];
+      }
+    }
+    return out;
+  }
+};
+function deepEqual(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// node_modules/@pubid/pubid/dist/flavors/oiml/model.js
+var KIND_BY_TYPE = {
+  B: "basic-publication",
+  D: "document",
+  E: "expert-report",
+  G: "guide",
+  R: "recommendation",
+  S: "seminar-report",
+  V: "vocabulary"
+};
+var TYPE_STRINGS = {
+  "basic-publication": "B",
+  document: "D",
+  "expert-report": "E",
+  guide: "G",
+  recommendation: "R",
+  "seminar-report": "S",
+  vocabulary: "V"
+};
+function isObj(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+function str2(v) {
+  return v === void 0 || v === null ? void 0 : String(v);
+}
+function extractLanguage(langData) {
+  if (isObj(langData))
+    return str2(langData["language"]);
+  return str2(langData);
+}
+var SINGLE_ATTRS = {
+  publisher: { type: "string" },
+  language: { type: "string" },
+  parsed_format: { type: "string", default: "short" },
+  number: { type: "string" },
+  part: { type: "string" },
+  subpart: { type: "string" },
+  suffix: { type: "string" },
+  space_suffix: { type: "boolean", default: false },
+  year: { type: "string" },
+  edition: { type: "string" },
+  stage: { type: "string" },
+  iteration: { type: "string" }
+};
+var OimlBase = class extends BaseIdentifier {
+  effectiveFormat() {
+    return this.parsed_format === "long" ? "long" : "short";
+  }
+};
+var OimlSingle = class extends OimlBase {
+  /** Ruby Identifiers::CodeNumber#code. */
+  composedCode() {
+    if (this.number === void 0)
+      return void 0;
+    let result = this.number;
+    if (this.part)
+      result += `-${this.part}`;
+    if (this.subpart)
+      result += `-${this.subpart}`;
+    if (this.suffix)
+      result += `${this.space_suffix ? " " : "-"}${this.suffix}`;
+    return result;
+  }
+  typeString() {
+    return TYPE_STRINGS[this.constructor.polymorphicName.slice("pubid:oiml:".length)] ?? "R";
+  }
+  /** renderSingle — the formatOverride threads through supplement rendering. */
+  render(formatOverride) {
+    const format = formatOverride ?? this.effectiveFormat();
+    let result = `${this.publisher} ${this.typeString()} ${this.composedCode()}`;
+    let usingEditionFormat = false;
+    if (this.edition && this.year) {
+      result += ` ${this.edition} Edition ${this.year}`;
+      usingEditionFormat = true;
+    } else if (this.edition) {
+      result += ` ${this.edition}`;
+      usingEditionFormat = true;
+    } else if (this.year) {
+      if (format === "long") {
+        result += ` Edition ${this.year}`;
+        usingEditionFormat = true;
+      } else {
+        result += `:${this.year}`;
+      }
+    }
+    if (this.stage || this.iteration) {
+      result += " ";
+      if (this.iteration)
+        result += this.iteration;
+      if (this.stage)
+        result += this.stage;
+    }
+    if (this.language) {
+      result += usingEditionFormat || this.parsed_format === "short_with_space" ? ` (${this.language})` : `(${this.language})`;
+    }
+    return result;
+  }
+};
+function oimlSingleClass(kind) {
+  const isBulletin = kind === "bulletin";
+  class OimlSingleIdentifier extends OimlSingle {
+    static polymorphicName = `pubid:oiml:${kind}`;
+    static attributes = isBulletin ? extendAttributes(BaseIdentifier, { ...SINGLE_ATTRS, sequence: { type: "string" } }) : extendAttributes(BaseIdentifier, SINGLE_ATTRS);
+    render(formatOverride) {
+      if (!isBulletin)
+        return super.render(formatOverride);
+      if (this.parsed_format === "citation" && this.year && this.number && this.sequence) {
+        return `${this.publisher} Bulletin ${toRoman(Number(this.year) - 1959)}(${Number(this.number)}) ${this.year}${this.number}${this.sequence}`;
+      }
+      let result = `${this.publisher} Bulletin`;
+      if (this.year) {
+        result += ` ${this.year}`;
+        if (this.number)
+          result += `-${this.number}`;
+        if (this.sequence)
+          result += `-${this.sequence}`;
+      }
+      if (this.language)
+        result += ` (${this.language})`;
+      return result;
+    }
+  }
+  registerType(OimlSingleIdentifier);
+  return OimlSingleIdentifier;
+}
+var SUPP_ATTRS = {
+  language: { type: "string" },
+  parsed_format: { type: "string", default: "short" },
+  base: { type: OimlSingle },
+  supp_year: { type: "string" },
+  trailing: { type: "boolean", default: false },
+  joined: { type: "boolean", default: false },
+  letter: { type: "string" },
+  year_on_base: { type: "boolean", default: false }
+};
+var SUPP_MAPPINGS = keyValue({ wire: "language", to: "language" }, { wire: "parsed_format", to: "parsed_format" }, { wire: "base", to: "base" }, { wire: "year", to: "supp_year" }, { wire: "trailing", to: "trailing" }, { wire: "joined", to: "joined" }, { wire: "letter", to: "letter" }, { wire: "year_on_base", to: "year_on_base" });
+var OimlSupplement = class extends OimlBase {
+  supplementType() {
+    const kind = this.constructor.polymorphicName.slice("pubid:oiml:".length);
+    if (kind === "annex")
+      return this.letter ? `Annex ${this.letter}` : "Annexes";
+    return kind === "errata" ? "Errata" : "Amendment";
+  }
+  render() {
+    const kind = this.constructor.polymorphicName.slice("pubid:oiml:".length);
+    if (kind === "annex")
+      return this.renderAnnex();
+    return this.renderSupplement();
+  }
+  /** renderSupplement */
+  renderSupplement() {
+    if (this.joined) {
+      let result2 = `${stripLanguage(this.base.render())}+${this.supplementType()}`;
+      if (this.supp_year)
+        result2 += `:${this.supp_year}`;
+      if (this.language)
+        result2 += ` (${this.language})`;
+      return result2;
+    }
+    if (this.trailing) {
+      let result2 = `${stripLanguage(this.base.render())} ${this.supplementType()}`;
+      if (this.language)
+        result2 += ` (${this.language})`;
+      return result2;
+    }
+    const baseFormat = this.effectiveFormat() !== "short" ? this.effectiveFormat() : this.base.parsed_format === "long" ? "long" : "short";
+    const baseStr = stripLanguage(this.base.render(baseFormat));
+    let result = `${this.supplementType()} (${this.supp_year}) to ${baseStr}`;
+    if (this.language)
+      result += ` (${this.language})`;
+    return result;
+  }
+  /** renderAnnex */
+  renderAnnex() {
+    if (this.year_on_base) {
+      const marker = this.letter ? `Annex ${this.letter}` : "Annexes";
+      let result2 = `${stripLanguage(this.base.render())} ${marker}`;
+      if (this.language)
+        result2 += ` (${this.language})`;
+      return result2;
+    }
+    const annexFormat = this.effectiveFormat();
+    const baseStr = this.base.render(this.base.parsed_format === "long" ? "long" : "short").replace(/:.*/, "").replace(/\s+Edition\s+\d{4}/, "").replace(/\(.*\)/, "").trim();
+    let result = baseStr;
+    if (this.letter) {
+      result += ` Annex ${this.letter}`;
+      if (this.supp_year)
+        result += ` Edition ${this.supp_year}`;
+    } else {
+      result += " Annexes";
+      if (this.supp_year) {
+        if (annexFormat === "long") {
+          result += ` Edition ${this.supp_year}`;
+        } else {
+          result += `:${this.supp_year}`;
+        }
+      }
+    }
+    if (this.language)
+      result += ` (${this.language})`;
+    return result;
+  }
+};
+function oimlSupplementClass(kind) {
+  class OimlSupplementIdentifier extends OimlSupplement {
+    static polymorphicName = `pubid:oiml:${kind}`;
+    static attributes = extendAttributes(BaseIdentifier, SUPP_ATTRS);
+    static mappings = SUPP_MAPPINGS;
+  }
+  registerType(OimlSupplementIdentifier);
+  return OimlSupplementIdentifier;
+}
+var KIND_CLASSES = {};
+for (const kind of [
+  "recommendation",
+  "basic-publication",
+  "document",
+  "guide",
+  "vocabulary",
+  "expert-report",
+  "seminar-report",
+  "bulletin"
+]) {
+  KIND_CLASSES[kind] = oimlSingleClass(kind);
+}
+KIND_CLASSES["amendment"] = oimlSupplementClass("amendment");
+KIND_CLASSES["errata"] = oimlSupplementClass("errata");
+KIND_CLASSES["annex"] = oimlSupplementClass("annex");
+var OimlUrnGenerator = class extends BaseUrnGenerator {
+  generate() {
+    const id = this.identifier;
+    const kind = id.constructor.polymorphicName.slice("pubid:oiml:".length);
+    if (kind === "bulletin") {
+      const b = id;
+      const parts2 = ["urn", "oiml", "bulletin"];
+      if (b.year) {
+        let locator = b.year;
+        if (b.number)
+          locator += `-${b.number}`;
+        if (b.sequence)
+          locator += `-${b.sequence}`;
+        parts2.push(locator);
+      }
+      if (id.language)
+        parts2.push(id.language.toLowerCase());
+      return parts2.join(":");
+    }
+    const isSupp = kind === "amendment" || kind === "errata" || kind === "annex";
+    const single = isSupp ? id.base : id;
+    const parts = ["urn", "oiml"];
+    parts.push(isSupp ? "r" : (TYPE_STRINGS[kind] ?? "r").toLowerCase());
+    const code = single.composedCode();
+    if (code)
+      parts.push(code);
+    const year = id.year ?? id.supp_year;
+    if (year)
+      parts.push(year);
+    const stage = id.stage;
+    if (stage)
+      parts.push(stage.toLowerCase());
+    const iteration = id.iteration;
+    if (iteration)
+      parts.push(iteration);
+    if (id.language)
+      parts.push(id.language.toLowerCase());
+    return parts.join(":");
+  }
+};
+for (const klass of Object.values(KIND_CLASSES)) {
+  klass.urnGenerator = OimlUrnGenerator;
+}
+function buildOimlIdentifier(tree) {
+  if (!isObj(tree))
+    throw new ParseFailed("OIML: unexpected parse tree", 0);
+  if (tree["amd_marker"] !== void 0)
+    return buildShortAmendment(tree);
+  if (tree["base"] !== void 0)
+    return buildSupplement(tree);
+  return buildBaseDocument(tree);
+}
+function buildShortAmendment(tree) {
+  const baseCode = isObj(tree["base_code"]) ? tree["base_code"] : void 0;
+  const base = buildBaseDocument({
+    publisher: tree["publisher"],
+    type: tree["type"],
+    number: baseCode?.["number"],
+    part: baseCode?.["part"],
+    subpart: baseCode?.["subpart"]
+  });
+  const editionFormat = isObj(tree["edition_format"]) ? tree["edition_format"] : void 0;
+  const yearValue = editionFormat ? editionFormat["year"] : tree["year"];
+  const attrs = {
+    publisher: "OIML",
+    base,
+    parsed_format: editionFormat ? "long" : "short"
+  };
+  const suppYear = str2(yearValue);
+  if (suppYear !== void 0)
+    attrs["supp_year"] = suppYear;
+  const language = extractLanguage(tree["language"]);
+  if (language !== void 0)
+    attrs["language"] = language;
+  return new KIND_CLASSES["amendment"](attrs);
+}
+function buildSupplement(tree) {
+  const marker = str2(tree["trailing_marker"]);
+  const plusMarker = str2(tree["plus_marker"]);
+  let kind;
+  if (tree["annex_letter"] !== void 0 || tree["annex_marker"] !== void 0) {
+    kind = "annex";
+  } else if (marker === "Errata" || plusMarker === "Errata") {
+    kind = "errata";
+  } else {
+    kind = "amendment";
+  }
+  const base = buildOimlIdentifier(tree["base"]);
+  const editionFormat = isObj(tree["edition_format"]) ? tree["edition_format"] : void 0;
+  const yearValue = editionFormat ? editionFormat["year"] : tree["year"];
+  const attrs = {
+    publisher: "OIML",
+    base,
+    parsed_format: editionFormat ? "long" : "short"
+  };
+  const suppYear = str2(yearValue);
+  if (suppYear !== void 0)
+    attrs["supp_year"] = suppYear;
+  const language = extractLanguage(tree["language"]);
+  if (language !== void 0)
+    attrs["language"] = language;
+  if (marker !== void 0)
+    attrs["trailing"] = true;
+  if (plusMarker !== void 0)
+    attrs["joined"] = true;
+  const letter = str2(tree["annex_letter"]);
+  if (letter !== void 0)
+    attrs["letter"] = letter;
+  if (kind === "annex" && !yearValue && base.year)
+    attrs["year_on_base"] = true;
+  return new KIND_CLASSES[kind](attrs);
+}
+function buildBaseDocument(tree) {
+  const type = str2(tree["type"]);
+  const kind = type === "Bulletin" ? "bulletin" : KIND_BY_TYPE[type ?? ""] ?? "recommendation";
+  const attrs = {
+    publisher: str2(tree["publisher"]) ?? "OIML"
+  };
+  const number = str2(tree["number"]);
+  if (number !== void 0)
+    attrs["number"] = number;
+  const part = str2(tree["part"]);
+  if (part !== void 0)
+    attrs["part"] = part;
+  const subpart = str2(tree["subpart"]);
+  if (subpart !== void 0)
+    attrs["subpart"] = subpart;
+  const codeSuffix = str2(tree["code_suffix"]);
+  if (codeSuffix !== void 0)
+    attrs["suffix"] = codeSuffix;
+  if ("space_suffix" in tree)
+    attrs["space_suffix"] = true;
+  const editionFormat = isObj(tree["edition_format"]) ? tree["edition_format"] : void 0;
+  let yearValue;
+  if (editionFormat) {
+    yearValue = editionFormat["year"];
+    const edition = str2(editionFormat["edition"]);
+    if (edition !== void 0)
+      attrs["edition"] = edition;
+  } else {
+    yearValue = tree["year"];
+  }
+  const year = str2(yearValue);
+  if (year !== void 0)
+    attrs["year"] = year;
+  if (kind === "bulletin")
+    applyBulletinLocator(attrs, tree);
+  attrs["parsed_format"] = editionFormat ? "long" : tree["space_before_lang"] !== void 0 ? "short_with_space" : tree["article_id"] !== void 0 ? "citation" : "short";
+  const stage = str2(tree["stage"]);
+  if (stage !== void 0)
+    attrs["stage"] = stage;
+  const iteration = str2(tree["iteration"]);
+  if (iteration !== void 0)
+    attrs["iteration"] = iteration;
+  const language = extractLanguage(tree["language"]);
+  if (language !== void 0)
+    attrs["language"] = language;
+  return new KIND_CLASSES[kind](attrs);
+}
+function applyBulletinLocator(attrs, tree) {
+  const articleId = str2(tree["article_id"]);
+  if (articleId) {
+    attrs["year"] = articleId.slice(0, 4);
+    attrs["number"] = articleId.slice(4, 6);
+    attrs["sequence"] = articleId.slice(6, 8);
+    return;
+  }
+  const issue = str2(tree["issue"]);
+  if (issue !== void 0)
+    attrs["number"] = issue;
+  const sequence = str2(tree["sequence"]);
+  if (sequence !== void 0)
+    attrs["sequence"] = sequence;
+}
+function stripLanguage(s) {
+  return s.replace(/\s*\([^)]+\)\s*$/, "").trim();
+}
+function toRoman(n) {
+  const table = [
+    [1e3, "M"],
+    [900, "CM"],
+    [500, "D"],
+    [400, "CD"],
+    [100, "C"],
+    [90, "XC"],
+    [50, "L"],
+    [40, "XL"],
+    [10, "X"],
+    [9, "IX"],
+    [5, "V"],
+    [4, "IV"],
+    [1, "I"]
+  ];
+  let out = "";
+  for (const [value, sym] of table) {
+    while (n >= value) {
+      out += sym;
+      n -= value;
+    }
+  }
+  return out;
+}
+
+// node_modules/@pubid/pubid/dist/flavors/oiml/implementation.js
+function oimlGrammarImplementation() {
+  return {
+    parse(input) {
+      return buildOimlIdentifier(parseGrammar(oimlGrammar, input));
+    }
+  };
+}
+
+// workers/worker_public/src/codecs.ts
+var oimlParser = oimlGrammarImplementation();
+var TYPE_LETTER = {
+  recommendation: "R",
+  document: "D",
+  basic_publication: "B",
+  "basic-publication": "B",
+  guide: "G",
+  expert_report: "E",
+  "expert-report": "E",
+  vocabulary: "V",
+  seminar_report: "S",
+  "seminar-report": "S"
+};
+function dualOimlSpine(side) {
+  try {
+    const h = oimlParser.parse(side.trim()).toHash();
+    if (h.number === void 0) return null;
+    const kind = String(h._type ?? "").split(":").pop() ?? "";
+    const letter = TYPE_LETTER[kind] ?? "";
+    if (!letter) return null;
+    const num = String(Number(h.number));
+    const part = h.part !== void 0 ? String(h.part) : void 0;
+    const ed = h.year !== void 0 ? String(h.year) : h.edition !== void 0 ? String(h.edition) : void 0;
+    return {
+      doc_number: num,
+      ...ed ? { edition: ed } : {},
+      label: `OIML ${letter} ${num}${part ? `-${part}` : ""}${ed ? `:${ed}` : ""}`
+    };
+  } catch {
+    return null;
+  }
+}
 var urnToDisplay = (u) => {
   const pub = u.match(/^urn:oiml:pub:([a-z]+):(\d+)(?:-([0-9a-z]+))?(?::(\d{4}))?(?::[a-z]{1,7}(?:-[a-z]{1,7})?)?$/i);
   if (pub) return `OIML ${pub[1].toUpperCase()} ${pub[2]}${pub[3] ? `-${pub[3]}` : ""}${pub[4] ? `:${pub[4]}` : ""}`;
@@ -402,6 +1730,11 @@ var parsePubid = (doc) => {
 };
 var oimlPubid = {
   parse(doc, edition) {
+    if (!/^urn:/i.test(doc) && doc.includes("|")) {
+      const side = doc.split("|").map((s) => s.trim()).find((s) => /^(?:OIML|oiml)\b/i.test(s));
+      const dual = side ? dualOimlSpine(side) : null;
+      if (dual) return dual;
+    }
     const p = parsePubid(doc);
     if (!p || p.series !== "pub") return null;
     const type = p.family.toUpperCase();
@@ -570,7 +1903,7 @@ function cfModelRunner(ai) {
     async embed(texts) {
       const order = embedRequestWinner ? [embedRequestWinner] : Object.keys(EMBED_REQUEST_SHAPES);
       for (const name of order) {
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt2 = 0; attempt2 < 3; attempt2++) {
           try {
             const res = await A.run("@cf/qwen/qwen3-embedding-0.6b", EMBED_REQUEST_SHAPES[name](texts));
             const vecs = extractVecBatch(res, texts.length);
@@ -580,7 +1913,7 @@ function cfModelRunner(ai) {
             }
           } catch {
           }
-          await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+          await new Promise((r) => setTimeout(r, 250 * (attempt2 + 1)));
         }
       }
       throw new Error(`embedding failed for all request shapes (${texts.length} text(s))`);
@@ -2692,13 +4025,13 @@ async function understandQuery(ai, model, query, history, entities = []) {
     top_k: 20
   };
   const ATTEMPT_TIMEOUTS = [1e4, 5e3];
-  for (let attempt = 0; attempt < ATTEMPT_TIMEOUTS.length; attempt++) {
+  for (let attempt2 = 0; attempt2 < ATTEMPT_TIMEOUTS.length; attempt2++) {
     const call = (async () => {
       const res = await ai.run({ model, messages: body.messages, effort: body.reasoning_effort, maxTokens: body.max_tokens, temperature: body.temperature, topP: body.top_p, topK: body.top_k });
       const text = res?.text ?? null;
       return typeof text === "string" ? extractJson(text) : null;
     })();
-    const timeout = new Promise((r) => setTimeout(() => r(null), ATTEMPT_TIMEOUTS[attempt]));
+    const timeout = new Promise((r) => setTimeout(() => r(null), ATTEMPT_TIMEOUTS[attempt2]));
     try {
       const got = await Promise.race([call, timeout]);
       if (got) return got;

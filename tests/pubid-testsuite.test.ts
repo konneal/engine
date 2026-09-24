@@ -9,16 +9,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { oimlPubid } from "../workers/worker_public/src/codecs.ts";
 
-const dir = process.env.PUBID_TESTSUITE_DIR ?? "../pubid-testsuite/tests/oiml";
-if (process.env.PUBID_TESTSUITE_DIR && !existsSync(dir)) {
-  throw new Error(`PUBID_TESTSUITE_DIR is set but ${dir} does not exist — refusing a vacuous pass`);
+const DIR_CANDIDATES = [
+  process.env.PUBID_TESTSUITE_DIR,
+  "../pubid-testsuite/tests/oiml",
+  join(homedir(), "src/pubid/pubid-testsuite/tests/oiml"),
+].filter((d): d is string => !!d);
+if (process.env.PUBID_TESTSUITE_DIR && !existsSync(process.env.PUBID_TESTSUITE_DIR)) {
+  throw new Error(`PUBID_TESTSUITE_DIR is set but ${process.env.PUBID_TESTSUITE_DIR} does not exist — refusing a vacuous pass`);
 }
+const dir = DIR_CANDIDATES.find((d) => existsSync(d)) ?? DIR_CANDIDATES[DIR_CANDIDATES.length - 1]!;
 
 if (!existsSync(dir)) {
-  console.log(`pubid-testsuite: SKIP — no corpus at ${dir} (CI checks out pubid/pubid-testsuite; locally it is the sibling checkout)`);
+  console.log(`pubid-testsuite: SKIP — no corpus at ${dir} (CI checks out pubid/pubid-testsuite; locally it is ~/src/pubid/pubid-testsuite)`);
 }
 
 const cases = existsSync(dir)
@@ -35,9 +42,8 @@ const cases = existsSync(dir)
 // outside the ledger and fails it too.
 const KNOWN_NULL: { re: RegExp; why: string }[] = [
   { re: /^Amendment \(\d+\) to /, why: "leading-amendment construct — the citation layer owns it" },
-  { re: /\b\d?\.?\d*(WD|CD)\b/, why: "draft-stage construct — outside the retrieval plane (no draft documents)" },
   { re: /Annex/, why: "annex construct — the citation layer owns it" },
-  { re: /\|/, why: "pipe-paired citation construct — the citation layer owns it" },
+  { re: /\b\d?\.?\d*(WD|CD)\b/, why: "draft-stage construct — outside the retrieval plane (no draft documents)" },
 ];
 
 test("every canonical case parses to the right spine or sits in the ledger", () => {
@@ -53,20 +59,25 @@ test("every canonical case parses to the right spine or sits in the ledger", () 
       continue;
     }
     const st = c.identifier.base ?? c.identifier;
+    // a dual-published record carries two members; the retrieval spine
+    // is the OIML side (the URN rule agrees — the dual's URN is the
+    // OIML side's)
+    const members = [st.first, st.second].filter(Boolean);
+    const side = members.find((m: any) => String(m._type ?? "").startsWith("pubid:oiml")) ?? st;
     // the testsuite encodes the family in _type (pubid:oiml:recommendation),
     // not a letter field; amendment/annex bases carry their own _type
     const TYPE_LETTER: Record<string, string> = {
       recommendation: "R", document: "D", basic_publication: "B", guide: "G",
       expert_report: "E", vocabulary: "V", seminar_report: "S",
     };
-    const family = st.family ?? TYPE_LETTER[String(st._type).split(":").pop().replace(/-/g, "_")] ?? "";
-    assert.equal(scope.doc_number, String(Number(st.number)), `${human}: doc_number`);
+    const family = side.family ?? TYPE_LETTER[String(side._type).split(":").pop().replace(/-/g, "_")] ?? "";
+    assert.equal(scope.doc_number, String(Number(side.number)), `${human}: doc_number`);
     assert.ok(
-      scope.label.startsWith(`OIML ${family} ${String(Number(st.number))}`),
+      scope.label.startsWith(`OIML ${family} ${String(Number(side.number))}`),
       `${human}: label ${scope.label}`,
     );
-    if (st.year && !scope.edition) assert.fail(`${human}: year ${st.year} lost (edition ${scope.edition})`);
-    if (st.year) assert.equal(scope.edition, st.year, `${human}: edition`);
+    if (side.year && !scope.edition) assert.fail(`${human}: year ${side.year} lost (edition ${scope.edition})`);
+    if (side.year) assert.equal(scope.edition, side.year, `${human}: edition`);
   }
   const stale = KNOWN_NULL.filter((k) => !used.has(k.why));
   assert.deepEqual(
