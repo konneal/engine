@@ -12,10 +12,9 @@ export interface LiveDataConfig {
     clientSecret?: string;
 }
 export declare function liveDataConfig(env: any): LiveDataConfig | null;
-/** Retain the sign-in's OP access token for the session's exchange
- *  window (the OP token's own TTL, minus a small margin). Called ONCE
- *  per sign-in from the auth callback; the token never persists past
- *  the window. */
+export declare function retainRefreshToken(env: any, sessionRaw: string, refreshToken: string): Promise<void>;
+export declare function readRefreshToken(env: any, sessionRaw: string): Promise<string | null>;
+export declare function dropRefreshToken(env: any, sessionRaw: string): Promise<void>;
 export declare function retainOpAccessToken(env: any, sessionRaw: string, opAccessToken: string, expiresInSec: number): Promise<void>;
 /** Drop the retained subject + the cached exchanged token (the sign-out
  *  closes the window deliberately, never by expiry alone). */

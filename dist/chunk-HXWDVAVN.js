@@ -23545,6 +23545,30 @@ function liveDataConfig(env) {
 }
 var SUBJECT_KEY = (sessionHash) => `opat:${sessionHash}`;
 var EXCHANGED_KEY = (sessionHash) => `ossx:${sessionHash}`;
+var REFRESH_KEY = (sessionHash) => `ort:${sessionHash}`;
+var REFRESH_TTL_SEC = 30 * 24 * 60 * 60;
+async function retainRefreshToken(env, sessionRaw, refreshToken) {
+  try {
+    await env.CACHE.put(REFRESH_KEY(await sha256Hex2(sessionRaw)), JSON.stringify({ token: refreshToken }), {
+      expirationTtl: REFRESH_TTL_SEC
+    });
+  } catch {
+  }
+}
+async function readRefreshToken(env, sessionRaw) {
+  try {
+    const hit = await env.CACHE.get(REFRESH_KEY(await sha256Hex2(sessionRaw)), "json");
+    return typeof hit?.token === "string" ? hit.token : null;
+  } catch {
+    return null;
+  }
+}
+async function dropRefreshToken(env, sessionRaw) {
+  try {
+    await env.CACHE.delete(REFRESH_KEY(await sha256Hex2(sessionRaw)));
+  } catch {
+  }
+}
 async function retainOpAccessToken(env, sessionRaw, opAccessToken, expiresInSec) {
   const ttl = Math.max(30, Math.floor(expiresInSec) - 30);
   try {
@@ -23966,30 +23990,6 @@ function renewedSessionClaims(session, claims) {
 }
 
 // workers/worker_public/src/oidc-refresh.ts
-var REFRESH_TTL_SEC = 30 * 24 * 60 * 60;
-var REFRESH_KEY = (sessionHash) => `ort:${sessionHash}`;
-async function retainRefreshToken(env, sessionRaw, refreshToken) {
-  try {
-    await env.CACHE.put(REFRESH_KEY(await sha256Hex(sessionRaw)), JSON.stringify({ token: refreshToken }), {
-      expirationTtl: REFRESH_TTL_SEC
-    });
-  } catch {
-  }
-}
-async function readRefreshToken(env, sessionRaw) {
-  try {
-    const hit = await env.CACHE.get(REFRESH_KEY(await sha256Hex(sessionRaw)), "json");
-    return typeof hit?.token === "string" ? hit.token : null;
-  } catch {
-    return null;
-  }
-}
-async function dropRefreshToken(env, sessionRaw) {
-  try {
-    await env.CACHE.delete(REFRESH_KEY(await sha256Hex(sessionRaw)));
-  } catch {
-  }
-}
 async function renewSessionClaims(env, cfg, session, sessionRaw) {
   const stored = await readRefreshToken(env, sessionRaw);
   if (!stored) return { kind: "unavailable" };

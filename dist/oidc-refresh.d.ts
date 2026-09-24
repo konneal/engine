@@ -11,7 +11,6 @@ export type RenewOutcome = {
 } | {
     kind: "unavailable";
 };
-export declare function retainRefreshToken(env: any, sessionRaw: string, refreshToken: string): Promise<void>;
 export declare function renewSessionClaims(env: any, cfg: {
     issuer: string;
     clientId: string;

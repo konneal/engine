@@ -27,7 +27,7 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-Z5WRH725.js";
+} from "./chunk-HXWDVAVN.js";
 import {
   corsHeaders,
   err,

@@ -10,12 +10,10 @@
 
 import { discoverIssuer, validateIdToken, type OidcIdTokenClaims } from "./oidc.ts";
 import { renewedSessionClaims, refreshGrant, type OidcMetadata } from "./refresh-core.ts";
-import { sha256Hex } from "./config";
 import type { SessionClaims } from "./session";
+import { readRefreshToken, dropRefreshToken, retainRefreshToken } from "./livedata";
 
-const REFRESH_TTL_SEC = 30 * 24 * 60 * 60; // the OP's grant TTL default
 
-const REFRESH_KEY = (sessionHash: string) => `ort:${sessionHash}`;
 
 export interface RenewedSession {
   claims: Omit<SessionClaims, "iat" | "exp">;
@@ -26,33 +24,6 @@ export type RenewOutcome =
   | { kind: "ok"; renewed: RenewedSession }
   | { kind: "revoked" }
   | { kind: "unavailable" };
-
-export async function retainRefreshToken(env: any, sessionRaw: string, refreshToken: string): Promise<void> {
-  try {
-    await env.CACHE.put(REFRESH_KEY(await sha256Hex(sessionRaw)), JSON.stringify({ token: refreshToken }), {
-      expirationTtl: REFRESH_TTL_SEC,
-    });
-  } catch {
-    // a KV hiccup degrades to the legacy staleness, never blocks sign-in
-  }
-}
-
-async function readRefreshToken(env: any, sessionRaw: string): Promise<string | null> {
-  try {
-    const hit = await env.CACHE.get(REFRESH_KEY(await sha256Hex(sessionRaw)), "json");
-    return typeof hit?.token === "string" ? hit.token : null;
-  } catch {
-    return null;
-  }
-}
-
-async function dropRefreshToken(env: any, sessionRaw: string): Promise<void> {
-  try {
-    await env.CACHE.delete(REFRESH_KEY(await sha256Hex(sessionRaw)));
-  } catch {
-    // best effort
-  }
-}
 
 export async function renewSessionClaims(
   env: any,
