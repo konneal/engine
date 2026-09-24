@@ -25,6 +25,8 @@ production: [spec, errata, model]
 lanes:
   review: [review]
   glossary: [glossary]
+catalog_url_template: "https://catalog.atlas.example/{type}"
+catalog_corpora: [spec]
 features:
   drafts: false
   model_plane: false

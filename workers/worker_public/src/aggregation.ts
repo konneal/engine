@@ -73,13 +73,14 @@ function classToken(query: string): string | null {
   return m ? m[1]!.toLowerCase() : null;
 }
 
-/** The class columns shaped `class_a` / `class_cd` — classes as COLUMNS
- *  (R 60's stabilisation table) rather than as row values. */
+/** The class columns shaped `class_<id>` — classes as COLUMNS rather
+ *  than as row values. Exact id first; a column whose suffix STARTS WITH
+ *  the token serves compound class ids sharing one column (c → cd). */
 function classAsColumn(cols: Column[], token: string): Column | undefined {
-  const exact = cols.find((c) => /^class_[a-z0-9.]+$/.test(c.name) && c.name.slice(6) === token);
+  const classCols = cols.filter((c) => /^class_[a-z0-9.]+$/.test(c.name));
+  const exact = classCols.find((c) => c.name.slice(6) === token);
   if (exact) return exact;
-  // classes C and D share one column (class_cd) in R 60-2 Table 1
-  return cols.find((c) => /^class_[a-z0-9.]+$/.test(c.name) && c.name.slice(6) === "cd" && (token === "c" || token === "d"));
+  return classCols.find((c) => c.name.slice(6).startsWith(token));
 }
 
 function numericColumns(cols: Column[]): Column[] {

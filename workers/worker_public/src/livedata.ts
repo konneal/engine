@@ -50,9 +50,9 @@ export interface LiveDataConfig {
 export function liveDataConfig(env: any): LiveDataConfig | null {
   const platformApi = (env.SMART_PLATFORM_API ?? "").trim().replace(/\/$/, "");
   const platformClientId = (env.SMART_PLATFORM_CLIENT_ID ?? "").trim();
-  const issuer = (env.OIDC_ISSUER ?? "https://id.oimlsmart.org").trim().replace(/\/$/, "");
+  const issuer = (env.OIDC_ISSUER ?? "").trim().replace(/\/$/, "");
   const clientId = (env.OIDC_CLIENT_ID ?? "").trim();
-  if (!platformApi || !platformClientId || !clientId) return null;
+  if (!platformApi || !platformClientId || !clientId || !issuer) return null;
   return { platformApi, platformClientId, issuer, clientId, clientSecret: env.OIDC_CLIENT_SECRET };
 }
 

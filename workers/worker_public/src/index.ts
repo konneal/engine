@@ -192,7 +192,7 @@ async function absenceRoute(c: RouteContext): Promise<Response> {
   const namedStd = namedDocumentIn(String(body?.standard ?? ""));
   const standard = standardForDocNumber(namedStd?.doc_number ?? String(body?.standard ?? "").trim());
   const topic = String(body?.topic ?? "").trim().toLowerCase();
-  if (!standard || !topic) return err(400, "invalid_input", "standard (e.g. \"R 60\") and topic are required");
+  if (!standard || !topic) return err(400, "invalid_input", "standard and topic are required");
   try {
     const nodes = (await env.DB.prepare("SELECT node_id, kind, name, content FROM model_nodes WHERE standard = ?1").bind(standard).all()).results ?? [];
     const tokens = topic.split(/\s+/).filter((t: string) => t.length > 2);

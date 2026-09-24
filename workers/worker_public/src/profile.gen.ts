@@ -19,6 +19,12 @@ export const PROFILE = {
     "references": {
       "label_prefix": ""
     },
+    "catalog_url_template": "https://catalog.fixture.example.org/{type}",
+    "catalog_corpora": [
+      "pub",
+      "dirty",
+      "clean"
+    ],
     "features": {
       "drafts": false,
       "model_plane": false
