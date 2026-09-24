@@ -960,7 +960,7 @@ function pickTable(nodes, query) {
     for (const t of tokens(n.node_id.replace("/table/", ""))) {
       if (t.length >= 3 && queryLower.includes(t)) score += 2;
     }
-    for (const w of String(c.name ?? "").toLowerCase().split(/[^a-z0-9.]+/)) {
+    for (const w of String(c.name ?? c.definition ?? "").toLowerCase().split(/[^a-z0-9.]+/)) {
       if (w.length >= 4 && queryLower.includes(w)) score += 1;
     }
     if (intervalPairs(cols).some((p) => p.low.unit && stated.has(p.low.unit))) score += 3;
@@ -981,7 +981,9 @@ function evaluateAggregation(nodes, query) {
   const cols = Array.isArray(payload.columns) ? payload.columns : [];
   const rows = (Array.isArray(payload.rows) ? payload.rows : []).filter((r) => Array.isArray(r));
   if (!cols.length || !rows.length) return null;
-  const tableTitle = String(content.name ?? content.definition ?? node.node_id.replace("/table/", ""));
+  const rawTitle = String(content.name ?? content.definition ?? node.node_id.replace("/table/", ""));
+  const cut = rawTitle.indexOf(" (");
+  const tableTitle = cut > 0 ? rawTitle.slice(0, cut) : rawTitle.slice(0, 120);
   const cite = (what) => `COMPUTED (${operation}) \u2014 ${what}, read from the typed table "${tableTitle}" (${node.node_id}). Present this result and cite the table's clause; the value is machine-computed from the table payload, do not recompute or round it differently.`;
   if (operation === "count") {
     const cc2 = classColumn(cols);
@@ -1864,6 +1866,17 @@ ${summary}` }] : [],
   const modelNote = boundModel && !boundModel.gated ? modelGroundingBlock(boundModel) : void 0;
   const machineVerdict = boundModel && !boundModel.gated ? evaluate(boundModel.content, q.query) : null;
   const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : void 0;
+  const modelNodeRows = async (kind, docNum) => {
+    const attempt = (num3) => {
+      const sql = num3 ? `SELECT standard, node_id, content FROM model_nodes WHERE kind = '${kind}' AND standard LIKE '%' || ?1` : `SELECT standard, node_id, content FROM model_nodes WHERE kind = '${kind}'`;
+      return num3 ? env.DB.prepare(sql).bind(num3) : env.DB.prepare(sql);
+    };
+    let rows = await attempt(docNum).all().catch(() => ({ results: [] }));
+    if (!(rows.results ?? []).length && docNum && docNum.includes("-")) {
+      rows = await attempt(docNum.replace(/-\d+$/, "")).all().catch(() => ({ results: [] }));
+    }
+    return rows;
+  };
   let conditionVerdict = null;
   let conditionStandard = null;
   if (!machineVerdict && !boundModel && P().publisher.features?.model_plane) {
@@ -1872,9 +1885,7 @@ ${summary}` }] : [],
     const stated = quantitiesIn(q.query);
     if (severityWord && Object.keys(stated).length >= 1) {
       const docNum = modelDocHint?.doc_number;
-      const sql = docNum ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' AND standard LIKE '%' || ?1" : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set'";
-      const stmt = docNum ? env.DB.prepare(sql).bind(docNum) : env.DB.prepare(sql);
-      const rows = await stmt.all().catch(() => ({ results: [] }));
+      const rows = await modelNodeRows("condition_set", docNum);
       const candidates = (rows.results ?? []).filter((r) => {
         const entry = licensedEntryForPackage(String(r.standard));
         return !entry || (standardKeys?.has(entry.key) ?? false);
@@ -1923,9 +1934,7 @@ ${summary}` }] : [],
   let aggregationStandard = null;
   if (!machineVerdict && !boundModel && !conditionVerdict && P().publisher.features?.model_plane) {
     const docNum = modelDocHint?.doc_number;
-    const sql = docNum ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'table' AND standard LIKE '%' || ?1" : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'table'";
-    const stmt = docNum ? env.DB.prepare(sql).bind(docNum) : env.DB.prepare(sql);
-    const rows = await stmt.all().catch(() => ({ results: [] }));
+    const rows = await modelNodeRows("table", docNum);
     const candidates = (rows.results ?? []).filter((r) => {
       const entry = licensedEntryForPackage(String(r.standard));
       return !entry || (standardKeys?.has(entry.key) ?? false);
