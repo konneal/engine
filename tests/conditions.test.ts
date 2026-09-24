@@ -4,14 +4,14 @@ import { evaluateConditionSets, quantitiesIn } from "../workers/worker_public/sr
 
 const sets = [
   {
-    node_id: "severity-cab-40-degc-85-rh",
+    node_id: "severity-chamber-40-degc-85-rh",
     content: { payload: { entries: [
       { quantity_kind: "temperature", value: "40", unit: "degC", tolerance: "2", si: { value: 313.15, unit: "K" } },
       { quantity_kind: "relative_humidity", value: "85", unit: "%", tolerance: "3", si: { value: 0.85, unit: "1" } },
     ] } },
   },
   {
-    node_id: "severity-cab-40-degc-93-rh",
+    node_id: "severity-chamber-40-degc-93-rh",
     content: { payload: { entries: [
       { quantity_kind: "temperature", value: "40", unit: "degC", tolerance: "2", si: { value: 313.15, unit: "K" } },
       { quantity_kind: "relative_humidity", value: "93", unit: "%", tolerance: "3", si: { value: 0.93, unit: "1" } },
@@ -20,21 +20,21 @@ const sets = [
 ];
 
 test("membership in SI: 40 degC at 85 % RH passes and names its set", () => {
-  const v = evaluateConditionSets(sets, "Is 40 °C at 85 % RH a valid damp heat severity?");
+  const v = evaluateConditionSets(sets, "Is 40 °C at 85 % RH a valid cyclic humidity severity?");
   assert.equal(v?.verdict, "pass");
-  assert.deepEqual(v.matched, ["severity-cab-40-degc-85-rh"]);
+  assert.deepEqual(v.matched, ["severity-chamber-40-degc-85-rh"]);
 });
 
 test("cross-unit: 313 K is the same stated temperature as 40 degC", () => {
   const v = evaluateConditionSets(sets, "Is 313 K at 85 % RH a valid severity?");
   assert.equal(v?.verdict, "pass");
-  assert.deepEqual(v.matched, ["severity-cab-40-degc-85-rh"]);
+  assert.deepEqual(v.matched, ["severity-chamber-40-degc-85-rh"]);
 });
 
 test("out-of-band fails and names the nearest set", () => {
   const v = evaluateConditionSets(sets, "Is 40 °C at 98 % RH a valid severity?");
   assert.equal(v?.verdict, "fail");
-  assert.equal(v?.nearest?.node_id, "severity-cab-40-degc-93-rh");
+  assert.equal(v?.nearest?.node_id, "severity-chamber-40-degc-93-rh");
 });
 
 test("quantities parse by unit with SI normalization", () => {

@@ -8,7 +8,7 @@ import { extractJson } from "../workers/worker_public/src/understandContract.ts"
 
 const FULL = JSON.stringify({
   intent: "knowledge",
-  docidentifier: "OIML R 60-1",
+  docidentifier: "ACME R 60-1",
   docnumber: "60",
   edition: "2006",
   language: null,
@@ -26,7 +26,7 @@ const FULL = JSON.stringify({
 test("full valid JSON parses with every field", () => {
   const u = extractJson(FULL)!;
   assert.equal(u.intent, "knowledge");
-  assert.equal(u.docidentifier, "OIML R 60-1");
+  assert.equal(u.docidentifier, "ACME R 60-1");
   assert.equal(u.doc_number, "60");
   assert.equal(u.edition, "2006");
   assert.equal(u.language, null);

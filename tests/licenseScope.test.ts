@@ -19,7 +19,7 @@ import type { ChunkMeta, Hit } from "../workers/shared/chunk.ts";
 
 // ── the fixture: a public family + a licensed one ───────────────────────
 
-const LICENSED_KEY = "std:fixture-60068-2-30";
+const LICENSED_KEY = "std:fixture-ab-99";
 
 function meta(partial: Partial<ChunkMeta>): ChunkMeta {
   return {
@@ -31,8 +31,8 @@ function meta(partial: Partial<ChunkMeta>): ChunkMeta {
 
 const CORPUS: Array<{ id: string; m: ChunkMeta; text: string }> = [
   { id: "pub-1", m: meta({ doc_id: "d-r60", docidentifier: "OIML R 60-1", doc_number: "60", clause_anchor: "5.2", clause_title: "Load cell" }), text: "a load cell converts force into a signal" },
-  { id: "lic-1", m: meta({ doc_id: "d-iec", docidentifier: "IEC 60068-2-30", doc_number: "60068-2-30", clause_anchor: "7", clause_title: "Damp heat procedure", standard_key: LICENSED_KEY, standard: "fixture-60068-2-30" }), text: "the damp heat cyclic procedure steps" },
-  { id: "lic-2", m: meta({ doc_id: "d-iec", docidentifier: "IEC 60068-2-30", doc_number: "60068-2-30", clause_anchor: "8", clause_title: "Severity", standard_key: LICENSED_KEY, standard: "fixture-60068-2-30" }), text: "severity rows for the damp heat test" },
+  { id: "lic-1", m: meta({ doc_id: "d-iec", docidentifier: "ACME AB-99", doc_number: "ab-99", clause_anchor: "7", clause_title: "Cyclic humidity procedure", standard_key: LICENSED_KEY, standard: "fixture-ab-99" }), text: "the cyclic humidity procedure steps" },
+  { id: "lic-2", m: meta({ doc_id: "d-iec", docidentifier: "ACME AB-99", doc_number: "ab-99", clause_anchor: "8", clause_title: "Severity", standard_key: LICENSED_KEY, standard: "fixture-ab-99" }), text: "severity rows for the cyclic humidity test" },
 ];
 
 function vec(text: string): number[] {
@@ -154,7 +154,7 @@ test("dense widen fallback under an empty entitlement set stays licensed-clean",
 // ── the request-scope derivation + salt ──────────────────────────────────
 
 test("standardKeysFrom validates against the declared whitelist (fail-closed)", () => {
-  setProfile(PROFILE); // the fixture declares std:fixture-60068-2-30
+  setProfile(PROFILE); // the fixture declares std:fixture-ab-99
   assert.ok(licenseDeclared());
   assert.deepEqual([...standardKeysFrom({ licensed_standards: [LICENSED_KEY, "std:forged", 42, null] })], [LICENSED_KEY]);
   assert.deepEqual([...standardKeysFrom({})], [], "absent field must derive empty");
@@ -194,11 +194,11 @@ test("bindModelNode gates a licensed package's grounding for the unentitled call
         return {
           bind: (..._args: unknown[]) => ({
             first: async () => ({
-              standard: "fixture-60068-2-30", node_id: "/req/class-a/mpe", kind: "requirement", name: "MPE",
+              standard: "fixture-ab-99", node_id: "/req/class-a/mpe", kind: "requirement", name: "MPE",
               clause_doc: "urn:fixture", clause_ref: "3.2",
               content: JSON.stringify({ statement: "the licensed machine content" }),
             }),
-            all: async () => ({ results: [{ standard: "fixture-60068-2-30" }] }),
+            all: async () => ({ results: [{ standard: "fixture-ab-99" }] }),
           }),
         };
       },
@@ -219,13 +219,13 @@ test("bindModelNode gates a licensed package's grounding for the unentitled call
 
 test("license boundary note + refusal: composed only for the unentitled licensed case", () => {
   setProfile(PROFILE);
-  const note = licenseBoundaryNote("60068-2-30", new Set());
+  const note = licenseBoundaryNote("ab-99", new Set());
   assert.ok(note?.includes("does not cover"), "boundary note missing the boundary");
   assert.ok(note?.includes("declare flow"), "boundary note missing the declare pointer");
-  assert.equal(licenseBoundaryNote("60068-2-30", new Set([LICENSED_KEY])), undefined, "entitled caller got a boundary note");
+  assert.equal(licenseBoundaryNote("ab-99", new Set([LICENSED_KEY])), undefined, "entitled caller got a boundary note");
   assert.equal(licenseBoundaryNote("60", new Set()), undefined, "public publication got a boundary note");
-  const refusal = licenseBoundaryRefusal("60068-2-30", new Set());
+  const refusal = licenseBoundaryRefusal("ab-99", new Set());
   assert.ok(refusal?.includes("licensed"), "boundary refusal missing");
-  assert.ok(refusal?.includes("60068-2-30"), "boundary refusal must name the standard");
+  assert.ok(refusal?.includes("ab-99"), "boundary refusal must name the standard");
   assert.equal(licenseBoundaryRefusal("60", new Set()), undefined);
 });

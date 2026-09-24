@@ -7,7 +7,7 @@ import { evaluate, extractChecks, symbolsIn, extractParams, verdictNote } from "
 const deadLoad = {
   check: "ocl{model.parameters.d_max >= 0.9 * model.parameters.e_max and model.parameters.d_max <= model.parameters.e_max}",
   on_violation: "invalid",
-  violation_meaning: "The declared maximum test load D_max lies outside [0.9·E_max, E_max] — the type evaluation of this load cell is void.",
+  violation_meaning: "The declared maximum test load D_max lies outside [0.9·E_max, E_max] — the type evaluation of this transducer is void.",
 };
 const mpeLimit = {
   acceptance_criteria: {
