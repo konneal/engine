@@ -725,6 +725,22 @@ async function handleAsk(
   // quantities alongside severity vocabulary; the candidate sets come
   // from the model node store (kind condition_set), license-gated like
   // every model lane.
+  // the model lanes' node store read: the doc hint joins the STANDARD id
+  // (iec-60068-2-78 carries the part; oiml-r60 does not) — when the hint
+  // names a part of a part-less package ("R 60-1"), retry on the stem
+  const modelNodeRows = async (kind: string, docNum: string | undefined) => {
+    const attempt = (num: string | undefined) => {
+      const sql = num
+        ? `SELECT standard, node_id, content FROM model_nodes WHERE kind = '${kind}' AND standard LIKE '%' || ?1`
+        : `SELECT standard, node_id, content FROM model_nodes WHERE kind = '${kind}'`;
+      return num ? env.DB.prepare(sql).bind(num) : env.DB.prepare(sql);
+    };
+    let rows = await attempt(docNum).all().catch(() => ({ results: [] }));
+    if (!(rows.results ?? []).length && docNum && docNum.includes("-")) {
+      rows = await attempt(docNum.replace(/-\d+$/, "")).all().catch(() => ({ results: [] }));
+    }
+    return rows;
+  };
   let conditionVerdict: ConditionVerdict | null = null;
   let conditionStandard: string | null = null;
   if (!machineVerdict && !boundModel && P().publisher.features?.model_plane) {
@@ -735,11 +751,7 @@ async function handleAsk(
       const docNum = modelDocHint?.doc_number;
       // the doc number joins the STANDARD id (iec-60068-2-78), which is
       // the doc number prefixed with the package-family prefix
-      const sql = docNum
-        ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set' AND standard LIKE '%' || ?1"
-        : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'condition_set'";
-      const stmt = docNum ? env.DB.prepare(sql).bind(docNum) : env.DB.prepare(sql);
-      const rows = await stmt.all().catch(() => ({ results: [] }));
+      const rows = await modelNodeRows("condition_set", docNum);
       const candidates = (rows.results ?? []).filter((r: any) => {
         const entry = licensedEntryForPackage(String(r.standard));
         return !entry || (standardKeys?.has(entry.key) ?? false);
@@ -801,11 +813,7 @@ async function handleAsk(
   let aggregationStandard: string | null = null;
   if (!machineVerdict && !boundModel && !conditionVerdict && P().publisher.features?.model_plane) {
     const docNum = modelDocHint?.doc_number;
-    const sql = docNum
-      ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'table' AND standard LIKE '%' || ?1"
-      : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'table'";
-    const stmt = docNum ? env.DB.prepare(sql).bind(docNum) : env.DB.prepare(sql);
-    const rows = await stmt.all().catch(() => ({ results: [] }));
+    const rows = await modelNodeRows("table", docNum);
     const candidates = (rows.results ?? []).filter((r: any) => {
       const entry = licensedEntryForPackage(String(r.standard));
       return !entry || (standardKeys?.has(entry.key) ?? false);

@@ -173,7 +173,8 @@ function pickTable(nodes: { node_id: string; content: any }[], query: string): {
     for (const t of tokens(n.node_id.replace("/table/", ""))) {
       if (t.length >= 3 && queryLower.includes(t)) score += 2;
     }
-    for (const w of String(c.name ?? "").toLowerCase().split(/[^a-z0-9.]+/)) {
+    // the D1 projection keeps the title under `definition`
+    for (const w of String(c.name ?? c.definition ?? "").toLowerCase().split(/[^a-z0-9.]+/)) {
       if (w.length >= 4 && queryLower.includes(w)) score += 1;
     }
     // the question's stated unit existing as this table's interval unit,
@@ -206,13 +207,18 @@ export function evaluateAggregation(
         : "lookup";
   if (!nodes.length) return null;
   const node = pickTable(nodes, query);
+
   if (!node) return null;
   const content = (node.content && typeof node.content === "object" ? node.content : {}) as Record<string, any>;
   const payload = (content.payload ?? {}) as { columns?: Column[]; rows?: unknown[] };
   const cols = Array.isArray(payload.columns) ? payload.columns : [];
   const rows = (Array.isArray(payload.rows) ? payload.rows : []).filter((r) => Array.isArray(r)) as string[][];
   if (!cols.length || !rows.length) return null;
-  const tableTitle = String(content.name ?? content.definition ?? node.node_id.replace("/table/", ""));
+  const rawTitle = String(content.name ?? content.definition ?? node.node_id.replace("/table/", ""));
+  // display titles are cut before the normative parenthetical and at a
+  // word boundary — the full definition stays in the payload
+  const cut = rawTitle.indexOf(" (");
+  const tableTitle = cut > 0 ? rawTitle.slice(0, cut) : rawTitle.slice(0, 120);
 
   const cite = (what: string) =>
     `COMPUTED (${operation}) — ${what}, read from the typed table "${tableTitle}" (${node.node_id}). Present this result and cite the table's clause; the value is machine-computed from the table payload, do not recompute or round it differently.`;
