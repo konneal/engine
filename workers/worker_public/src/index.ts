@@ -435,7 +435,7 @@ async function openapiCatalogRoute(c: RouteContext): Promise<Response> {
       openapi: "3.1.0",
       info: { title: `${P().publisher.product_name} API`, version: c.env.INDEX_VERSION ?? "0" },
       paths: {},
-      "x-oiml-permissions-catalog": permissionsCatalog(),
+      "x-permissions-catalog": permissionsCatalog(),
     },
     200,
     corsHeaders(c.req),

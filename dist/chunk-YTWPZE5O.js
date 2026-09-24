@@ -48,6 +48,12 @@ var PROFILE = {
     "references": {
       "label_prefix": ""
     },
+    "catalog_url_template": "https://catalog.fixture.example.org/{type}",
+    "catalog_corpora": [
+      "pub",
+      "dirty",
+      "clean"
+    ],
     "features": {
       "drafts": false,
       "model_plane": false
@@ -109,11 +115,11 @@ var PROFILE = {
     "models": {},
     "licensed": [
       {
-        "key": "std:fixture-60068-2-30",
-        "package": "fixture-60068-2-30",
-        "doc_number": "60068-2-30",
-        "title": "FIXTURE environmental testing \u2014 damp heat, cyclic",
-        "edition": "2005"
+        "key": "std:fixture-ab-99",
+        "package": "fixture-ab-99",
+        "doc_number": "ab-99",
+        "title": "FIXTURE climatic conditioning, cyclic humidity",
+        "edition": "2019"
       }
     ]
   },

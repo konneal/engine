@@ -17,6 +17,8 @@ export declare const PROFILE: {
         readonly references: {
             readonly label_prefix: "";
         };
+        readonly catalog_url_template: "https://catalog.fixture.example.org/{type}";
+        readonly catalog_corpora: readonly ["pub", "dirty", "clean"];
         readonly features: {
             readonly drafts: false;
             readonly model_plane: false;
@@ -55,11 +57,11 @@ export declare const PROFILE: {
         readonly terminology: {};
         readonly models: {};
         readonly licensed: readonly [{
-            readonly key: "std:fixture-60068-2-30";
-            readonly package: "fixture-60068-2-30";
-            readonly doc_number: "60068-2-30";
-            readonly title: "FIXTURE environmental testing — damp heat, cyclic";
-            readonly edition: "2005";
+            readonly key: "std:fixture-ab-99";
+            readonly package: "fixture-ab-99";
+            readonly doc_number: "ab-99";
+            readonly title: "FIXTURE climatic conditioning, cyclic humidity";
+            readonly edition: "2019";
         }];
     };
     readonly ui: {

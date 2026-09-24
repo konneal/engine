@@ -1,7 +1,7 @@
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-EFQALN2Z.js";
+} from "./chunk-BV7IKH3N.js";
 import {
   DATASETS,
   LIMITS,
@@ -12,12 +12,12 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-ADXV2DPK.js";
+} from "./chunk-RESCBSX6.js";
 import {
   P,
   __commonJS,
   __toESM
-} from "./chunk-TJRTVJW5.js";
+} from "./chunk-YTWPZE5O.js";
 
 // node_modules/@oimlsmart/oiml-pubid/dist/index.js
 var require_dist = __commonJS({
@@ -1939,7 +1939,8 @@ ${context}` }
   };
 }
 function publicationUrl(meta) {
-  if (meta.corpus && !["oiml", "dirty", "clean"].includes(meta.corpus)) return void 0;
+  const ownCorpora = P().publisher.catalog_corpora;
+  if (meta.corpus && ownCorpora && !ownCorpora.includes(meta.corpus)) return void 0;
   const tpl = P().publisher.catalog_url_template;
   if (!tpl || !meta.doctype || !meta.doc_number) return void 0;
   return tpl.replace("{type}", meta.doctype.toLowerCase()) + meta.doc_number;
@@ -2032,9 +2033,9 @@ async function sha256Hex2(s) {
 function liveDataConfig(env) {
   const platformApi = (env.SMART_PLATFORM_API ?? "").trim().replace(/\/$/, "");
   const platformClientId = (env.SMART_PLATFORM_CLIENT_ID ?? "").trim();
-  const issuer = (env.OIDC_ISSUER ?? "https://id.oimlsmart.org").trim().replace(/\/$/, "");
+  const issuer = (env.OIDC_ISSUER ?? "").trim().replace(/\/$/, "");
   const clientId = (env.OIDC_CLIENT_ID ?? "").trim();
-  if (!platformApi || !platformClientId || !clientId) return null;
+  if (!platformApi || !platformClientId || !clientId || !issuer) return null;
   return { platformApi, platformClientId, issuer, clientId, clientSecret: env.OIDC_CLIENT_SECRET };
 }
 var SUBJECT_KEY = (sessionHash) => `opat:${sessionHash}`;
@@ -2444,7 +2445,7 @@ function authErrorText(reason) {
   return PLAIN_LANGUAGE[reason] ?? "Sign-in failed. Please try again.";
 }
 function authConfig(env) {
-  const issuer = env.OIDC_ISSUER ?? "https://id.oimlsmart.org";
+  const issuer = (env.OIDC_ISSUER ?? "").trim().replace(/\/$/, "");
   const clientId = env.OIDC_CLIENT_ID;
   const redirectUri = env.OIDC_REDIRECT_URI ?? "https://ai.oimlsmart.org/auth/callback";
   const sessionSecret = env.SESSION_SECRET;

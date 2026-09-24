@@ -1,13 +1,13 @@
 import {
   handleSearch
-} from "../../chunk-YFDWKXEB.js";
+} from "../../chunk-SLZ4TZNO.js";
 import {
   checkQuoteAnchors,
   handleAsk,
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-AN4VFBBZ.js";
+} from "../../chunk-EE6V6X6D.js";
 import {
   buildMessages,
   citations,
@@ -29,7 +29,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-7UT76RQO.js";
+} from "../../chunk-DGFJUA2C.js";
 import {
   authenticate,
   corsHeaders,
@@ -38,14 +38,14 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-EFQALN2Z.js";
+} from "../../chunk-BV7IKH3N.js";
 import {
   canonicalRefusal
-} from "../../chunk-DBBGOOMZ.js";
+} from "../../chunk-FNJ457SE.js";
 import {
   entitlementScope,
   standardKeysFrom
-} from "../../chunk-5MBWE7WD.js";
+} from "../../chunk-COKARI7O.js";
 import {
   LIMITS,
   MODELS,
@@ -56,11 +56,11 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-ADXV2DPK.js";
+} from "../../chunk-RESCBSX6.js";
 import {
   P,
   setProfile
-} from "../../chunk-TJRTVJW5.js";
+} from "../../chunk-YTWPZE5O.js";
 
 // workers/worker_public/src/conversations.ts
 var ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
@@ -979,7 +979,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-HCZ4CDUR.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-RFKT7ZZY.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-36JS3555.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-YA6TD6QJ.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1404,7 +1404,7 @@ async function absenceRoute(c) {
   const namedStd = namedDocumentIn(String(body?.standard ?? ""));
   const standard = standardForDocNumber(namedStd?.doc_number ?? String(body?.standard ?? "").trim());
   const topic = String(body?.topic ?? "").trim().toLowerCase();
-  if (!standard || !topic) return err(400, "invalid_input", 'standard (e.g. "R 60") and topic are required');
+  if (!standard || !topic) return err(400, "invalid_input", "standard and topic are required");
   try {
     const nodes = (await env.DB.prepare("SELECT node_id, kind, name, content FROM model_nodes WHERE standard = ?1").bind(standard).all()).results ?? [];
     const tokens = topic.split(/\s+/).filter((t2) => t2.length > 2);
@@ -1615,7 +1615,7 @@ async function openapiCatalogRoute(c) {
       openapi: "3.1.0",
       info: { title: `${P().publisher.product_name} API`, version: c.env.INDEX_VERSION ?? "0" },
       paths: {},
-      "x-oiml-permissions-catalog": permissionsCatalog()
+      "x-permissions-catalog": permissionsCatalog()
     },
     200,
     corsHeaders(c.req)

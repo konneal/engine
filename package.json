@@ -5,13 +5,7 @@
   ],
   "scripts": {
     "typecheck": "tsc -p workers/worker_public",
-    "deploy:public": "npm run deploy -w workers/worker_public",
-    "dev:public": "npm run dev -w workers/worker_public",
-    "deploy": "./scripts/deploy.sh",
-    "test:golden": "node scripts/eval.mjs",
-    "test:e2e": "node tests/e2e.mjs",
     "lint:wrangler": "python3 scripts/lint_wrangler.py",
-    "test:ui": "node tests/ui.mjs",
     "test:bridge": "node --test tests/bridge.test.mjs",
     "test:units": "node --test --experimental-strip-types tests/*.test.ts",
     "gen:openapi-types": "node scripts/gen-openapi-types.mjs",
