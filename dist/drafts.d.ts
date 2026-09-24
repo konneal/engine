@@ -5,7 +5,7 @@ export interface DraftSample {
 export interface ApplicationPrefillFields {
     /** the Recommendation, as the estate URN (urn:oiml:pub:r:60:2021) */
     standard_doc: string;
-    /** display label ("OIML R 60:2021") */
+    /** display label ("ACME AB 99:2019") */
     standard_label?: string;
     family_designation?: string;
     group_label?: string;

@@ -27,23 +27,23 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-7UT76RQO.js";
+} from "./chunk-DGFJUA2C.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-EFQALN2Z.js";
+} from "./chunk-BV7IKH3N.js";
 import {
   canonicalRefusal,
   refusalAnswer
-} from "./chunk-DBBGOOMZ.js";
+} from "./chunk-FNJ457SE.js";
 import {
   entitlementScope,
   requestSalt,
   resolveRequestScope
-} from "./chunk-5MBWE7WD.js";
+} from "./chunk-COKARI7O.js";
 import {
   LIMITS,
   MODELS,
@@ -53,10 +53,10 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-ADXV2DPK.js";
+} from "./chunk-RESCBSX6.js";
 import {
   P
-} from "./chunk-TJRTVJW5.js";
+} from "./chunk-YTWPZE5O.js";
 
 // workers/worker_public/src/internal_gateway.ts
 async function retrieveInternal(service, auth, query) {
@@ -883,9 +883,10 @@ function classToken(query) {
   return m ? m[1].toLowerCase() : null;
 }
 function classAsColumn(cols, token) {
-  const exact = cols.find((c) => /^class_[a-z0-9.]+$/.test(c.name) && c.name.slice(6) === token);
+  const classCols = cols.filter((c) => /^class_[a-z0-9.]+$/.test(c.name));
+  const exact = classCols.find((c) => c.name.slice(6) === token);
   if (exact) return exact;
-  return cols.find((c) => /^class_[a-z0-9.]+$/.test(c.name) && c.name.slice(6) === "cd" && (token === "c" || token === "d"));
+  return classCols.find((c) => c.name.slice(6).startsWith(token));
 }
 function numericColumns(cols) {
   return cols.filter((c) => c.type === "number" || c.type === "integer" || /^class_[a-z0-9.]+$/.test(c.name));
@@ -1119,12 +1120,12 @@ function boundaryNoteText(match, citing) {
   const doc = match.entry.doc_number ?? match.entry.key;
   const title = match.entry.title ?? doc;
   const refs = citing.length ? `The public corpus references it from ${citing.join(", ")}.` : "";
-  return `LICENSED BOUNDARY \u2014 ${title} (IEC ${doc}) is licensed content in this deployment; its procedure is NOT part of the public corpus you are grounded in. ${refs} When answering: name the licensed document as the authoritative source of the procedure and say it is available to entitled callers; do NOT recite its conditioning or severity parameters (specific temperatures, humidity levels, durations or cycle counts) as if from the source \u2014 describe only what the public grounding passages themselves state, attributed to their own publications.`;
+  return `LICENSED BOUNDARY \u2014 ${title} (IEC ${doc}) is licensed content in this deployment; its procedure is NOT part of the public corpus you are grounded in. ${refs} When answering: name the licensed document as the authoritative source of the procedure and say it is available to entitled callers. Do NOT state its conditioning or severity parameters in ANY form \u2014 no temperatures, humidity levels, durations or cycle counts, not even as a single bound or as a value another publication repeats or cites; keep the description structural (expose, condition, recover) and let the licensed document own the numbers. If the grounding passages state parameter values, say only that the publications describe their own requirements and that the procedure's parameters are in the licensed document.`;
 }
 
 // workers/worker_public/src/drafts.ts
 var ACT_VERB = "(?:draft|prepare|pre-?fill|fill\\s+(?:in|out)|start|submit|file|lodge)";
-var ACT_TARGET = "(?:new\\s+)?(?:certification\\s+|type[ -]evaluation\\s+|OIML[- ]CS\\s+)?application";
+var ACT_TARGET = "(?:new\\s+)?(?:certification\\s+|type[ -]evaluation\\s+)?application";
 var INTENT_RES = [
   new RegExp(`\\b${ACT_VERB}\\b[\\s\\S]{0,60}?\\b${ACT_TARGET}\\b`, "i"),
   new RegExp(`\\b${ACT_TARGET}\\b[\\s\\S]{0,30}?\\b(?:draft|prepare|pre-?fill|for me)\\b`, "i")
@@ -1149,18 +1150,18 @@ function roleLabel(role) {
   if (["cs_admin", "admin"].includes(role)) return "a scheme administrator";
   return `the "${role}" role`;
 }
-var EXTRACTION_SYSTEM = `You extract the fields of a new OIML certification application from the user's own messages.
+var EXTRACTION_SYSTEM = `You extract the fields of a new certification application from the user's own messages.
 
 Rules:
 - Output ONLY a JSON object \u2014 no prose, no code fence.
 - Copy every value from the user's own words, and for each field give "source": the exact contiguous span of the user's message you copied it from.
 - NEVER infer, complete, normalize away, or guess a value. If the user did not state it, omit the field entirely.
-- "standard": the Recommendation the user named (e.g. "R 60" or "OIML R 60:2021") \u2014 a plain string, or omit when none was named.
+- "standard": the publication the user named (e.g. "AB 99" or "ACME AB 99:2019") \u2014 a plain string, or omit when none was named.
 - "scheme": only when the user named scheme A or scheme B explicitly.
 
 Schema (every field optional):
 {
-  "standard": "R 60",
+  "standard": "AB 99",
   "family_designation": { "value": "\u2026", "source": "\u2026" },
   "group_label": { "value": "\u2026", "source": "\u2026" },
   "model_designation": { "value": "\u2026", "source": "\u2026" },
@@ -1323,14 +1324,14 @@ async function prepareDraft(env, opts) {
     const untraced = dropped.find((d) => d.field === "standard");
     return refusal(
       "standard_unresolved",
-      untraced ? `I can't anchor the draft: you haven't named the Recommendation in your own words (the ${untraced.value} reading isn't yours). Name it plainly \u2014 for example OIML R 60 \u2014 and I'll prepare the draft.` : "I can't anchor the draft: you haven't named the Recommendation. Name it plainly \u2014 for example OIML R 60 \u2014 and I'll prepare it."
+      untraced ? `I can't anchor the draft: you haven't named the Recommendation in your own words (the ${untraced.value} reading isn't yours). Name it plainly \u2014 for example ACME AB 99 \u2014 and I'll prepare the draft.` : "I can't anchor the draft: you haven't named the publication. Name it plainly \u2014 for example ACME AB 99 \u2014 and I'll prepare it."
     );
   }
   const standard = await resolveStandard(env, kept.standard);
   if (!standard) {
     return refusal(
       "standard_unresolved",
-      `I couldn't resolve ${kept.standard} as a publication in the corpus, so I can't anchor the draft. Name the Recommendation plainly \u2014 for example OIML R 60 \u2014 and I'll prepare it.`
+      `I couldn't resolve ${kept.standard} as a publication in the corpus, so I can't anchor the draft. Name the publication plainly \u2014 for example ACME AB 99 \u2014 and I'll prepare it.`
     );
   }
   const fields = {
@@ -1952,7 +1953,7 @@ ${summary}` }] : [],
   const verdictBlock = machineVerdict ? {
     unit_id: boundModel.node_id,
     type: "verdict",
-    docidentifier: `${P().publisher.name} SMART model (${boundModel.standard})`,
+    docidentifier: `${P().publisher.name} model (${boundModel.standard})`,
     payload: {
       verdict: machineVerdict.verdict,
       on_violation: machineVerdict.on_violation,
@@ -1965,7 +1966,7 @@ ${summary}` }] : [],
   const conditionBlock = conditionVerdict ? {
     unit_id: conditionVerdict.matched[0] ?? conditionVerdict.nearest.node_id,
     type: "verdict",
-    docidentifier: `IEC SMART model (${conditionStandard})`,
+    docidentifier: `${P().publisher.name} model (${conditionStandard})`,
     payload: {
       verdict: conditionVerdict.verdict,
       missing: [],
@@ -2000,7 +2001,7 @@ ${summary}` }] : [],
   const aggregationBlock = aggregationVerdict ? {
     unit_id: aggregationVerdict.table,
     type: "verdict",
-    docidentifier: `SMART model table${aggregationStandard ? ` (${aggregationStandard})` : ""}`,
+    docidentifier: `${P().publisher.name} model table${aggregationStandard ? ` (${aggregationStandard})` : ""}`,
     payload: {
       check: `${aggregationVerdict.operation}: ${aggregationVerdict.column ?? aggregationVerdict.table_title ?? aggregationVerdict.table} = ${aggregationVerdict.value}${aggregationVerdict.unit ? ` ${aggregationVerdict.unit}` : ""}`,
       meaning: aggregationVerdict.table_title,
@@ -2021,10 +2022,7 @@ ${summary}` }] : [],
         const rows = await env.DB.prepare(
           "SELECT n.label AS label FROM graph_edges e JOIN graph_nodes n ON e.src = n.id WHERE e.kind = 'cites' AND e.dst LIKE ?1 LIMIT 4"
         ).bind(`%${docNum}%`).all().catch(() => ({ results: [] }));
-        citing = (rows.results ?? []).map((r) => {
-          const m = String(r.label ?? "").match(/^OIML-([A-Z]+)-(\d+)(?:-([A-Za-z0-9]+))?-(\d{4})$/);
-          return m ? `OIML ${m[1]} ${m[2]}${m[3] ? `-${m[3]}` : ""} (${m[4]})` : String(r.label ?? "");
-        });
+        citing = (rows.results ?? []).map((r) => String(r.label ?? "").replace(/^doc:/, ""));
       }
       boundaryNote = boundaryNoteText(match, citing);
     }

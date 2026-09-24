@@ -22,6 +22,8 @@ export declare const PROFILE: {
             readonly review: readonly ["review"];
             readonly glossary: readonly ["glossary"];
         };
+        readonly catalog_url_template: "https://catalog.atlas.example/{type}";
+        readonly catalog_corpora: readonly ["spec"];
         readonly features: {
             readonly drafts: false;
             readonly model_plane: false;

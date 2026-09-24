@@ -97,10 +97,12 @@ key.
 
 ## Promotion gates
 
-The engine ships the gate harness: a deployment's golden cases and
-annealment probes live in `profile/evals/`; the gate runs them against
-production before any promotion. Answers are witness-checked (the
-answer must contain the expected span, not just score well).
+The gate belongs to the deployment: its golden cases, annealment
+probes and the runners (gates, eval, variance, e2e) live in the
+deployment repository and run against that deployment's production.
+The engine provides what the gate exercises — the answer contract,
+the typed blocks and the model plane — and its own CI proves the
+fixture profiles end to end.
 
 ## Repository
 
