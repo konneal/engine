@@ -22,6 +22,7 @@ import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveReco
 import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, licensedEntryForPackage, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./conditions";
+import { evaluateAggregation, type AggregationVerdict } from "./aggregation";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { memoryNote } from "./memories";
 import { entitlementScope, resolveRequestScope, requestSalt } from "./requestScope";
@@ -791,6 +792,52 @@ async function handleAsk(
       }
     : null;
   if (conditionVerdict) console.log("condition engine:", conditionVerdict.matched.join("|") || conditionVerdict.nearest!.node_id, "→", conditionVerdict.verdict.toUpperCase());
+  // ── table-payload aggregation (konneal/engine#91): count / min / max
+  // / interval lookup over the typed table nodes — deterministic
+  // arithmetic where the answer IS the table's content. Fires when no
+  // node binding, machine verdict or condition verdict ran; the
+  // candidates are license-gated like every model lane.
+  let aggregationVerdict: AggregationVerdict | null = null;
+  let aggregationStandard: string | null = null;
+  if (!machineVerdict && !boundModel && !conditionVerdict && P().publisher.features?.model_plane) {
+    const docNum = modelDocHint?.doc_number;
+    const sql = docNum
+      ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'table' AND standard LIKE '%' || ?1"
+      : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'table'";
+    const stmt = docNum ? env.DB.prepare(sql).bind(docNum) : env.DB.prepare(sql);
+    const rows = await stmt.all().catch(() => ({ results: [] }));
+    const candidates = (rows.results ?? []).filter((r: any) => {
+      const entry = licensedEntryForPackage(String(r.standard));
+      return !entry || (standardKeys?.has(entry.key) ?? false);
+    });
+    const v = evaluateAggregation(
+      candidates.map((r: any) => ({ node_id: String(r.node_id), content: JSON.parse(String(r.content ?? "{}")) })),
+      q.query,
+    );
+    if (v) {
+      aggregationVerdict = v;
+      aggregationStandard = String((rows.results?.[0] as any)?.standard ?? "");
+    }
+  }
+  const aggregationNote = aggregationVerdict
+    ? `${aggregationVerdict.note}${aggregationStandard ? ` (standard ${aggregationStandard}.)` : ""}`
+    : undefined;
+  const aggregationBlock = aggregationVerdict
+    ? {
+        unit_id: aggregationVerdict.table,
+        type: "verdict",
+        docidentifier: `SMART model table${aggregationStandard ? ` (${aggregationStandard})` : ""}`,
+        payload: {
+          check: `${aggregationVerdict.operation}: ${aggregationVerdict.column ?? aggregationVerdict.table_title ?? aggregationVerdict.table} = ${aggregationVerdict.value}${aggregationVerdict.unit ? ` ${aggregationVerdict.unit}` : ""}`,
+          meaning: aggregationVerdict.table_title,
+          operation: aggregationVerdict.operation,
+          value: aggregationVerdict.value,
+          unit: aggregationVerdict.unit,
+          row: aggregationVerdict.row,
+        },
+      }
+    : null;
+  if (aggregationVerdict) console.log("aggregation engine:", aggregationVerdict.operation, aggregationVerdict.table, "→", aggregationVerdict.value);
   try {
     const tR = Date.now();
     // ── The "my account" live read (TODO.ai-platform/03) — resolved
@@ -940,7 +987,7 @@ async function handleAsk(
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
@@ -993,7 +1040,7 @@ async function handleAsk(
           const c2 = canonical0.includes(refusalAnswer())
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
             : await contractV2(env.DB, canonical0, usedHits);
-          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : [])], context_applied: ctxApplied, read: readAs(),
+          send({ type: "done", model, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : [])], context_applied: ctxApplied, read: readAs(),
             // the evidence view's ground truth: the exact passages this
             // answer was built from, compact — cache hits carry none,
             // because the cache stores the answer and never the passages
@@ -1172,7 +1219,7 @@ async function handleAsk(
   // figure completion (#172) — see ./completion for the rationale
   completionBlocks.push(...(await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used)));
 
-  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;

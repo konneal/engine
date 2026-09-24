@@ -589,17 +589,17 @@ function parseAndEval(src, params) {
       const r = add();
       switch (t.v) {
         case ">=":
-          return num2(l) >= num2(r);
+          return num3(l) >= num3(r);
         case "<=":
-          return num2(l) <= num2(r);
+          return num3(l) <= num3(r);
         case ">":
-          return num2(l) > num2(r);
+          return num3(l) > num3(r);
         case "<":
-          return num2(l) < num2(r);
+          return num3(l) < num3(r);
         case "==":
-          return num2(l) === num2(r);
+          return num3(l) === num3(r);
         default:
-          return num2(l) !== num2(r);
+          return num3(l) !== num3(r);
       }
     }
     return l;
@@ -611,7 +611,7 @@ function parseAndEval(src, params) {
       if (t && t.t === "op" && (t.v === "+" || t.v === "-")) {
         p++;
         const r = mul();
-        l = t.v === "+" ? num2(l) + num2(r) : num2(l) - num2(r);
+        l = t.v === "+" ? num3(l) + num3(r) : num3(l) - num3(r);
       } else return l;
     }
   }
@@ -622,7 +622,7 @@ function parseAndEval(src, params) {
       if (t && t.t === "op" && (t.v === "*" || t.v === "/")) {
         p++;
         const r = unary();
-        l = t.v === "*" ? num2(l) * num2(r) : num2(l) / num2(r);
+        l = t.v === "*" ? num3(l) * num3(r) : num3(l) / num3(r);
       } else return l;
     }
   }
@@ -630,7 +630,7 @@ function parseAndEval(src, params) {
     const t = peek();
     if (t && t.t === "op" && t.v === "-") {
       p++;
-      return -num2(unary());
+      return -num3(unary());
     }
     return atom();
   }
@@ -650,7 +650,7 @@ function parseAndEval(src, params) {
     throw new Error(`unexpected ${t.v}`);
   }
   const truthy = (v) => typeof v === "boolean" ? v : v !== 0;
-  const num2 = (v) => typeof v === "boolean" ? v ? 1 : 0 : v;
+  const num3 = (v) => typeof v === "boolean" ? v ? 1 : 0 : v;
   const out = or();
   if (p !== toks.length) throw new Error("trailing tokens");
   return out;
@@ -766,20 +766,20 @@ function verdictNote(v, node) {
 var NUM = String.raw`-?\d+(?:[.,]\d+)?`;
 function quantitiesIn(query) {
   const out = {};
-  const num2 = (s) => Number(s.replace(",", "."));
+  const num3 = (s) => Number(s.replace(",", "."));
   const put = (kind, stated, stated_unit, si) => {
     if (Number.isFinite(si)) out[kind] = { stated, stated_unit, si };
   };
   const tempC = query.match(new RegExp(`(${NUM})\\s*(?:\xB0\\s*)?C\\b`));
-  if (tempC) put("temperature", num2(tempC[1]), "degC", num2(tempC[1]) + 273.15);
+  if (tempC) put("temperature", num3(tempC[1]), "degC", num3(tempC[1]) + 273.15);
   const tempK = query.match(new RegExp(`(${NUM})\\s*K\\b`));
-  if (tempK && out.temperature === void 0) put("temperature", num2(tempK[1]), "K", num2(tempK[1]));
+  if (tempK && out.temperature === void 0) put("temperature", num3(tempK[1]), "K", num3(tempK[1]));
   const rh = query.match(new RegExp(`(${NUM})\\s*%\\s*(?:RH\\b|relative\\s+humidity)?`, "i"));
-  if (rh) put("relative_humidity", num2(rh[1]), "%", num2(rh[1]) / 100);
+  if (rh) put("relative_humidity", num3(rh[1]), "%", num3(rh[1]) / 100);
   const hours = query.match(new RegExp(`(${NUM})\\s*h\\b`, "i"));
-  if (hours) put("duration", num2(hours[1]), "h", num2(hours[1]) * 3600);
+  if (hours) put("duration", num3(hours[1]), "h", num3(hours[1]) * 3600);
   const days = query.match(new RegExp(`(${NUM})\\s*days?\\b`, "i"));
-  if (days && out.duration === void 0) put("duration", num2(days[1]), "d", num2(days[1]) * 86400);
+  if (days && out.duration === void 0) put("duration", num3(days[1]), "d", num3(days[1]) * 86400);
   return out;
 }
 function scoreSet(entries, q) {
@@ -838,6 +838,217 @@ function evaluateConditionSets(nodes, query) {
     checks: nearest.checks,
     note: `VERDICT: FAIL \u2014 no severity set admits the stated combination. The nearest set is ${nearest.node_id} (bands: ${nearest.checks.map((c) => c.band).join("; ")}). Say the combination is outside the menu and name the nearest set; never soften it.`
   };
+}
+
+// workers/worker_public/src/aggregation.ts
+var NUM2 = String.raw`-?\d+(?:[,\s]?\d{3})*(?:[.,]\d+)?`;
+var UNIT_WORDS = {
+  kg: ["mass", "load", "weight"],
+  s: ["time", "duration", "second"],
+  "km/h": ["speed", "velocity"],
+  v: ["load"],
+  degC: ["temperature"],
+  ppm: ["range", "fraction"]
+};
+function num2(v) {
+  if (v === null || v === void 0) return null;
+  let s = String(v).trim().replace(/\s/g, "");
+  if (!s || /^null$/i.test(s)) return null;
+  if (/^\d{1,3}(,\d{3})+([.,]\d+)?$/.test(s)) s = s.replace(/,/g, "");
+  else s = s.replace(",", ".");
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+function tokens(name) {
+  return name.toLowerCase().split("_").filter(Boolean);
+}
+function hasWord(queryLower, w) {
+  return new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\b`, "i").test(queryLower);
+}
+function columnScore(col, queryLower) {
+  let score = 0;
+  for (const t of tokens(col.name)) {
+    if (["min", "max", "gt", "of"].includes(t)) continue;
+    if (t.length >= 3 && queryLower.includes(t)) score += 1;
+  }
+  const hints = col.unit ? UNIT_WORDS[col.unit] : void 0;
+  if (hints?.some((h) => hasWord(queryLower, h))) score += 1;
+  return score;
+}
+function classColumn(cols) {
+  return cols.find((c) => c.name === "accuracy_class" || c.name === "metrological_class" || c.name.endsWith("_class"));
+}
+function classToken(query) {
+  const m = query.match(/\bclass\s+([a-z0-9.]+)\b/i);
+  return m ? m[1].toLowerCase() : null;
+}
+function classAsColumn(cols, token) {
+  const exact = cols.find((c) => /^class_[a-z0-9.]+$/.test(c.name) && c.name.slice(6) === token);
+  if (exact) return exact;
+  return cols.find((c) => /^class_[a-z0-9.]+$/.test(c.name) && c.name.slice(6) === "cd" && (token === "c" || token === "d"));
+}
+function numericColumns(cols) {
+  return cols.filter((c) => c.type === "number" || c.type === "integer" || /^class_[a-z0-9.]+$/.test(c.name));
+}
+function intervalPairs(cols) {
+  const byName = new Map(cols.map((c) => [c.name, c]));
+  const pairs = [];
+  for (const c of cols) {
+    for (const [suffix, exclusive] of [["min", false], ["gt", true]]) {
+      if (!c.name.endsWith(`_${suffix}`)) continue;
+      const high = byName.get(`${c.name.slice(0, -suffix.length)}max`);
+      if (high && high.unit === c.unit) pairs.push({ low: c, high, exclusiveLow: exclusive });
+    }
+  }
+  return pairs;
+}
+function statedInInterval(query, unit) {
+  if (!unit) return null;
+  const re = new RegExp(`(${NUM2})\\s*${unit.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\b`, "i");
+  const m = query.match(re);
+  return m ? num2(m[1]) : null;
+}
+function selectRow(rows, cols, pair, stated, filterColumn, filterValue) {
+  const lowIdx = cols.indexOf(pair.low);
+  const highIdx = cols.indexOf(pair.high);
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (filterColumn && filterValue !== null) {
+      const fIdx = cols.indexOf(filterColumn);
+      if (fIdx < 0 || String(row[fIdx] ?? "").trim().toLowerCase() !== filterValue) continue;
+    }
+    const low = num2(row[lowIdx]);
+    const high = num2(row[highIdx]);
+    const aboveLow = low === null || (pair.exclusiveLow ? stated > low : stated >= low);
+    const belowHigh = high === null || stated <= high;
+    if (aboveLow && belowHigh) return { row, index: i };
+  }
+  return null;
+}
+function cellValue(row, cols, col) {
+  const idx = cols.indexOf(col);
+  if (idx < 0) return null;
+  const raw = row[idx] ?? "";
+  return num2(raw) ?? String(raw).trim();
+}
+function pickTable(nodes, queryLower) {
+  let best = null;
+  for (const n of nodes) {
+    const c = n.content ?? {};
+    const payload = c.payload ?? {};
+    if (!Array.isArray(payload.rows) || !payload.rows.length) continue;
+    let score = 0;
+    for (const t of tokens(n.node_id.replace("/table/", ""))) {
+      if (t.length >= 3 && queryLower.includes(t)) score += 2;
+    }
+    for (const w of String(c.name ?? "").toLowerCase().split(/[^a-z0-9.]+/)) {
+      if (w.length >= 4 && queryLower.includes(w)) score += 1;
+    }
+    if (!best || score > best.score) best = { node: n, score };
+  }
+  if (best && best.score > 0) return best.node;
+  return nodes.length === 1 ? nodes[0] : null;
+}
+function evaluateAggregation(nodes, query) {
+  const qLower = query.toLowerCase();
+  const operation = /\bhow many\b|\bnumber of\b/.test(qLower) ? "count" : /\b(minimum|smallest|shortest|lowest|least)\b/.test(qLower) ? "min" : /\b(maximum|largest|longest|highest|greatest)\b/.test(qLower) ? "max" : "lookup";
+  if (!nodes.length) return null;
+  const node = pickTable(nodes, qLower);
+  if (!node) return null;
+  const content = node.content && typeof node.content === "object" ? node.content : {};
+  const payload = content.payload ?? {};
+  const cols = Array.isArray(payload.columns) ? payload.columns : [];
+  const rows = (Array.isArray(payload.rows) ? payload.rows : []).filter((r) => Array.isArray(r));
+  if (!cols.length || !rows.length) return null;
+  const tableTitle = String(content.name ?? content.definition ?? node.node_id.replace("/table/", ""));
+  const cite = (what) => `COMPUTED (${operation}) \u2014 ${what}, read from the typed table "${tableTitle}" (${node.node_id}). Present this result and cite the table's clause; the value is machine-computed from the table payload, do not recompute or round it differently.`;
+  if (operation === "count") {
+    const cc2 = classColumn(cols);
+    if (cc2 && /\bclasses?\b/.test(qLower) && tokens(cc2.name).some((t) => t.length >= 3 && qLower.includes(t))) {
+      const idx = cols.indexOf(cc2);
+      const distinct = new Set(rows.map((r) => String(r[idx] ?? "").trim().toLowerCase()));
+      return {
+        operation,
+        table: node.node_id,
+        table_title: tableTitle,
+        column: cc2.name,
+        value: distinct.size,
+        note: cite(`the table defines ${distinct.size} distinct ${cc2.name.replace("_", " ")} values`)
+      };
+    }
+    return {
+      operation,
+      table: node.node_id,
+      table_title: tableTitle,
+      value: rows.length,
+      note: cite(`the table has ${rows.length} rows`)
+    };
+  }
+  const cToken = classToken(query);
+  if (operation === "min" || operation === "max") {
+    let col = cToken ? classAsColumn(cols, cToken) : void 0;
+    if (!col) {
+      let best = null;
+      for (const c of numericColumns(cols)) {
+        const s = columnScore(c, qLower);
+        if (s > 0 && (!best || s > best.score)) best = { col: c, score: s };
+      }
+      col = best?.col;
+    }
+    if (!col) return null;
+    const values = rows.map((r) => num2(r[cols.indexOf(col)])).filter((v) => v !== null);
+    if (!values.length) return null;
+    const value = operation === "min" ? Math.min(...values) : Math.max(...values);
+    return {
+      operation,
+      table: node.node_id,
+      table_title: tableTitle,
+      column: col.name,
+      value,
+      unit: col.unit,
+      note: cite(`${operation} of ${col.name.replace(/_/g, " ")} across ${values.length} rows is ${value}${col.unit ? ` ${col.unit}` : ""}`)
+    };
+  }
+  const pairs = intervalPairs(cols);
+  const cc = classColumn(cols);
+  const filterColumn = cc && cToken ? cc : void 0;
+  let matched = null;
+  let pairUsed = null;
+  let stated = null;
+  for (const pair of pairs) {
+    const v = statedInInterval(query, pair.low.unit);
+    if (v === null) continue;
+    const r = selectRow(rows, cols, pair, v, filterColumn, cToken);
+    if (r) {
+      matched = r;
+      pairUsed = pair;
+      stated = v;
+      break;
+    }
+  }
+  if (matched && pairUsed && stated !== null) {
+    const returnCol = cToken ? classAsColumn(cols, cToken) : void 0;
+    const valueCols = cols.filter(
+      (c) => c !== pairUsed.low && c !== pairUsed.high && c !== filterColumn && numericColumns(cols).includes(c)
+    );
+    const col = returnCol ?? (valueCols.length === 1 ? valueCols[0] : void 0);
+    const value = col ? cellValue(matched.row, cols, col) : null;
+    const rowObj = {};
+    cols.forEach((c, i) => rowObj[c.name] = String(matched.row[i] ?? "").trim());
+    return {
+      operation: "lookup",
+      table: node.node_id,
+      table_title: tableTitle,
+      column: col?.name,
+      value,
+      unit: col?.unit,
+      row: rowObj,
+      note: cite(
+        `the stated ${stated} ${pairUsed.low.unit ?? ""} falls in the row ${pairUsed.low.name} ${matched.row[cols.indexOf(pairUsed.low)]} / ${pairUsed.high.name} ${matched.row[cols.indexOf(pairUsed.high)]}${cToken ? `, ${filterColumn ? filterColumn.name.replace("_", " ") : "class"} ${cToken}` : ""}`
+      )
+    };
+  }
+  return null;
 }
 
 // workers/worker_public/src/drafts.ts
@@ -966,16 +1177,16 @@ async function resolveStandard(env, named) {
   const m = named.match(/^urn:oiml:pub:([rdbge]):(\d{1,3})(?:-[0-9A-Za-z]+)?(?::(\d{4}))?$/i) ?? named.match(/^(?:OIML\s+)?([RDBGE])\s*(\d{1,3})(?:-[0-9A-Za-z]+)?(?:\s*:\s*(\d{4}))?$/i);
   if (!m) return null;
   const type = m[1].toUpperCase();
-  const num2 = String(Number(m[2]));
+  const num3 = String(Number(m[2]));
   try {
     const row = await env.DB.prepare(
       "SELECT docidentifier, edition, status, derived_status FROM documents WHERE family = ?1 AND active = 1 ORDER BY (part IS NULL) DESC, edition DESC LIMIT 1"
-    ).bind(`${type}-${num2}`).first();
+    ).bind(`${type}-${num3}`).first();
     if (!row) return null;
     const edition = typeof row.edition === "string" ? row.edition : void 0;
     return {
-      urn: `urn:oiml:pub:${type.toLowerCase()}:${num2}${edition ? `:${edition}` : ""}`,
-      label: typeof row.docidentifier === "string" ? row.docidentifier : `OIML ${type} ${num2}`,
+      urn: `urn:oiml:pub:${type.toLowerCase()}:${num3}${edition ? `:${edition}` : ""}`,
+      label: typeof row.docidentifier === "string" ? row.docidentifier : `OIML ${type} ${num3}`,
       ...edition ? { edition } : {},
       status: typeof row.derived_status === "string" ? row.derived_status : typeof row.status === "string" ? row.status : void 0
     };
@@ -1687,6 +1898,41 @@ ${summary}` }] : [],
     }
   } : null;
   if (conditionVerdict) console.log("condition engine:", conditionVerdict.matched.join("|") || conditionVerdict.nearest.node_id, "\u2192", conditionVerdict.verdict.toUpperCase());
+  let aggregationVerdict = null;
+  let aggregationStandard = null;
+  if (!machineVerdict && !boundModel && !conditionVerdict && P().publisher.features?.model_plane) {
+    const docNum = modelDocHint?.doc_number;
+    const sql = docNum ? "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'table' AND standard LIKE '%' || ?1" : "SELECT standard, node_id, content FROM model_nodes WHERE kind = 'table'";
+    const stmt = docNum ? env.DB.prepare(sql).bind(docNum) : env.DB.prepare(sql);
+    const rows = await stmt.all().catch(() => ({ results: [] }));
+    const candidates = (rows.results ?? []).filter((r) => {
+      const entry = licensedEntryForPackage(String(r.standard));
+      return !entry || (standardKeys?.has(entry.key) ?? false);
+    });
+    const v = evaluateAggregation(
+      candidates.map((r) => ({ node_id: String(r.node_id), content: JSON.parse(String(r.content ?? "{}")) })),
+      q.query
+    );
+    if (v) {
+      aggregationVerdict = v;
+      aggregationStandard = String(rows.results?.[0]?.standard ?? "");
+    }
+  }
+  const aggregationNote = aggregationVerdict ? `${aggregationVerdict.note}${aggregationStandard ? ` (standard ${aggregationStandard}.)` : ""}` : void 0;
+  const aggregationBlock = aggregationVerdict ? {
+    unit_id: aggregationVerdict.table,
+    type: "verdict",
+    docidentifier: `SMART model table${aggregationStandard ? ` (${aggregationStandard})` : ""}`,
+    payload: {
+      check: `${aggregationVerdict.operation}: ${aggregationVerdict.column ?? aggregationVerdict.table_title ?? aggregationVerdict.table} = ${aggregationVerdict.value}${aggregationVerdict.unit ? ` ${aggregationVerdict.unit}` : ""}`,
+      meaning: aggregationVerdict.table_title,
+      operation: aggregationVerdict.operation,
+      value: aggregationVerdict.value,
+      unit: aggregationVerdict.unit,
+      row: aggregationVerdict.row
+    }
+  } : null;
+  if (aggregationVerdict) console.log("aggregation engine:", aggregationVerdict.operation, aggregationVerdict.table, "\u2192", aggregationVerdict.value);
   try {
     const tR = Date.now();
     if (declaredCtx?.kind === "account") {
@@ -1780,7 +2026,7 @@ Answer account questions from these records ONLY: name the record when you use i
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
     summary,
     budget
   );
@@ -1828,7 +2074,7 @@ Answer account questions from these records ONLY: name the record when you use i
             model,
             query_hash: queryHash,
             follow_ups: understanding?.follow_ups ?? [],
-            blocks: [...c2.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : []],
+            blocks: [...c2.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : []],
             context_applied: ctxApplied,
             read: readAs(),
             // the evidence view's ground truth: the exact passages this
@@ -1945,7 +2191,7 @@ Answer account questions from these records ONLY: name the record when you use i
     if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
   }
   completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
-  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
+  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = await warmEmbed ?? null;
