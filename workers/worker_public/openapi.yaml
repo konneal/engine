@@ -1183,8 +1183,10 @@ components:
             with its expression, the values bound from the question, and
             the individual result — plus, for condition-set membership,
             the matched severity set or the nearest set with the violated
-            bands. The verdict is computed server-side; clients render it
-            as data.
+            bands; aggregation verdicts carry the machine-computed
+            count, minimum, maximum or interval lookup over a typed
+            table payload. The verdict is computed server-side; clients
+            render it as data.
           items:
             type: object
         model:

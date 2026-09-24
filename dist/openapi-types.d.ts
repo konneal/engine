@@ -894,7 +894,7 @@ export interface components {
                 /** Format: uri */
                 url?: string;
             }[];
-            /** @description The typed objects the answer carries: tables, figures, condition-set verdicts, conformance verdicts and unit blocks. A verdict block's payload carries the machine evaluation — the verdict (pass, fail or void), one check per machine rule with its expression, the values bound from the question, and the individual result — plus, for condition-set membership, the matched severity set or the nearest set with the violated bands. The verdict is computed server-side; clients render it as data. */
+            /** @description The typed objects the answer carries: tables, figures, condition-set verdicts, conformance verdicts and unit blocks. A verdict block's payload carries the machine evaluation — the verdict (pass, fail or void), one check per machine rule with its expression, the values bound from the question, and the individual result — plus, for condition-set membership, the matched severity set or the nearest set with the violated bands; aggregation verdicts carry the machine-computed count, minimum, maximum or interval lookup over a typed table payload. The verdict is computed server-side; clients render it as data. */
             blocks?: Record<string, never>[];
             /** @description The model that generated the answer. */
             model?: string;
