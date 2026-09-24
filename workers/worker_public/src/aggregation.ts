@@ -222,7 +222,7 @@ export function evaluateAggregation(
   const tableTitle = cut > 0 ? rawTitle.slice(0, cut) : rawTitle.slice(0, 120);
 
   const cite = (what: string) =>
-    `COMPUTED (${operation}) — ${what}, read from the typed table "${tableTitle}" (${node.node_id}). Present this result and cite the table's clause; the value is machine-computed from the table payload, do not recompute or round it differently.`;
+    `COMPUTED (${operation}) — ${what}, read from the typed table "${tableTitle}". Present this result and cite the table's clause; the value is machine-computed from the table payload, do not recompute or round it differently. The machine table identifier rides the verdict block as data — never write it in your prose.`;
 
   if (operation === "count") {
     const cc = classColumn(cols);
