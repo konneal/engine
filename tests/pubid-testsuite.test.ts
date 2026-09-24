@@ -37,6 +37,7 @@ const KNOWN_NULL: { re: RegExp; why: string }[] = [
   { re: /^Amendment \(\d+\) to /, why: "leading-amendment construct — the citation layer owns it" },
   { re: /\b\d?\.?\d*(WD|CD)\b/, why: "draft-stage construct — outside the retrieval plane (no draft documents)" },
   { re: /Annex/, why: "annex construct — the citation layer owns it" },
+  { re: /\|/, why: "pipe-paired citation construct — the citation layer owns it" },
 ];
 
 test("every canonical case parses to the right spine or sits in the ledger", () => {
