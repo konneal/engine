@@ -931,12 +931,31 @@ function cellValue(row, cols, col) {
   const raw = row[idx] ?? "";
   return num2(raw) ?? String(raw).trim();
 }
-function pickTable(nodes, queryLower) {
+function classValueExists(rows, cols, token) {
+  const cc = classColumn(cols);
+  if (!cc) return false;
+  const idx = cols.indexOf(cc);
+  return rows.some((r) => String(r[idx] ?? "").trim().toLowerCase() === token);
+}
+function statedUnits(query) {
+  const out = /* @__PURE__ */ new Set();
+  const re = new RegExp(`(${NUM2})\\s*([%\xB0a-zA-Z][a-zA-Z/.%\xB0]*\\b)`, "g");
+  for (const m of query.matchAll(re)) {
+    if (m[2]) out.add(m[2].replace("\u2062", "").trim());
+  }
+  return out;
+}
+function pickTable(nodes, query) {
+  const queryLower = query.toLowerCase();
+  const stated = statedUnits(query);
+  const cToken = classToken(query);
   let best = null;
   for (const n of nodes) {
     const c = n.content ?? {};
     const payload = c.payload ?? {};
     if (!Array.isArray(payload.rows) || !payload.rows.length) continue;
+    const cols = Array.isArray(payload.columns) ? payload.columns : [];
+    const rows = (Array.isArray(payload.rows) ? payload.rows : []).filter((r) => Array.isArray(r));
     let score = 0;
     for (const t of tokens(n.node_id.replace("/table/", ""))) {
       if (t.length >= 3 && queryLower.includes(t)) score += 2;
@@ -944,6 +963,8 @@ function pickTable(nodes, queryLower) {
     for (const w of String(c.name ?? "").toLowerCase().split(/[^a-z0-9.]+/)) {
       if (w.length >= 4 && queryLower.includes(w)) score += 1;
     }
+    if (intervalPairs(cols).some((p) => p.low.unit && stated.has(p.low.unit))) score += 3;
+    if (cToken && (classAsColumn(cols, cToken) || classValueExists(rows, cols, cToken))) score += 2;
     if (!best || score > best.score) best = { node: n, score };
   }
   if (best && best.score > 0) return best.node;
@@ -953,7 +974,7 @@ function evaluateAggregation(nodes, query) {
   const qLower = query.toLowerCase();
   const operation = /\bhow many\b|\bnumber of\b/.test(qLower) ? "count" : /\b(minimum|smallest|shortest|lowest|least)\b/.test(qLower) ? "min" : /\b(maximum|largest|longest|highest|greatest)\b/.test(qLower) ? "max" : "lookup";
   if (!nodes.length) return null;
-  const node = pickTable(nodes, qLower);
+  const node = pickTable(nodes, query);
   if (!node) return null;
   const content = node.content && typeof node.content === "object" ? node.content : {};
   const payload = content.payload ?? {};

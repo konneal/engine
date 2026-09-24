@@ -138,8 +138,16 @@ test("several tables: table-name scoring picks mpe_moving, not mpe_tiers", () =>
 });
 
 test("ambiguous across many unscored tables: refuse rather than guess", () => {
-  const v = evaluateAggregation([mpeTiers, mpeMoving], "What is the value at 120 km/h?");
+  const v = evaluateAggregation([mpeTiers, mpeMoving], "What is the value?");
   assert.equal(v, null);
+});
+
+test("the stated unit and class beat a title-word tie: 500 kg class C picks the stabilisation table (live regression)", () => {
+  const v = evaluateAggregation([mpeTiers, stabilisation], "After a 500 kg load change, how long must a class C load cell stabilise before the reading, per OIML R 60?");
+  assert.equal(v?.table, "/table/loading_stabilisation_times");
+  assert.equal(v?.operation, "lookup");
+  assert.equal(v?.value, 30);
+  assert.equal(v?.unit, "s");
 });
 
 test("no aggregation intent matchable: no verdict", () => {

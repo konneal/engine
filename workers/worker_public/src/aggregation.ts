@@ -140,12 +140,35 @@ function cellValue(row: string[], cols: Column[], col: Column): number | string 
   return num(raw) ?? String(raw).trim();
 }
 
-function pickTable(nodes: { node_id: string; content: any }[], queryLower: string): { node_id: string; content: any } | null {
+/** The named class exists as a row VALUE of the table's class column
+ *  (mpe_tiers' accuracy_class A/B/C/D rows). */
+function classValueExists(rows: string[][], cols: Column[], token: string): boolean {
+  const cc = classColumn(cols);
+  if (!cc) return false;
+  const idx = cols.indexOf(cc);
+  return rows.some((r) => String(r[idx] ?? "").trim().toLowerCase() === token);
+}
+
+function statedUnits(query: string): Set<string> {
+  const out = new Set<string>();
+  const re = new RegExp(`(${NUM})\\s*([%°a-zA-Z][a-zA-Z/.%°]*\\b)`,"g");
+  for (const m of query.matchAll(re)) {
+    if (m[2]) out.add(m[2].replace("\u2062", "").trim());
+  }
+  return out;
+}
+
+function pickTable(nodes: { node_id: string; content: any }[], query: string): { node_id: string; content: any } | null {
+  const queryLower = query.toLowerCase();
+  const stated = statedUnits(query);
+  const cToken = classToken(query);
   let best: { node: { node_id: string; content: any }; score: number } | null = null;
   for (const n of nodes) {
     const c = n.content ?? {};
     const payload = (c.payload ?? {}) as { columns?: Column[]; rows?: unknown[] };
     if (!Array.isArray(payload.rows) || !payload.rows.length) continue;
+    const cols = (Array.isArray(payload.columns) ? payload.columns : []) as Column[];
+    const rows = (Array.isArray(payload.rows) ? payload.rows : []).filter((r) => Array.isArray(r)) as string[][];
     let score = 0;
     for (const t of tokens(n.node_id.replace("/table/", ""))) {
       if (t.length >= 3 && queryLower.includes(t)) score += 2;
@@ -153,6 +176,11 @@ function pickTable(nodes: { node_id: string; content: any }[], queryLower: strin
     for (const w of String(c.name ?? "").toLowerCase().split(/[^a-z0-9.]+/)) {
       if (w.length >= 4 && queryLower.includes(w)) score += 1;
     }
+    // the question's stated unit existing as this table's interval unit,
+    // and the named class resolving here, are the strongest signals —
+    // a table without either cannot hold the lookup
+    if (intervalPairs(cols).some((p) => p.low.unit && stated.has(p.low.unit))) score += 3;
+    if (cToken && (classAsColumn(cols, cToken) || classValueExists(rows, cols, cToken))) score += 2;
     if (!best || score > best.score) best = { node: n, score };
   }
   // an un-scored pick across several tables would be a guess: refuse
@@ -177,7 +205,7 @@ export function evaluateAggregation(
         ? "max"
         : "lookup";
   if (!nodes.length) return null;
-  const node = pickTable(nodes, qLower);
+  const node = pickTable(nodes, query);
   if (!node) return null;
   const content = (node.content && typeof node.content === "object" ? node.content : {}) as Record<string, any>;
   const payload = (content.payload ?? {}) as { columns?: Column[]; rows?: unknown[] };
