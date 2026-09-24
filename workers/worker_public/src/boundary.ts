@@ -61,9 +61,13 @@ export function boundaryNoteText(match: LicensedMatch, citing: string[]): string
     `LICENSED BOUNDARY — ${title} (IEC ${doc}) is licensed content in this ` +
     `deployment; its procedure is NOT part of the public corpus you are grounded in. ` +
     `${refs} When answering: name the licensed document as the authoritative source of ` +
-    `the procedure and say it is available to entitled callers; do NOT recite its ` +
-    `conditioning or severity parameters (specific temperatures, humidity levels, ` +
-    `durations or cycle counts) as if from the source — describe only what the public ` +
-    `grounding passages themselves state, attributed to their own publications.`
+    `the procedure and say it is available to entitled callers. Do NOT state its ` +
+    `conditioning or severity parameters in ANY form — no temperatures, humidity ` +
+    `levels, durations or cycle counts, not even as a single bound or as a value ` +
+    `another publication repeats or cites; keep the description structural (expose, ` +
+    `condition, recover) and let the licensed document own the numbers. If the ` +
+    `grounding passages state parameter values, say only that the publications ` +
+    `describe their own requirements and that the procedure's parameters are in the ` +
+    `licensed document.`
   );
 }

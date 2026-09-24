@@ -384,7 +384,8 @@ function publicationUrl(meta: ChunkMeta): string | undefined {
   // foreign-corpus chunk has no entry in it, and a fabricated url is
   // worse than none (the door for internal renderings is the internal
   // origin, wired by the site's doc-base configuration)
-  if (meta.corpus && !["oiml", "dirty", "clean"].includes(meta.corpus)) return undefined;
+  const ownCorpora = P().publisher.catalog_corpora;
+  if (meta.corpus && ownCorpora && !ownCorpora.includes(meta.corpus)) return undefined;
   const tpl = P().publisher.catalog_url_template;
   if (!tpl || !meta.doctype || !meta.doc_number) return undefined;
   return tpl.replace("{type}", meta.doctype.toLowerCase()) + meta.doc_number;

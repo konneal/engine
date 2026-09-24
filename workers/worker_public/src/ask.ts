@@ -774,7 +774,7 @@ async function handleAsk(
     ? {
         unit_id: boundModel!.node_id,
         type: "verdict",
-        docidentifier: `${P().publisher.name} SMART model (${boundModel!.standard})`,
+        docidentifier: `${P().publisher.name} model (${boundModel!.standard})`,
         payload: {
           verdict: machineVerdict.verdict,
           on_violation: machineVerdict.on_violation,
@@ -789,7 +789,7 @@ async function handleAsk(
     ? {
         unit_id: conditionVerdict.matched[0] ?? conditionVerdict.nearest!.node_id,
         type: "verdict",
-        docidentifier: `IEC SMART model (${conditionStandard})`,
+        docidentifier: `${P().publisher.name} model (${conditionStandard})`,
         payload: {
           verdict: conditionVerdict.verdict,
           missing: [],
@@ -835,7 +835,7 @@ async function handleAsk(
     ? {
         unit_id: aggregationVerdict.table,
         type: "verdict",
-        docidentifier: `SMART model table${aggregationStandard ? ` (${aggregationStandard})` : ""}`,
+        docidentifier: `${P().publisher.name} model table${aggregationStandard ? ` (${aggregationStandard})` : ""}`,
         payload: {
           check: `${aggregationVerdict.operation}: ${aggregationVerdict.column ?? aggregationVerdict.table_title ?? aggregationVerdict.table} = ${aggregationVerdict.value}${aggregationVerdict.unit ? ` ${aggregationVerdict.unit}` : ""}`,
           meaning: aggregationVerdict.table_title,
@@ -862,10 +862,7 @@ async function handleAsk(
         const rows = await env.DB.prepare(
           "SELECT n.label AS label FROM graph_edges e JOIN graph_nodes n ON e.src = n.id WHERE e.kind = 'cites' AND e.dst LIKE ?1 LIMIT 4",
         ).bind(`%${docNum}%`).all().catch(() => ({ results: [] }));
-        citing = (rows.results ?? []).map((r: any) => {
-          const m = String(r.label ?? "").match(/^OIML-([A-Z]+)-(\d+)(?:-([A-Za-z0-9]+))?-(\d{4})$/);
-          return m ? `OIML ${m[1]} ${m[2]}${m[3] ? `-${m[3]}` : ""} (${m[4]})` : String(r.label ?? "");
-        });
+        citing = (rows.results ?? []).map((r: any) => String(r.label ?? "").replace(/^doc:/, ""));
       }
       boundaryNote = boundaryNoteText(match, citing);
     }

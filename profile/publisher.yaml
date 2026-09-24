@@ -19,6 +19,10 @@ codec: plain-slug
 session_cookie: fixture-session
 references:
   label_prefix: ""
+# the publisher's catalog page ({type} = lowercase doctype) and the
+# corpora the catalog covers (foreign-corpus chunks get no catalog link)
+catalog_url_template: "https://catalog.fixture.example.org/{type}"
+catalog_corpora: [pub, dirty, clean]
 # engine features this deployment switches on (default: off — the
 # engine serves every publisher without them)
 features:

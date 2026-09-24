@@ -32,6 +32,10 @@ export const PROFILE = {
         "glossary"
       ]
     },
+    "catalog_url_template": "https://catalog.atlas.example/{type}",
+    "catalog_corpora": [
+      "spec"
+    ],
     "features": {
       "drafts": false,
       "model_plane": false

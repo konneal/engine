@@ -48,7 +48,7 @@ export interface AuthConfig {
 }
 
 function authConfig(env: any): AuthConfig | null {
-  const issuer = env.OIDC_ISSUER ?? "https://id.oimlsmart.org";
+  const issuer = (env.OIDC_ISSUER ?? "").trim().replace(/\/$/, "");
   const clientId = env.OIDC_CLIENT_ID;
   const redirectUri = env.OIDC_REDIRECT_URI ?? "https://ai.oimlsmart.org/auth/callback";
   const sessionSecret = env.SESSION_SECRET;
