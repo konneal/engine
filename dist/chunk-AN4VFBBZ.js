@@ -1074,6 +1074,54 @@ function evaluateAggregation(nodes, query) {
   return null;
 }
 
+// workers/worker_public/src/boundary.ts
+var TITLE_STOPWORDS = /* @__PURE__ */ new Set([
+  "environmental",
+  "testing",
+  "test",
+  "tests",
+  "guidance",
+  "generic",
+  "standards",
+  "standard",
+  "electromagnetic",
+  "compatibility",
+  "environment",
+  "description",
+  "measurement",
+  "techniques",
+  "immunity",
+  "residential",
+  "commercial",
+  "industrial",
+  "environments",
+  "and",
+  "for",
+  "the",
+  "iec",
+  "iso"
+]);
+function distinctiveTokens(title) {
+  return title.toLowerCase().split(/[^a-z0-9.]+/).filter((w) => w.length >= 3 && !TITLE_STOPWORDS.has(w) && !/^[0-9:-]+$/.test(w));
+}
+function matchLicensedTopic(query, licensed) {
+  const words = new Set(query.toLowerCase().split(/[^a-z0-9.]+/).filter(Boolean));
+  let best = null;
+  for (const entry of licensed) {
+    if (!entry.title) continue;
+    const matched = distinctiveTokens(entry.title).filter((w) => words.has(w));
+    if (matched.length < 2) continue;
+    if (!best || matched.length > best.matched.length) best = { entry, matched };
+  }
+  return best;
+}
+function boundaryNoteText(match, citing) {
+  const doc = match.entry.doc_number ?? match.entry.key;
+  const title = match.entry.title ?? doc;
+  const refs = citing.length ? `The public corpus references it from ${citing.join(", ")}.` : "";
+  return `LICENSED BOUNDARY \u2014 ${title} (IEC ${doc}) is licensed content in this deployment; its procedure is NOT part of the public corpus you are grounded in. ${refs} When answering: name the licensed document as the authoritative source of the procedure and say it is available to entitled callers; do NOT recite its conditioning or severity parameters (specific temperatures, humidity levels, durations or cycle counts) as if from the source \u2014 describe only what the public grounding passages themselves state, attributed to their own publications.`;
+}
+
 // workers/worker_public/src/drafts.ts
 var ACT_VERB = "(?:draft|prepare|pre-?fill|fill\\s+(?:in|out)|start|submit|file|lodge)";
 var ACT_TARGET = "(?:new\\s+)?(?:certification\\s+|type[ -]evaluation\\s+|OIML[- ]CS\\s+)?application";
@@ -1963,6 +2011,24 @@ ${summary}` }] : [],
     }
   } : null;
   if (aggregationVerdict) console.log("aggregation engine:", aggregationVerdict.operation, aggregationVerdict.table, "\u2192", aggregationVerdict.value);
+  let boundaryNote = null;
+  if (P().sources?.licensed?.length) {
+    const match = matchLicensedTopic(q.query, P().sources.licensed);
+    if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
+      const docNum = match.entry.doc_number ?? "";
+      let citing = [];
+      if (docNum) {
+        const rows = await env.DB.prepare(
+          "SELECT n.label AS label FROM graph_edges e JOIN graph_nodes n ON e.src = n.id WHERE e.kind = 'cites' AND e.dst LIKE ?1 LIMIT 4"
+        ).bind(`%${docNum}%`).all().catch(() => ({ results: [] }));
+        citing = (rows.results ?? []).map((r) => {
+          const m = String(r.label ?? "").match(/^OIML-([A-Z]+)-(\d+)(?:-([A-Za-z0-9]+))?-(\d{4})$/);
+          return m ? `OIML ${m[1]} ${m[2]}${m[3] ? `-${m[3]}` : ""} (${m[4]})` : String(r.label ?? "");
+        });
+      }
+      boundaryNote = boundaryNoteText(match, citing);
+    }
+  }
   try {
     const tR = Date.now();
     if (declaredCtx?.kind === "account") {
@@ -2056,7 +2122,7 @@ Answer account questions from these records ONLY: name the record when you use i
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
     summary,
     budget
   );

@@ -23,6 +23,7 @@ import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, licensedEnt
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./conditions";
 import { evaluateAggregation, type AggregationVerdict } from "./aggregation";
+import { matchLicensedTopic, boundaryNoteText } from "./boundary";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { memoryNote } from "./memories";
 import { entitlementScope, resolveRequestScope, requestSalt } from "./requestScope";
@@ -846,6 +847,29 @@ async function handleAsk(
       }
     : null;
   if (aggregationVerdict) console.log("aggregation engine:", aggregationVerdict.operation, aggregationVerdict.table, "→", aggregationVerdict.value);
+  // ── the licensed boundary note (TODO.rag/12): an unentitled question
+  // that is topically ABOUT a licensed standard gets the boundary
+  // posture — the citation graph names the public publications that
+  // reference the licensed document, and the note instructs the model
+  // to attribute, never to recite the licensed parameters.
+  let boundaryNote: string | null = null;
+  if (P().sources?.licensed?.length) {
+    const match = matchLicensedTopic(q.query, P().sources.licensed);
+    if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
+      const docNum = match.entry.doc_number ?? "";
+      let citing: string[] = [];
+      if (docNum) {
+        const rows = await env.DB.prepare(
+          "SELECT n.label AS label FROM graph_edges e JOIN graph_nodes n ON e.src = n.id WHERE e.kind = 'cites' AND e.dst LIKE ?1 LIMIT 4",
+        ).bind(`%${docNum}%`).all().catch(() => ({ results: [] }));
+        citing = (rows.results ?? []).map((r: any) => {
+          const m = String(r.label ?? "").match(/^OIML-([A-Z]+)-(\d+)(?:-([A-Za-z0-9]+))?-(\d{4})$/);
+          return m ? `OIML ${m[1]} ${m[2]}${m[3] ? `-${m[3]}` : ""} (${m[4]})` : String(r.label ?? "");
+        });
+      }
+      boundaryNote = boundaryNoteText(match, citing);
+    }
+  }
   try {
     const tR = Date.now();
     // ── The "my account" live read (TODO.ai-platform/03) — resolved
@@ -995,7 +1019,7 @@ async function handleAsk(
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
