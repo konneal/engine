@@ -14,7 +14,8 @@ import {
   OidcError,
 } from "./oidc";
 import { clearSessionCookie, mintSessionCookie, mintSessionToken, rawSessionToken, readSession, sessionCookieFromToken, SessionClaims } from "./session";
-import { renewSessionClaims, retainRefreshToken } from "./oidc-refresh";
+import { renewSessionClaims } from "./oidc-refresh";
+import { retainRefreshToken } from "./livedata";
 import { bubbleConfirmPage, isAllowedBubbleOrigin } from "./bubble";
 import { dropOpAccessToken, retainOpAccessToken } from "./livedata";
 

@@ -65,6 +65,41 @@ const EXCHANGED_KEY = (sessionHash: string) => `ossx:${sessionHash}`;
  *  window (the OP token's own TTL, minus a small margin). Called ONCE
  *  per sign-in from the auth callback; the token never persists past
  *  the window. */
+// The session's refresh-token store (oidc-refresh.ts): the OP's refresh
+// grant is what makes session renewal a RE-JUDGMENT of live standing
+// instead of a re-stamp of frozen claims. Same KV discipline as the
+// access token: keyed by the session token's hash, TTL = the grant's
+// own life, never D1.
+const REFRESH_KEY = (sessionHash: string) => `ort:${sessionHash}`;
+const REFRESH_TTL_SEC = 30 * 24 * 60 * 60; // the OP's grant TTL default
+
+export async function retainRefreshToken(env: any, sessionRaw: string, refreshToken: string): Promise<void> {
+  try {
+    await env.CACHE.put(REFRESH_KEY(await sha256Hex(sessionRaw)), JSON.stringify({ token: refreshToken }), {
+      expirationTtl: REFRESH_TTL_SEC,
+    });
+  } catch {
+    // a KV hiccup degrades to the legacy staleness, never blocks sign-in
+  }
+}
+
+export async function readRefreshToken(env: any, sessionRaw: string): Promise<string | null> {
+  try {
+    const hit = await env.CACHE.get(REFRESH_KEY(await sha256Hex(sessionRaw)), "json");
+    return typeof hit?.token === "string" ? hit.token : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function dropRefreshToken(env: any, sessionRaw: string): Promise<void> {
+  try {
+    await env.CACHE.delete(REFRESH_KEY(await sha256Hex(sessionRaw)));
+  } catch {
+    // best effort
+  }
+}
+
 export async function retainOpAccessToken(
   env: any,
   sessionRaw: string,
