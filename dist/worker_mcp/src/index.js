@@ -1,11 +1,11 @@
 import {
   authenticate
-} from "../../chunk-BV7IKH3N.js";
-import "../../chunk-RESCBSX6.js";
+} from "../../chunk-FYGJDJPN.js";
+import "../../chunk-434NRPSS.js";
 import {
   P,
   setProfile
-} from "../../chunk-YTWPZE5O.js";
+} from "../../chunk-HYI32HMI.js";
 
 // workers/worker_mcp/src/index.ts
 var PROTOCOL_VERSION = "2025-06-18";
