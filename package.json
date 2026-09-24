@@ -16,18 +16,18 @@
     "gen:profile": "node scripts/gen_profile.mjs"
   },
   "devDependencies": {
+    "@astrojs/markdown-satteri": "^0.4.1",
+    "@astrojs/mdx": "^4.3.14",
     "@cloudflare/workers-types": "^5.20260911.1",
+    "@konneal/client": "^0.2.1",
+    "@oimlsmart/oiml-pubid": "^1.2.1",
+    "@pubid/pubid": "^0.1.4",
     "esbuild": "^0.28.2",
     "jsdom": "^29.1.1",
     "openapi-typescript": "^7.13.0",
     "playwright": "^1.62.1",
-    "yaml": "^2.9.1",
-    "@astrojs/markdown-satteri": "^0.4.1",
-    "@astrojs/mdx": "^4.3.14",
-    "@konneal/client": "^0.2.1",
-    "@oimlsmart/oiml-pubid": "^1.2.1"
+    "yaml": "^2.9.1"
   },
-  "dependencies": {},
   "version": "0.2.21",
   "description": "The Konneal engine: the publisher-agnostic build pipeline and API plane for standards intelligence (retrieval, answer contract, verdicts, evaluation).",
   "license": "BSD-3-Clause",
