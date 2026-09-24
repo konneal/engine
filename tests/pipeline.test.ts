@@ -51,19 +51,19 @@ function fx(id: string, meta: Partial<ChunkMeta>, text: string): Fixture {
 }
 
 const CORPUS: Fixture[] = [
-  fx("r60-ov", { doc_id: "d-r60", docidentifier: "OIML R 60-1", doc_number: "60", edition: "2006", clause_anchor: "overview", clause_title: "Overview" }, "overview of the recommendation parts and annex structure"),
-  fx("r60-fam", { doc_id: "d-r60", docidentifier: "OIML R 60", doc_number: "60", edition: "2006", clause_anchor: "family", clause_title: "Family" }, "family of parts"),
-  fx("r60-52", { doc_id: "d-r60", docidentifier: "OIML R 60-1", doc_number: "60", edition: "2006", clause_anchor: "5.2", clause_title: "Load cell terminology" }, "a load cell converts a force into a measurable signal; creep is the change under constant load"),
-  fx("r60-tbl", { doc_id: "d-r60", docidentifier: "OIML R 60-1", doc_number: "60", edition: "2006", clause_anchor: "5.4", clause_title: "Maximum permissible errors", unit_id: "u:r60-tbl", block: "table" }, "class | maximum | permissible | error\nA | 0.5 | v | e\nB | 1.0 | v | e"),
-  fx("r76-tbl", { doc_id: "d-r76", docidentifier: "OIML R 76-2", doc_number: "76", edition: "2006", clause_anchor: "3.2", clause_title: "Accuracy classes", unit_id: "u:r76-tbl", block: "table" }, "class | accuracy | error\nIII | 1.5 | v | e"),
-  fx("r87-04", { doc_id: "d-r87", docidentifier: "OIML R 87", doc_number: "87", edition: "2004", clause_anchor: "3.1", clause_title: "Actual quantity" }, "the actual quantity of prepackage contents; quantity rules for prepackage labeling"),
-  fx("r87-95", { doc_id: "d-r87b", docidentifier: "OIML R 87", doc_number: "87", edition: "1995", clause_anchor: "3.1", clause_title: "Actual quantity" }, "the actual quantity of prepackage contents in the 1995 edition"),
-  fx("d117", { doc_id: "d-117", docidentifier: "OIML D 117", doc_number: "117", edition: "2003", clause_anchor: "6", clause_title: "Humidity testing" }, "humidity testing conditions for chambers"),
+  fx("r60-ov", { doc_id: "d-r60", docidentifier: "ACME R 60-1", doc_number: "60", edition: "2006", clause_anchor: "overview", clause_title: "Overview" }, "overview of the recommendation parts and annex structure"),
+  fx("r60-fam", { doc_id: "d-r60", docidentifier: "ACME R 60", doc_number: "60", edition: "2006", clause_anchor: "family", clause_title: "Family" }, "family of parts"),
+  fx("r60-52", { doc_id: "d-r60", docidentifier: "ACME R 60-1", doc_number: "60", edition: "2006", clause_anchor: "5.2", clause_title: "Load cell terminology" }, "a load cell converts a force into a measurable signal; creep is the change under constant load"),
+  fx("r60-tbl", { doc_id: "d-r60", docidentifier: "ACME R 60-1", doc_number: "60", edition: "2006", clause_anchor: "5.4", clause_title: "Maximum permissible errors", unit_id: "u:r60-tbl", block: "table" }, "class | maximum | permissible | error\nA | 0.5 | v | e\nB | 1.0 | v | e"),
+  fx("r76-tbl", { doc_id: "d-r76", docidentifier: "ACME R 76-2", doc_number: "76", edition: "2006", clause_anchor: "3.2", clause_title: "Accuracy classes", unit_id: "u:r76-tbl", block: "table" }, "class | accuracy | error\nIII | 1.5 | v | e"),
+  fx("r87-04", { doc_id: "d-r87", docidentifier: "ACME R 87", doc_number: "87", edition: "2004", clause_anchor: "3.1", clause_title: "Actual quantity" }, "the actual quantity of prepackage contents; quantity rules for prepackage labeling"),
+  fx("r87-95", { doc_id: "d-r87b", docidentifier: "ACME R 87", doc_number: "87", edition: "1995", clause_anchor: "3.1", clause_title: "Actual quantity" }, "the actual quantity of prepackage contents in the 1995 edition"),
+  fx("d117", { doc_id: "d-117", docidentifier: "ACME D 117", doc_number: "117", edition: "2003", clause_anchor: "6", clause_title: "Humidity testing" }, "humidity testing conditions for chambers"),
 ];
 
 const GLOSSARY_FIXTURE = [
-  { term: "actual quantity", text: "actual quantity — the net quantity of product in a prepackage", docidentifier: "OIML R 87", doc_number: "87" },
-  { term: "load cell", text: "load cell — force to signal converter", docidentifier: "OIML R 60-1", doc_number: "60" },
+  { term: "actual quantity", text: "actual quantity — the net quantity of product in a prepackage", docidentifier: "ACME R 87", doc_number: "87" },
+  { term: "load cell", text: "load cell — force to signal converter", docidentifier: "ACME R 60-1", doc_number: "60" },
 ];
 
 function cosine(a: number[], b: number[]): number {
@@ -179,7 +179,7 @@ test("full registry: doc-scoped query filters, pins the typed table, respects th
 });
 
 test("full registry: seal cuts every lane to the declared family", async () => {
-  const env = makeEnv({ lexicalIds: ["d117", "r87-04"], graphDocs: ["doc:OIML-R-87-2004"] });
+  const env = makeEnv({ lexicalIds: ["d117", "r87-04"], graphDocs: ["doc:ACME-R-87-2004"] });
   const c = ctx(env, {
     opts: { sealScope: { doc_number: "60" } },
     lexicalHits: [], // seal filters lexicalHits in the prelude; emulate empty
@@ -190,7 +190,7 @@ test("full registry: seal cuts every lane to the declared family", async () => {
 });
 
 test("full registry: glossary link rides the result and routes the concept graph", async () => {
-  const env = makeEnv({ graphDocs: ["doc:OIML-R-87-2004"] });
+  const env = makeEnv({ graphDocs: ["doc:ACME-R-87-2004"] });
   const c = ctx(env, {
     query: "rules for the actual quantity in a prepackage",
     rq: "rules for the actual quantity in a prepackage",

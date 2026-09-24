@@ -86,11 +86,11 @@ export const PROFILE = {
     "models": {},
     "licensed": [
       {
-        "key": "std:fixture-60068-2-30",
-        "package": "fixture-60068-2-30",
-        "doc_number": "60068-2-30",
-        "title": "FIXTURE environmental testing — damp heat, cyclic",
-        "edition": "2005"
+        "key": "std:fixture-ab-99",
+        "package": "fixture-ab-99",
+        "doc_number": "ab-99",
+        "title": "FIXTURE climatic conditioning, cyclic humidity",
+        "edition": "2019"
       }
     ]
   },

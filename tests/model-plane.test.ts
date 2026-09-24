@@ -41,8 +41,8 @@ setProfile({
     ...PROFILE.prompts,
     vars: {
       ...PROFILE.prompts.vars,
-      model_grounding_intro: "Model grounding — the OIML SMART model plane (the platform's machine-readable Recommendation model, derived from the Primmel packages, the models' single source of truth):",
-      model_passage_note: "Some passages are the OIML SMART model plane (labeled OIML SMART model) — the platform's machine-readable Recommendation models derived from the Primmel packages. Treat their machine limits, applicability rules and acceptance criteria as the model's own statement of them (quote machine limits verbatim); where a model passage and a prose passage disagree, say so explicitly and cite both.",
+      model_grounding_intro: "Model grounding — the ACME model plane (the platform's machine-readable Recommendation model, derived from the Primmel packages, the models' single source of truth):",
+      model_passage_note: "Some passages are the ACME model plane (labeled ACME model) — the platform's machine-readable Recommendation models derived from the Primmel packages. Treat their machine limits, applicability rules and acceptance criteria as the model's own statement of them (quote machine limits verbatim); where a model passage and a prose passage disagree, say so explicitly and cite both.",
     },
   },
 });
@@ -66,15 +66,15 @@ const MPE_NODE = {
 const HUMIDITY_NODE = {
   id: "/req/metrological/humidity-ch",
   kind: "requirement",
-  name: "Humidity error for CH or unmarked load cells",
+  name: "Humidity error for CH or unmarked transducers",
   statement: "The influence of exposure to cyclic temperature conditions…",
   applicability: { humidity_class: ["CH"] },
   clause: { doc: "urn:oiml:pub:r:60-1:2021", clause: "5.6.3.1", urn: "urn:oiml:pub:r:60-1:2021#clause-5.6.3.1" },
   source_discrepancy: {
-    summary: "R 60-3 form criterion for the max-load humidity effect (C_Hmax ≤ MPE) contradicts the R 60-1 requirement text (C_Hmax ≤ 1 v)",
+    summary: "AB 99-3 form criterion for the max-load humidity effect (C_Hmax ≤ MPE) contradicts the AB 99-1 requirement text (C_Hmax ≤ 1 v)",
     sources: ["urn:oiml:pub:r:60-1:2021#clause-5.6.3.1", "urn:oiml:pub:r:60-3:2021#clause-2.1.7"],
     resolution: "follows_clause_x",
-    rationale: "The model follows R 60-1, 5.6.3.1 — the normative requirement clause…",
+    rationale: "The model follows AB 99-1, 5.6.3.1 — the normative requirement clause…",
   },
 };
 
@@ -216,7 +216,7 @@ test("the disagreement posture is structural: a declared source_discrepancy alwa
   const bound = await bindModelNode(env, { label: "/req/metrological/humidity-ch", query: "q", standard: "oiml-r60" });
   const block = modelGroundingBlock(bound!);
   assert.match(block, /DECLARED SOURCE DISCREPANCY/);
-  assert.match(block, /contradicts the R 60-1 requirement text/);
+  assert.match(block, /contradicts the AB 99-1 requirement text/);
   assert.match(block, /urn:oiml:pub:r:60-1:2021#clause-5\.6\.3\.1 and urn:oiml:pub:r:60-3:2021#clause-2\.1\.7/);
   assert.match(block, /MUST surface this and cite both/);
   assert.match(block, /humidity class: CH/);
@@ -238,7 +238,7 @@ test("the echo names the bound node, bounded; the persisted echo round-trips", a
   const persisted = parseAppliedContext({
     kind: "entity",
     label: "this requirement /req/metrological/mpe — …",
-    scoped_to: "OIML R 60:2021",
+    scoped_to: "ACME R 60:2021",
     model: echo,
   });
   assert.deepEqual(persisted?.model, echo);

@@ -18,8 +18,8 @@ test("valid refs survive, invalid dropped and stripped", () => {
 });
 
 test("no refs → unchanged", () => {
-  const { text, dropped } = sanitizeRefs("plain answer [OIML R 60 §1]", new Set());
-  assert.equal(text, "plain answer [OIML R 60 §1]");
+  const { text, dropped } = sanitizeRefs("plain answer [ACME AB 99 §1]", new Set());
+  assert.equal(text, "plain answer [ACME AB 99 §1]");
   assert.equal(dropped.length, 0);
 });
 

@@ -24,7 +24,7 @@ test("figure completion: prose + token mentions both resolve; dedup, trim, cap",
   const db = stubDb({ "u:fig-3": {}, "u:fig-4": {} });
   const blocks = await completeFigures(
     db as any,
-    "About (u:fig-3, R 60-2 §2.11.2) and [[u:fig-4]]; also u:fig-3 again.",
+    "About (u:fig-3, AB 99-2 §2.11.2) and [[u:fig-4]]; also u:fig-3 again.",
     [{ unit_id: "u:table-1", type: "table", docidentifier: "", payload: {} } as any],
   );
   assert.deepEqual(blocks.map((b) => b.unit_id).sort(), ["u:fig-3", "u:fig-4"]);
@@ -68,7 +68,7 @@ test("figure completion: prose 'Figure 3' resolves within the used publications 
       };
     },
   };
-  const used = [{ metadata: { docidentifier: "OIML R 60-2:2021" }, text: "" }] as any;
+  const used = [{ metadata: { docidentifier: "ACME AB 99-2:2019" }, text: "" }] as any;
   const blocks = await completeFigures(
     db as any,
     "Figure 3 shows the recommended test sequence for each test temperature.",

@@ -48,7 +48,7 @@ export interface DraftSample {
 export interface ApplicationPrefillFields {
   /** the Recommendation, as the estate URN (urn:oiml:pub:r:60:2021) */
   standard_doc: string;
-  /** display label ("OIML R 60:2021") */
+  /** display label ("ACME AB 99:2019") */
   standard_label?: string;
   family_designation?: string;
   group_label?: string;
@@ -124,7 +124,7 @@ export interface PrepareOpts {
 // performs).
 
 const ACT_VERB = "(?:draft|prepare|pre-?fill|fill\\s+(?:in|out)|start|submit|file|lodge)";
-const ACT_TARGET = "(?:new\\s+)?(?:certification\\s+|type[ -]evaluation\\s+|OIML[- ]CS\\s+)?application";
+const ACT_TARGET = "(?:new\\s+)?(?:certification\\s+|type[ -]evaluation\\s+)?application";
 const INTENT_RES = [
   new RegExp(`\\b${ACT_VERB}\\b[\\s\\S]{0,60}?\\b${ACT_TARGET}\\b`, "i"),
   new RegExp(`\\b${ACT_TARGET}\\b[\\s\\S]{0,30}?\\b(?:draft|prepare|pre-?fill|for me)\\b`, "i"),
@@ -165,18 +165,18 @@ function roleLabel(role: string): string {
 
 // ── the extraction (the LLM proposes) ────────────────────────────────
 
-const EXTRACTION_SYSTEM = `You extract the fields of a new OIML certification application from the user's own messages.
+const EXTRACTION_SYSTEM = `You extract the fields of a new certification application from the user's own messages.
 
 Rules:
 - Output ONLY a JSON object — no prose, no code fence.
 - Copy every value from the user's own words, and for each field give "source": the exact contiguous span of the user's message you copied it from.
 - NEVER infer, complete, normalize away, or guess a value. If the user did not state it, omit the field entirely.
-- "standard": the Recommendation the user named (e.g. "R 60" or "OIML R 60:2021") — a plain string, or omit when none was named.
+- "standard": the publication the user named (e.g. "AB 99" or "ACME AB 99:2019") — a plain string, or omit when none was named.
 - "scheme": only when the user named scheme A or scheme B explicitly.
 
 Schema (every field optional):
 {
-  "standard": "R 60",
+  "standard": "AB 99",
   "family_designation": { "value": "…", "source": "…" },
   "group_label": { "value": "…", "source": "…" },
   "model_designation": { "value": "…", "source": "…" },
@@ -428,8 +428,8 @@ export async function prepareDraft(env: any, opts: PrepareOpts): Promise<DraftVe
       "standard_unresolved",
       untraced
         ? `I can't anchor the draft: you haven't named the Recommendation in your own words (the ${untraced.value} reading isn't yours). ` +
-          "Name it plainly — for example OIML R 60 — and I'll prepare the draft."
-        : "I can't anchor the draft: you haven't named the Recommendation. Name it plainly — for example OIML R 60 — and I'll prepare it.",
+          "Name it plainly — for example ACME AB 99 — and I'll prepare the draft."
+        : "I can't anchor the draft: you haven't named the publication. Name it plainly — for example ACME AB 99 — and I'll prepare it.",
     );
   }
   const standard = await resolveStandard(env, kept.standard);
@@ -437,7 +437,7 @@ export async function prepareDraft(env: any, opts: PrepareOpts): Promise<DraftVe
     return refusal(
       "standard_unresolved",
       `I couldn't resolve ${kept.standard} as a publication in the corpus, so I can't anchor the draft. ` +
-        "Name the Recommendation plainly — for example OIML R 60 — and I'll prepare it.",
+        "Name the publication plainly — for example ACME AB 99 — and I'll prepare it.",
     );
   }
 
