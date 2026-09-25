@@ -9,6 +9,7 @@ import {
   contextNote,
   parseAppliedContext,
   parseContext,
+  machineOffers,
   parseDocRef,
   namedDocumentIn,
   resolveDocScope,
@@ -169,6 +170,100 @@ test("the account kind (TODO.ai-platform/03): parses, echoes the live read, roun
   // the account note is never static (the ask handler composes it from
   // the live read's outcome)
   assert.equal(contextNote({ kind: "account", label: "my account" }, null), undefined);
+});
+
+test("the machine facet (TODO.ai-platform/08): entity-only, bounded, echoed as state + offered count", () => {
+  // parses on the entity kind; the empty acts array is the honest
+  // "read but not act" and SURVIVES (it is the proposal bound)
+  const c = parseContext({
+    context: {
+      kind: "entity",
+      label: "this application R60-2026-0042",
+      machine: { state: "UNDER_REVIEW", acts: [] },
+    },
+  });
+  assert.deepEqual(c?.machine, { state: "UNDER_REVIEW", acts: [] });
+  // never present on other kinds — dropped, not carried
+  assert.equal(parseContext({ context: { kind: "page", label: "p", machine: { state: "X", acts: [] } } })?.machine, undefined);
+  // the full facet parses; fields are bounded
+  const full = parseContext({
+    context: {
+      kind: "entity",
+      label: "l",
+      machine: {
+        state: "UNDER_REVIEW",
+        acts: [
+          { action: "ia_accepts", to: "ACCEPTED" },
+          { action: "ia_logs_samples", to: "SAMPLES_RECEIVED", guard: "receipt_complete" },
+          { action: "", to: "NOWHERE" }, // malformed — dropped, never carried
+        ],
+      },
+    },
+  });
+  assert.deepEqual(full?.machine, {
+    state: "UNDER_REVIEW",
+    acts: [
+      { action: "ia_accepts", to: "ACCEPTED" },
+      { action: "ia_logs_samples", to: "SAMPLES_RECEIVED", guard: "receipt_complete" },
+    ],
+  });
+  // the bounds hold: state ≤ 60, ≤ 24 acts, fields ≤ 60
+  const big = parseContext({
+    context: {
+      kind: "entity",
+      label: "l",
+      machine: {
+        state: "S".repeat(80),
+        acts: Array.from({ length: 30 }, (_, i) => ({ action: `a${i}_${"x".repeat(70)}`, to: "T" })),
+      },
+    },
+  });
+  assert.equal(big?.machine?.state.length, 60);
+  assert.equal(big?.machine?.acts.length, 24);
+  assert.equal(big?.machine?.acts[0]?.action.length, 60);
+  // no state = no facet (the state is the fact; acts alone are nothing)
+  assert.equal(parseContext({ context: { kind: "entity", label: "l", machine: { acts: [{ action: "a", to: "B" }] } } })?.machine, undefined);
+  assert.equal(parseContext({ context: { kind: "entity", label: "l", machine: "UNDER_REVIEW" } })?.machine, undefined);
+});
+
+test("the machine facet: the echo carries state + offered count; the note speaks the bound", () => {
+  const declared = parseContext({
+    context: {
+      kind: "entity",
+      label: "this application R60-2026-0042",
+      machine: { state: "UNDER_REVIEW", acts: [{ action: "ia_accepts", to: "ACCEPTED" }, { action: "ia_rejects", to: "REJECTED" }] },
+    },
+  })!;
+  const echo = appliedContext(declared, null);
+  assert.deepEqual(echo.machine, { state: "UNDER_REVIEW", offered: 2 });
+  // the empty set echoes offered: 0 — the panel's line stays honest
+  assert.deepEqual(appliedContext(parseContext({ context: { kind: "entity", label: "l", machine: { state: "ACTIVE", acts: [] } } })!, null).machine, {
+    state: "ACTIVE",
+    offered: 0,
+  });
+  // the note names the bound, or the read-only honesty
+  assert.match(contextNote(declared, null)!, /UNDER_REVIEW/);
+  assert.match(contextNote(declared, null)!, /ia_accepts, ia_rejects/);
+  assert.match(contextNote(declared, null)!, /Never propose an act outside that set/);
+  const readOnly = parseContext({ context: { kind: "entity", label: "l", machine: { state: "ACTIVE", acts: [] } } })!;
+  assert.match(contextNote(readOnly, null)!, /read but not act/);
+  // the stored echo round-trips bounded
+  assert.deepEqual(
+    parseAppliedContext({ kind: "entity", label: "l", scoped_to: null, machine: { state: "UNDER_REVIEW", offered: 2 } })?.machine,
+    { state: "UNDER_REVIEW", offered: 2 },
+  );
+  assert.equal(parseAppliedContext({ kind: "entity", label: "l", machine: { state: 42 } })?.machine, undefined);
+  assert.deepEqual(parseAppliedContext({ kind: "entity", label: "l", machine: { state: "S".repeat(80), offered: 999 } })?.machine, {
+    state: "S".repeat(60),
+    offered: 24,
+  });
+});
+
+test("machineOffers: the proposal bound — absent facet is not an offer; the empty set offers nothing", () => {
+  assert.equal(machineOffers(undefined, "ia_accepts"), false);
+  assert.equal(machineOffers({ state: "UNDER_REVIEW", acts: [] }, "ia_accepts"), false);
+  assert.equal(machineOffers({ state: "UNDER_REVIEW", acts: [{ action: "ia_accepts", to: "ACCEPTED" }] }, "ia_accepts"), true);
+  assert.equal(machineOffers({ state: "UNDER_REVIEW", acts: [{ action: "ia_accepts", to: "ACCEPTED" }] }, "ia_rejects"), false);
 });
 
 test("namedDocumentIn: only a document the question TEXT names is read — priors and classes are not namings", () => {
