@@ -1,1 +1,4 @@
-export declare function buildJudgeContext(passages: string[], machine?: string[]): string;
+export declare function buildJudgeContext(passages: (string | {
+    text: string;
+    table?: boolean;
+})[], machine?: string[]): string;
