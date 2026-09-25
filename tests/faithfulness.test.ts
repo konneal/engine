@@ -4,6 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseVerdict } from "../workers/worker_public/src/verdict-parse.ts";
+import { buildJudgeContext } from "../workers/worker_public/src/faithfulness-context.ts";
 
 test("plain verdict object", () => {
   const v = parseVerdict('{"score": 1.0, "ungrounded_claims": []}');
@@ -55,4 +56,11 @@ test("escaped quotes inside claims do not derail string tracking", () => {
   const v = parseVerdict(String.raw`{"score": 0.4, "ungrounded_claims": ["the \"quoted\" {claim}"]}`);
   assert.equal(v?.score, 0.4);
   assert.equal(v?.ungrounded_claims[0], 'the "quoted" {claim}');
+});
+
+test("machine context rides the grounding as [M] lines", () => {
+  const ctx = buildJudgeContext(["passage one"], ["lookup: class_cd = 30 s — Combined load windows (R 60-2, Table 1)"]);
+  assert.ok(ctx.includes("[M] lookup: class_cd = 30 s"), "the machine line must reach the grounding");
+  assert.ok(ctx.startsWith("[1] passage one"));
+  assert.equal(buildJudgeContext(["p"], []).includes("[M]"), false);
 });

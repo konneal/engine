@@ -7,7 +7,7 @@ import {
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-BWSH7VBG.js";
+} from "../../chunk-Y7Z4RGVI.js";
 import {
   buildMessages,
   citations,
@@ -327,7 +327,10 @@ async function handleGetShared(env, slug) {
 }
 
 // workers/worker_public/prompts/faithfulness.md
-var faithfulness_default = 'You are a factuality judge. Given an answer and the retrieved passages it was based on, identify any claims in the answer that are NOT directly supported by the passages. Reply with ONLY a JSON object: {"score": 0.0-1.0, "ungrounded_claims": ["claim text", ...]} \u2014 score is the fraction of claims that ARE grounded in the passages; if every claim is supported, score is 1.0 and ungrounded_claims is [].\n';
+var faithfulness_default = `You are a factuality judge. Given an answer and the retrieved passages it was based on, identify any claims in the answer that are NOT directly supported by the passages. Reply with ONLY a JSON object: {"score": 0.0-1.0, "ungrounded_claims": ["claim text", ...]} \u2014 score is the fraction of claims that ARE grounded in the passages; if every claim is supported, score is 1.0 and ungrounded_claims is [].
+
+Passages prefixed [M] are this service's own machine-computed model data (typed blocks the answer was given) \u2014 a claim restating [M] content is grounded.
+`;
 
 // workers/worker_public/src/verdict-parse.ts
 function coerceVerdict(obj) {
@@ -385,10 +388,17 @@ function parseVerdict(text) {
   return verdict;
 }
 
-// workers/worker_public/src/faithfulness.ts
-async function scoreFaithfulness(ai, model, answer, passages) {
-  if (!answer || !passages.length) return null;
+// workers/worker_public/src/faithfulness-context.ts
+function buildJudgeContext(passages, machine = []) {
   const context = passages.slice(0, 8).map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 900)}`).join("\n");
+  const machineContext = machine.length ? "\n" + machine.slice(0, 6).map((m) => `[M] ${m.replace(/\s+/g, " ").slice(0, 400)}`).join("\n") : "";
+  return context + machineContext;
+}
+
+// workers/worker_public/src/faithfulness.ts
+async function scoreFaithfulness(ai, model, answer, passages, machine = []) {
+  if (!answer || !passages.length) return null;
+  const context = buildJudgeContext(passages, machine);
   const t0 = Date.now();
   const timeout = new Promise((r) => setTimeout(() => {
     console.log(`faithfulness: timeout (${Date.now() - t0}ms)`);
@@ -405,7 +415,7 @@ async function scoreFaithfulness(ai, model, answer, passages) {
 ${answer.slice(0, 2e3)}
 
 Passages:
-${context}` }
+${context}${machine.length ? buildJudgeContext([], machine) : ""}` }
       ],
       max_tokens: 6144,
       reasoning_effort: "low",
@@ -696,7 +706,7 @@ async function handleJudge(env, req) {
   if (!question || !answer) return err(400, "invalid_input", "question and answer required");
   const passagesText = passages.map((p, i) => `[${i + 1}] ${p}`).join("\n");
   const [faith, relevancy, precision] = await Promise.all([
-    passages.length ? scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, passages) : Promise.resolve(null),
+    passages.length ? scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, passages, (Array.isArray(body?.blocks) ? body.blocks : []).map((b) => [b?.payload?.check, b?.payload?.meaning].filter((x) => typeof x === "string").join(" \u2014 ")).filter(Boolean)) : Promise.resolve(null),
     scoreJudge(env.AI, roleModel(env, "grader"), relevancy_default, `Question: ${question}
 
 Answer:
@@ -979,7 +989,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-YE2L3Q5H.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-I26YUVSP.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-T3T6LGNM.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-I26YUVSP.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1448,7 +1458,8 @@ async function verifyRoute(c) {
       { name: "unit_references", deterministic: true, pass: refs.length === validRefs.length, detail: refs.length ? `${validRefs.length}/${refs.length} unit references resolve to served units` : "no unit references" },
       { name: "citations_present", deterministic: true, pass: new RegExp(`\\[[^\\]]*(${P().publisher.name})[^\\]]*\\]`).test(answer), detail: "normative claims should carry a passage citation" }
     ];
-    const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h) => h.text));
+    const machine = (Array.isArray(body?.blocks) ? body.blocks : []).filter((b) => b?.type === "verdict" && b?.payload).map((b) => [b.payload.check, b.payload.meaning, b.payload.definition, b.payload.violation_meaning].filter((x) => typeof x === "string" && x).join(" \u2014 ")).filter(Boolean);
+    const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h) => h.text), machine);
     return json({
       checks,
       judged: faith ? { name: "faithfulness", deterministic: false, score: faith.score, ungrounded_claims: faith.ungrounded_claims.slice(0, 5) } : null,

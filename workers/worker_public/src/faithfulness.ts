@@ -6,6 +6,7 @@
 // The prompt is data (prompts/faithfulness.md), bundled as text.
 import faithfulnessPrompt from "../prompts/faithfulness.md";
 import { parseVerdict } from "./verdict-parse";
+import { buildJudgeContext } from "./faithfulness-context";
 
 export type { Verdict } from "./verdict-parse";
 
@@ -19,12 +20,10 @@ export async function scoreFaithfulness(
   model: string,
   answer: string,
   passages: string[],
+  machine: string[] = [],
 ): Promise<FaithfulnessResult | null> {
   if (!answer || !passages.length) return null;
-  const context = passages
-    .slice(0, 8)
-    .map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 900)}`)
-    .join("\n");
+  const context = buildJudgeContext(passages, machine);
 
   const t0 = Date.now();
   const timeout = new Promise<null>((r) => setTimeout(() => { console.log(`faithfulness: timeout (${Date.now() - t0}ms)`); r(null); }, 240000));
@@ -35,7 +34,7 @@ export async function scoreFaithfulness(
           role: "system",
           content: faithfulnessPrompt.trimEnd(),
         },
-        { role: "user", content: `Answer:\n${answer.slice(0, 2000)}\n\nPassages:\n${context}` },
+        { role: "user", content: `Answer:\n${answer.slice(0, 2000)}\n\nPassages:\n${context}${machine.length ? buildJudgeContext([], machine) : ""}` },
       ],
       max_tokens: 6144,
       reasoning_effort: "low",

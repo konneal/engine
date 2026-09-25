@@ -342,7 +342,7 @@ export async function handleJudge(env: Env, req: Request): Promise<Response> {
   // and this route was the one path the flip never reached — it judged
   // on with the retired model and the scores collapsed
   const [faith, relevancy, precision] = await Promise.all([
-    passages.length ? scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, passages) : Promise.resolve(null),
+    passages.length ? scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, passages, (Array.isArray(body?.blocks) ? body.blocks : []).map((b: any) => [b?.payload?.check, b?.payload?.meaning].filter((x: unknown) => typeof x === "string").join(" — ")).filter(Boolean)) : Promise.resolve(null),
     scoreJudge(env.AI, roleModel(env, "grader"), relevancyPrompt, `Question: ${question}\n\nAnswer:\n${answer}`),
     passages.length ? scoreJudge(env.AI, roleModel(env, "grader"), fill(precisionPrompt, promptVars()), `Question: ${question}\n\nPassages:\n${passagesText}`) : Promise.resolve(null),
   ]);

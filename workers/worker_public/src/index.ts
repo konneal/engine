@@ -238,7 +238,15 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
       { name: "unit_references", deterministic: true, pass: refs.length === validRefs.length, detail: refs.length ? `${validRefs.length}/${refs.length} unit references resolve to served units` : "no unit references" },
       { name: "citations_present", deterministic: true, pass: new RegExp(`\\[[^\\]]*(${P().publisher.name})[^\\]]*\\]`).test(answer), detail: "normative claims should carry a passage citation" },
     ];
-    const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h: Hit) => h.text));
+    // the answer's typed blocks are the machine grounding (the computed
+    // verdict/aggregation values) — the judge sees them or every
+    // computed value reads as ungrounded
+    const machine = (Array.isArray(body?.blocks) ? body.blocks : [])
+      .filter((b: any) => b?.type === "verdict" && b?.payload)
+      .map((b: any) => [b.payload.check, b.payload.meaning, b.payload.definition, b.payload.violation_meaning]
+        .filter((x: unknown) => typeof x === "string" && x).join(" — "))
+      .filter(Boolean);
+    const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h: Hit) => h.text), machine);
     return json({
       checks,
       judged: faith ? { name: "faithfulness", deterministic: false, score: faith.score, ungrounded_claims: faith.ungrounded_claims.slice(0, 5) } : null,
