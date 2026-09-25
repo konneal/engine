@@ -24405,6 +24405,7 @@ export {
   embed,
   generateOnce,
   ftsMatchQuery,
+  refCodec,
   NO_CONTEXT,
   parseContext,
   namedDocumentIn,

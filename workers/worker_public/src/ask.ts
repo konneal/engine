@@ -5,6 +5,7 @@
 
 import { LIMITS, MODELS, num, sha256Hex, roleModel, answerEffort, requestEffort, effortBudget } from "./config";
 import { portModelRunner } from "./env.ts";
+import { refCodec } from "./codecs";
 import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, refusalAnswer, Hit } from "./pipeline";
 import { sessionFrom } from "./auth";
 import { retrieveInternal } from "./internal_gateway";
@@ -858,27 +859,24 @@ async function handleAsk(
   // publication's own clause — surface for a question the document's
   // vocabulary alone would miss
   let boundaryBoost: string | undefined;
-  // the model-bound edition boost: the grounding pool tilts to the
-  // CURRENT edition's chunks (the superseded dirty-corpus editions
-  // otherwise outrank them on shared vocabulary and the answer's model
-  // values read as ungrounded against 2017 passages)
-  let modelEditionBoost: string | undefined;
-  if (boundModel && !boundModel.gated) {
-    const prefix = String(P().sources?.models?.standard_prefix ?? "");
-    if (prefix && boundModel.standard.startsWith(prefix)) {
-      // the profile's package prefix derives the graph family
-      // (<prefix><num> → family <LETTER>-<num>) and the boost is the
-      // family's ACTIVE edition
-      const num = boundModel.standard.slice(prefix.length);
-      const family = `${prefix.slice(prefix.lastIndexOf("-") + 1).toUpperCase()}-${num}`;
+  // the EDITION boost: the grounding pool tilts to the publication's
+  // ACTIVE edition (the graph's own registry) — the dirty corpus's
+  // superseded editions otherwise outrank the current ones on shared
+  // vocabulary, and the answer's current-edition values then read as
+  // ungrounded against superseded passages. The family key is the
+  // profile codec's (familyOf) — no publisher grammar here.
+  let editionBoost: string | undefined;
+  try {
+    const fam = understanding?.doc ? refCodec().familyOf(understanding.doc) : null;
+    if (fam) {
       const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1")
-        .bind(family).first<any>().catch(() => null);
-      if (row?.edition) modelEditionBoost = String(row.edition);
-    } else {
-      modelEditionBoost = boundModel.standard; // the doc number is embedded in the id
+        .bind(fam).first<any>().catch(() => null);
+      if (row?.edition) editionBoost = String(row.edition);
     }
+  } catch {
+    // a registry hiccup degrades to unsteered retrieval
   }
-  const lexicalBoost = [boundaryBoost, modelEditionBoost].filter(Boolean).join(" ") || undefined;
+  const lexicalBoost = [boundaryBoost, editionBoost].filter(Boolean).join(" ") || undefined;
   if (P().sources?.licensed?.length) {
     const match = matchLicensedTopic(q.query, P().sources.licensed);
     if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
