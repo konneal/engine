@@ -33,8 +33,11 @@ jobs:
             exit 1
           fi
           SHA=$(git rev-parse HEAD)
-          BAD=$(gh api "repos/${GITHUB_REPOSITORY}/commits/$SHA/check-runs" --jq '[.check_runs[] | select(.conclusion != "success") | .conclusion] | join(",")')
-          RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/commits/$SHA/check-runs" --jq '.check_runs | length')
+          # the publish run itself attaches a check-run to the commit — exclude
+          # this workflow's own runs, or a single failed dispatch poisons every
+          # retry of the SAME version (the guard read its own history)
+          BAD=$(gh api "repos/${GITHUB_REPOSITORY}/commits/$SHA/check-runs" --jq '[.check_runs[] | select(.name != "publish") | select(.conclusion != "success") | .conclusion] | join(",")')
+          RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/commits/$SHA/check-runs" --jq '[.check_runs[] | select(.name != "publish")] | length')
           if [ "$RUNS" -gt 0 ] && [ -n "$BAD" ]; then
             echo "::error::CI on $SHA is not green ($BAD) — read CI before publishing"
             exit 1
