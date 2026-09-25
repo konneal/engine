@@ -27,23 +27,23 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-6MHR5JI4.js";
+} from "./chunk-WKG65DBA.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-FYGJDJPN.js";
+} from "./chunk-2RKYO3OC.js";
 import {
   canonicalRefusal,
   refusalAnswer
-} from "./chunk-RZ3UZVRR.js";
+} from "./chunk-A3QHHUN5.js";
 import {
   entitlementScope,
   requestSalt,
   resolveRequestScope
-} from "./chunk-IOZAZA7Y.js";
+} from "./chunk-JGKSUSF5.js";
 import {
   LIMITS,
   MODELS,
@@ -53,10 +53,10 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-434NRPSS.js";
+} from "./chunk-OMXAE27N.js";
 import {
   P
-} from "./chunk-HYI32HMI.js";
+} from "./chunk-3FYJM7LH.js";
 
 // workers/worker_public/src/internal_gateway.ts
 async function retrieveInternal(service, auth, query) {
@@ -2016,13 +2016,14 @@ ${summary}` }] : [],
   let boundaryBoost;
   let modelEditionBoost;
   if (boundModel && !boundModel.gated) {
-    const om = /^oiml-r(\d+)$/.exec(boundModel.standard);
-    if (om) {
-      const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(`R-${om[1]}`).first().catch(() => null);
+    const prefix = String(P().sources?.models?.standard_prefix ?? "");
+    if (prefix && boundModel.standard.startsWith(prefix)) {
+      const num3 = boundModel.standard.slice(prefix.length);
+      const family = `${prefix.slice(prefix.lastIndexOf("-") + 1).toUpperCase()}-${num3}`;
+      const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(family).first().catch(() => null);
       if (row?.edition) modelEditionBoost = String(row.edition);
     } else {
-      const im = /^iec-(.+)$/.exec(boundModel.standard);
-      if (im) modelEditionBoost = im[1];
+      modelEditionBoost = boundModel.standard;
     }
   }
   const lexicalBoost = [boundaryBoost, modelEditionBoost].filter(Boolean).join(" ") || void 0;

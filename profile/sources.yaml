@@ -2,7 +2,10 @@ corpora:
   clean: { repo: fixtures/corpus, note: the engine's fixture corpus }
 bibliography: {}
 terminology: {}
-models: {}
+models:
+  # the package-id prefix the model lanes read (the edition boost derives
+  # the graph family from it: <prefix><num> → family <LETTER>-<num>)
+  standard_prefix: "fx-r" 
 # the licensed-standards declaration (TODO.external-refs/08): the
 # entitlement keys the deployment's index may carry (`standard_key` chunk
 # metadata, from the packages' license_key facet) — this list is the

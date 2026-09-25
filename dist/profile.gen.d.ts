@@ -55,7 +55,9 @@ export declare const PROFILE: {
         };
         readonly bibliography: {};
         readonly terminology: {};
-        readonly models: {};
+        readonly models: {
+            readonly standard_prefix: "fx-r";
+        };
         readonly licensed: readonly [{
             readonly key: "std:fixture-ab-99";
             readonly package: "fixture-ab-99";

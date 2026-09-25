@@ -1,13 +1,13 @@
 import {
   handleSearch
-} from "../../chunk-WQ2PYIWK.js";
+} from "../../chunk-GAPT3WEN.js";
 import {
   checkQuoteAnchors,
   handleAsk,
   handleMemories,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-Y7Z4RGVI.js";
+} from "../../chunk-ADQEM7IS.js";
 import {
   buildMessages,
   citations,
@@ -29,7 +29,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-6MHR5JI4.js";
+} from "../../chunk-WKG65DBA.js";
 import {
   authenticate,
   corsHeaders,
@@ -38,14 +38,14 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-FYGJDJPN.js";
+} from "../../chunk-2RKYO3OC.js";
 import {
   canonicalRefusal
-} from "../../chunk-RZ3UZVRR.js";
+} from "../../chunk-A3QHHUN5.js";
 import {
   entitlementScope,
   standardKeysFrom
-} from "../../chunk-IOZAZA7Y.js";
+} from "../../chunk-JGKSUSF5.js";
 import {
   LIMITS,
   MODELS,
@@ -56,11 +56,11 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-434NRPSS.js";
+} from "../../chunk-OMXAE27N.js";
 import {
   P,
   setProfile
-} from "../../chunk-HYI32HMI.js";
+} from "../../chunk-3FYJM7LH.js";
 
 // workers/worker_public/src/conversations.ts
 var ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
@@ -989,7 +989,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-T3T6LGNM.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-I26YUVSP.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-YN63SADP.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-MSFDEFQG.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
