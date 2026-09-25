@@ -9,7 +9,7 @@ import {
   modelGroundingBlock,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-YVC6HPXO.js";
+} from "../../chunk-MHA2OFWE.js";
 import {
   buildMessages,
   citations,
@@ -996,7 +996,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-6HQFQP3F.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-EADF54TY.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-BDD5TFNC.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-EADF54TY.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });

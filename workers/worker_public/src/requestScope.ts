@@ -56,8 +56,14 @@ export function entitlementScope(keys: Set<string>): Set<string> | null {
 /** Validate + intersect. Returns { error } when the request explicitly
  *  disables every dataset (a user error, not a scope). The corpora a
  *  dataset searches travel WITH the declaration (profile datasets.yaml,
- *  `corpora:`) — the engine maps no publisher names. */
-export function resolveRequestScope(body: any, member: unknown): RequestScope | { error: "empty-datasets" } {
+ *  `corpora:`) — the engine maps no publisher names.
+ *
+ *  `opts.keyWithEntitlements` (the key-tier licensed federation): an
+ *  API-key caller whose request carries a VALIDATED entitlement set is
+ *  admitted to the session-gated (federated) datasets — the key's
+ *  entitlement set is the licensed scope the internal lane honors; the
+ *  internal worker re-validates the key server-side before it answers. */
+export function resolveRequestScope(body: any, member: unknown, opts?: { keyWithEntitlements?: boolean }): RequestScope | { error: "empty-datasets" } {
   const allIds = DATASETS().map((d) => d.id);
   const requested = Array.isArray(body?.datasets)
     ? (body.datasets as unknown[]).filter((x): x is string => typeof x === "string" && allIds.includes(x))
@@ -65,7 +71,7 @@ export function resolveRequestScope(body: any, member: unknown): RequestScope | 
   if (requested !== null && requested.length === 0) return { error: "empty-datasets" };
   const permittedIds = allIds.filter((id) => {
     const d = DATASETS().find((x) => x.id === id)!;
-    return d.session ? datasetAllowed(d, member) : true;
+    return d.session ? datasetAllowed(d, member) || !!opts?.keyWithEntitlements : true;
   });
   // requested ∩ permitted — an explicit request NEVER widens past the
   //  session's permissions (a member without ai-preview asking

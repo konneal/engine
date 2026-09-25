@@ -28,7 +28,7 @@ import { matchLicensedTopic, boundaryNoteText } from "./boundary";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { detectApiCallIntent, prepareApiCall } from "./apicalls";
 import { memoryNote } from "./memories";
-import { entitlementScope, resolveRequestScope, requestSalt } from "./requestScope";
+import { entitlementScope, resolveRequestScope, requestSalt, standardKeysFrom } from "./requestScope";
 import { rawSessionToken } from "./session";
 import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested, semanticCacheKey } from "./answercache";
 import type { Env } from "./env";
@@ -309,15 +309,20 @@ async function handleAsk(
   // Members get federated retrieval (OIML + ISO/IEC) merged into the same
   // pipeline via the service binding; rag-public never touches the
   // internal index itself, and generation/rerank stay in ONE pipeline.
+  // The key-tier licensed federation (the LIVE_MEMBER_TOKEN retirement):
+  // an API-key caller with a VALIDATED entitlement set rides the same
+  // lane — the key is re-verified server-side by the internal worker and
+  // the entitlement set is the licensed scope the hard cut honors.
   const service = env.INTERNAL_SERVICE;
   const fedAuth = {
     cookie: req.headers.get("cookie") ?? "",
     authorization: req.headers.get("authorization") ?? "",
   };
+  const keyLicensed = tier === "key" && standardKeysFrom(body).size > 0;
   // Dataset scope + memory selection (MECE: the derivation lives in
   // ./requestScope; this path only wires it). A request that explicitly
   // disables every dataset is a user error.
-  const scope = resolveRequestScope(body, member);
+  const scope = resolveRequestScope(body, member, { keyWithEntitlements: keyLicensed });
   if ("error" in scope) return err(400, "invalid_input", "datasets: at least one dataset must stay enabled");
   const { corpora, narrowed, isoOn } = scope;
   // The license entitlement set (TODO.external-refs/08): request-scoped,
@@ -335,7 +340,7 @@ async function handleAsk(
   // per-request depth toggle (⚡ fast / 🧠 thorough): effort changes the
   // answer, so it salts the cache with the selections above
   const salt = requestSaltStr ? `${requestSaltStr}|effort:${effort}` : `effort:${effort}`;
-  const federate = member && service && isoOn
+  const federate = (member || keyLicensed) && service && isoOn
     ? (q2: string) => retrieveInternal(service, fedAuth, q2)
     : undefined;
 

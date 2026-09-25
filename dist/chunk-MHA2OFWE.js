@@ -45,7 +45,8 @@ import {
 import {
   entitlementScope,
   requestSalt,
-  resolveRequestScope
+  resolveRequestScope,
+  standardKeysFrom
 } from "./chunk-4GJGBGJK.js";
 import {
   LIMITS,
@@ -1914,14 +1915,15 @@ async function handleAsk(env, ctx, req, tier, key) {
     cookie: req.headers.get("cookie") ?? "",
     authorization: req.headers.get("authorization") ?? ""
   };
-  const scope = resolveRequestScope(body, member);
+  const keyLicensed = tier === "key" && standardKeysFrom(body).size > 0;
+  const scope = resolveRequestScope(body, member, { keyWithEntitlements: keyLicensed });
   if ("error" in scope) return err(400, "invalid_input", "datasets: at least one dataset must stay enabled");
   const { corpora, narrowed, isoOn } = scope;
   const standardKeys = entitlementScope(scope.standardKeys);
   const [memNote, memoryUsed] = member && scope.memoryIds.length ? await memoryNote(env, member.sub, scope.memoryIds) : [null, []];
   const requestSaltStr = requestSalt(scope, memoryUsed);
   const salt = requestSaltStr ? `${requestSaltStr}|effort:${effort}` : `effort:${effort}`;
-  const federate = member && service && isoOn ? (q2) => retrieveInternal(service, fedAuth, q2) : void 0;
+  const federate = (member || keyLicensed) && service && isoOn ? (q2) => retrieveInternal(service, fedAuth, q2) : void 0;
   const ns = tier === "key" ? `k:${key.id}` : member ? `m:${member.sub}` : "anon";
   const model = member ? MODELS.member : MODELS.anon;
   const prev = typeof body?.prev === "string" ? body.prev.slice(0, 800) : void 0;

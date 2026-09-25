@@ -185,6 +185,31 @@ test("requestSalt carries the entitlement set whenever the deployment keys conte
   assert.equal(P().sources.licensed.length, 1, "fixture profile not restored");
 });
 
+// ── the key-tier licensed federation ─────────────────────────────────────
+
+test("resolveRequestScope: the key-with-entitlements principal is admitted to the session-gated datasets", () => {
+  setProfile(PROFILE);
+  // anonymous: the session-gated dataset is not permitted, federation off
+  const anon = resolveRequestScope({}, null) as any;
+  assert.equal(anon.isoOn, false);
+  assert.deepEqual(anon.scopeIds, ["pub"]);
+  // the key-tier principal (a validated entitlement set, no session):
+  // the session-gated dataset opens — the internal worker re-verifies
+  // the key server-side before it answers
+  const keyed = resolveRequestScope({}, null, { keyWithEntitlements: true }) as any;
+  assert.equal(keyed.isoOn, true);
+  assert.ok(keyed.scopeIds.includes("internal"));
+  // an explicit datasets request still intersects, never widens
+  const narrowed = resolveRequestScope({ datasets: ["internal"] }, null, { keyWithEntitlements: true }) as any;
+  assert.deepEqual(narrowed.scopeIds, ["internal"]);
+  const forged = resolveRequestScope({ datasets: ["internal"] }, null) as any;
+  assert.deepEqual(forged.scopeIds, [], "an anon explicit ask for the gated dataset intersects to nothing");
+  // the member path is unchanged
+  const member = resolveRequestScope({}, { sub: "u", roles: ["preview"] }) as any;
+  assert.equal(member.isoOn, true);
+  setProfile(PROFILE);
+});
+
 // ── the gated model binding ──────────────────────────────────────────────
 
 test("bindModelNode gates a licensed package's grounding for the unentitled caller", async () => {
