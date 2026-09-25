@@ -120,7 +120,7 @@ export async function retrieve(
       : rq === folded && opts.warmEmbed
         ? opts.warmEmbed.then((w) => w ?? embed(portModelRunner(env), MODELS.embed, rq))
         : embed(portModelRunner(env), MODELS.embed, rq);
-  const lexicalP = lexicalPrefilter(env, rq).catch(() => [] as Hit[]);
+  const lexicalP = lexicalPrefilter(env, opts.lexicalBoost ? `${rq} ${opts.lexicalBoost}` : rq).catch(() => [] as Hit[]);
   const [vector, lexicalHits0] = await Promise.all([vectorP, lexicalP]);
   // The declared context's seal binds the lexical lane at the SOURCE: the
   // RRF fusion mixes the full-corpus lexical ranking straight into the

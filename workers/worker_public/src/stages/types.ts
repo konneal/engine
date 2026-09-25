@@ -12,6 +12,11 @@ export interface RetrieveOptions {
   prev?: string;
   understanding?: QueryUnderstanding | null;
   queryOverride?: string;
+  /** Extra terms appended to the LEXICAL lane's query only (never the
+   *  dense vector): the licensed-boundary boost — chunks whose prose
+   *  references the licensed document surface for a question the
+   *  document's own vocabulary would otherwise miss. */
+  lexicalBoost?: string;
   federate?: (query: string) => Promise<Hit[]>;
   warmEmbed?: Promise<number[] | null>;
   graphDocNumbers?: string[];
