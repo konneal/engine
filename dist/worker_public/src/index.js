@@ -1,6 +1,6 @@
 import {
   handleSearch
-} from "../../chunk-S7NLWPNX.js";
+} from "../../chunk-5LSEBH3J.js";
 import {
   bindModelNode,
   checkQuoteAnchors,
@@ -9,7 +9,7 @@ import {
   modelGroundingBlock,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-TDKNQPA2.js";
+} from "../../chunk-WSLADX7O.js";
 import {
   buildMessages,
   citations,
@@ -32,7 +32,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-F66NYFUK.js";
+} from "../../chunk-NHHQAGBW.js";
 import {
   authenticate,
   corsHeaders,
@@ -996,7 +996,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-43C2WZZO.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-NHTT5DDI.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-GU554Y45.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-LGDQR43R.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1382,14 +1382,16 @@ async function adminStatsRoute(c) {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
   if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
-  const [byDay, byModel, feedback, convCount, cacheMix, durations] = await Promise.all([
+  const [byDay, byModel, feedback, convCount, cacheMix, durations, retriesRow] = await Promise.all([
     env.DB.prepare("SELECT day, tier, COUNT(*) as n, SUM(ok) as ok FROM queries WHERE day >= date('now','-7 days') GROUP BY day, tier ORDER BY day DESC").all(),
     env.DB.prepare("SELECT model, SUM(requests) as requests FROM spend WHERE day >= date('now','-7 days') GROUP BY model ORDER BY requests DESC").all(),
     env.DB.prepare("SELECT rating, COUNT(*) as n FROM feedback GROUP BY rating").all(),
     env.DB.prepare("SELECT COUNT(*) as n FROM conversations").first(),
     env.DB.prepare("SELECT COALESCE(cache, 'miss') AS cache, COUNT(*) AS n FROM queries WHERE day >= date('now','-7 days') AND route = 'ask' GROUP BY cache").all(),
-    env.DB.prepare("SELECT duration_ms FROM queries WHERE day >= date('now','-7 days') AND route = 'ask' AND duration_ms IS NOT NULL").all()
+    env.DB.prepare("SELECT duration_ms FROM queries WHERE day >= date('now','-7 days') AND route = 'ask' AND duration_ms IS NOT NULL").all(),
+    env.DB.prepare("SELECT COALESCE(SUM(retries), 0) AS total, SUM(CASE WHEN retries > 0 THEN 1 ELSE 0 END) AS answers FROM queries WHERE day >= date('now','-7 days') AND route = 'ask'").all()
   ]);
+  const retries = retriesRow?.results?.[0] ?? { total: 0, answers: 0 };
   const ds = durations.results.map((r) => r.duration_ms).sort((a, b) => a - b);
   const pct = (q) => ds.length ? ds[Math.min(ds.length - 1, Math.floor(q * ds.length))] : null;
   const totalQueries = byDay.results.reduce((a, r) => a + (r.n || 0), 0) || 0;
@@ -1407,6 +1409,7 @@ async function adminStatsRoute(c) {
     feedback: feedback.results,
     cache_mix_7d: cacheMix.results,
     latency_ms: ds.length ? { n: ds.length, p50: pct(0.5), p95: pct(0.95) } : null,
+    generate_retries_7d: { total: Number(retries.total) || 0, answers_retried: Number(retries.answers) || 0 },
     conversations: convCount?.n ?? 0,
     error_rate_pct: errorRate,
     index_version: env.INDEX_VERSION,
