@@ -40,14 +40,14 @@ export function telemetry(
   queryHash: string,
   lang?: string,
   cache?: "exact" | "semantic",
-  meta?: { durationMs?: number; keyId?: string | null },
+  meta?: { durationMs?: number; keyId?: string | null; retries?: number },
 ) {
   const day = today();
   ctx.waitUntil(
     env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO queries (ts, day, tier, route, model, ok, answer_chars, query_hash, lang, cache, duration_ms, key_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
-      ).bind(new Date().toISOString(), day, tier, route, model, ok ? 1 : 0, answerChars, queryHash, lang ?? null, cache ?? null, meta?.durationMs ?? null, meta?.keyId ?? null),
+        "INSERT INTO queries (ts, day, tier, route, model, ok, answer_chars, query_hash, lang, cache, duration_ms, key_id, retries) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+      ).bind(new Date().toISOString(), day, tier, route, model, ok ? 1 : 0, answerChars, queryHash, lang ?? null, cache ?? null, meta?.durationMs ?? null, meta?.keyId ?? null, meta?.retries ?? 0),
       env.DB.prepare(
         "INSERT INTO spend (day, tier, model, requests) VALUES (?1,?2,?3,1) ON CONFLICT(day, tier, model) DO UPDATE SET requests = requests + 1",
       ).bind(day, tier, model ?? "none"),
