@@ -2367,6 +2367,8 @@ export {
   handleMemories,
   checkQuoteAnchors,
   standardForDocNumber,
+  bindModelNode,
+  modelGroundingBlock,
   scoreJudge,
   handleAsk
 };
