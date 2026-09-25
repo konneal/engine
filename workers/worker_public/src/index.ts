@@ -234,7 +234,7 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
     // grounding — a verify that grounds against different passages than
     // the answer used judges a different answer
     let lexicalBoost: string | undefined;
-    let editionSteer: { doc_number: string; edition: string } | null = null;
+    let editionExclude: { doc_number: string; edition: string } | null = null;
     try {
       const fam = u?.doc_number ? refCodec().familyOf(u.doc_number) : null;
       if (fam) {
@@ -242,7 +242,7 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
           .bind(fam).first().catch(() => null);
         if (row?.edition) {
           lexicalBoost = String(row.edition);
-          editionSteer = { doc_number: fam.split("-").pop() ?? "", edition: String(row.edition) };
+          editionExclude = { doc_number: fam.split("-").pop() ?? "", edition: String(row.edition) };
         }
       }
     } catch {
@@ -250,7 +250,7 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
     }
     const bound = await bindModelNode(env, { query, standardKeys: entitlementScope(standardKeysFrom(body)) });
     const modelGrounding = bound && !bound.gated ? modelGroundingBlock(bound) : null;
-    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionSteer });
+    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionExclude });
     const passages = retrieved.hits.map((h: Hit) => h.text);
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);
