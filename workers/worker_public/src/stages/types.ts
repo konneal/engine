@@ -29,6 +29,11 @@ export interface RetrieveOptions {
    *  in-family passage out of the final hits, sealing the answer to
    *  zero despite a healthy in-family pool. */
   sealScope?: { doc_number: string; edition?: string } | null;
+  /** Verify's grounding steer (demote-not-exclude): hits of the named
+   *  document whose edition differs from the active one move to the END
+   *  of the candidate pool — superseded passages stay servable but stop
+   *  competing for the window against the current edition. */
+  editionSteer?: { doc_number: string; edition: string } | null;
   /** Option C: dense-lane results computed concurrently with
    *  understanding (same folded-query vector, retrieve's exact query
    *  parameters). With no filter they REPLACE the primary dense query;

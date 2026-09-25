@@ -234,19 +234,23 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
     // grounding — a verify that grounds against different passages than
     // the answer used judges a different answer
     let lexicalBoost: string | undefined;
+    let editionSteer: { doc_number: string; edition: string } | null = null;
     try {
       const fam = u?.doc_number ? refCodec().familyOf(u.doc_number) : null;
       if (fam) {
         const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1")
           .bind(fam).first().catch(() => null);
-        if (row?.edition) lexicalBoost = String(row.edition);
+        if (row?.edition) {
+          lexicalBoost = String(row.edition);
+          editionSteer = { doc_number: fam.split("-").pop() ?? "", edition: String(row.edition) };
+        }
       }
     } catch {
       // degrade to unsteered retrieval
     }
     const bound = await bindModelNode(env, { query, standardKeys: entitlementScope(standardKeysFrom(body)) });
     const modelGrounding = bound && !bound.gated ? modelGroundingBlock(bound) : null;
-    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost });
+    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionSteer });
     const passages = retrieved.hits.map((h: Hit) => h.text);
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);
@@ -265,7 +269,7 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
         .filter((x: unknown) => typeof x === "string" && x).join(" — "))
       .filter(Boolean);
     if (modelGrounding) machine.unshift(modelGrounding);
-    const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h: Hit) => h.text), machine);
+    const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h: Hit) => ({ text: h.text, table: (h.metadata as any).block === "table" || undefined })), machine);
     return json({
       checks,
       judged: faith ? { name: "faithfulness", deterministic: false, score: faith.score, ungrounded_claims: faith.ungrounded_claims.slice(0, 5) } : null,
