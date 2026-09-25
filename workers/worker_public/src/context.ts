@@ -12,6 +12,30 @@
 // answer depends on the declaration, not just the query) and is never
 // written into them — the caches stay context-clean by construction.
 
+/** One act the declared entity's lifecycle machine offers at its current
+ *  state, FOR THE DECLARING USER'S ROLE (the platform filters before
+ *  publishing; the wire is advisory — the platform re-validates every
+ *  proposed act authoritatively on the way back). */
+export interface MachineAct {
+  /** the machine's own action id (the model's vocabulary) */
+  action: string;
+  /** the state the act lands the entity on */
+  to: string;
+  /** the declared guard (the caller-supplied computed input the
+   *  transition requires), when the transition declares one */
+  guard?: string;
+}
+
+/** The affordance channel (TODO.ai-platform/08): the entity declaration's
+ *  machine facet — the lifecycle machine's current state (the fact,
+ *  published even when the role fires nothing) + the acts offered to the
+ *  declaring user's role (EMPTY means "the user can read but not act").
+ *  Only ever present on the entity kind. */
+export interface MachineContext {
+  state: string;
+  acts: MachineAct[];
+}
+
 export interface DeclaredContext {
   kind: "page" | "entity" | "document" | "account";
   /** display label ("this certificate R60/2021-A-EX1-26.01") — echoed
@@ -24,6 +48,8 @@ export interface DeclaredContext {
    *  (urn:oiml:pub:r:60-1:2021) or the plain docidentifier */
   doc?: string;
   edition?: string;
+  /** the affordance channel's machine facet (entity kind only) */
+  machine?: MachineContext;
 }
 
 /** The account context's live-read echo (TODO.ai-platform/03): WHEN the
@@ -55,9 +81,46 @@ export interface AppliedContext {
    *  chip grounded this answer in the model node itself — its constraint,
    *  its provenance, its tests */
   model?: { node_id: string; kind: string; standard: string; clause?: string };
+  /** the affordance channel's echo (TODO.ai-platform/08): the declared
+   *  machine's state + how many acts it offered the declaring user's role
+   *  — the panel's honest context line reads THIS, never its own copy */
+  machine?: { state: string; offered: number };
 }
 
 export const NO_CONTEXT: AppliedContext = { kind: "none", scoped_to: null };
+
+/** The affordance channel's bounds (TODO.ai-platform/08): the machine
+ *  facet is a hint from the panel, so it parses bounded and degrades to
+ *  undefined (no facet) on any malformation — never to an error. The
+ *  state is the fact; the acts may be EMPTY (the role fires nothing at
+ *  this state — the honest "read but not act"). */
+const MACHINE_STATE_MAX = 60;
+const MACHINE_ACT_MAX = 24;
+const MACHINE_FIELD_MAX = 60;
+
+export function parseMachine(v: any): MachineContext | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const state = typeof v.state === "string" ? v.state.trim().slice(0, MACHINE_STATE_MAX) : "";
+  if (!state) return undefined;
+  const acts: MachineAct[] = [];
+  for (const a of Array.isArray(v.acts) ? v.acts.slice(0, MACHINE_ACT_MAX) : []) {
+    const action = typeof a?.action === "string" ? a.action.trim().slice(0, MACHINE_FIELD_MAX) : "";
+    const to = typeof a?.to === "string" ? a.to.trim().slice(0, MACHINE_FIELD_MAX) : "";
+    if (!action || !to) continue;
+    const guard = typeof a?.guard === "string" && a.guard.trim() ? a.guard.trim().slice(0, MACHINE_FIELD_MAX) : undefined;
+    acts.push({ action, to, ...(guard ? { guard } : {}) });
+  }
+  return { state, acts };
+}
+
+/** The proposal bound (TODO.ai-platform/08): a draft act the offered set
+ *  does not carry is never proposed. An absent facet is not a bound (the
+ *  page publishes none); a present facet with an empty acts array bounds
+ *  to NOTHING — the user can read but not act. */
+export function machineOffers(machine: MachineContext | undefined, action: string): boolean {
+  if (!machine) return false;
+  return machine.acts.some((a) => a.action === action);
+}
 
 /** Parse + bound the ask body's optional `context` field. Anything
  *  malformed degrades to null (no context), never to a 400 — a context
@@ -70,7 +133,9 @@ export function parseContext(body: any): DeclaredContext | null {
   const route = typeof c.route === "string" && c.route.trim() ? c.route.trim().slice(0, 200) : undefined;
   const doc = typeof c.doc === "string" && c.doc.trim() ? c.doc.trim().slice(0, 80) : undefined;
   const edition = typeof c.edition === "string" && /^\d{4}$/.test(c.edition.trim()) ? c.edition.trim() : undefined;
-  return { kind: c.kind, label, ...(route ? { route } : {}), ...(doc ? { doc } : {}), ...(edition ? { edition } : {}) };
+  // the machine facet rides the entity kind only (the channel's contract)
+  const machine = c.kind === "entity" ? parseMachine(c.machine) : undefined;
+  return { kind: c.kind, label, ...(route ? { route } : {}), ...(doc ? { doc } : {}), ...(edition ? { edition } : {}), ...(machine ? { machine } : {}) };
 }
 
 import { refCodec, type DocScope } from "./codecs.ts";
@@ -132,6 +197,10 @@ export function appliedContext(
     scoped_to: scope ? scope.label : null,
     ...(note ? { note } : {}),
     ...(live ? { live } : {}),
+    // the affordance echo (TODO.ai-platform/08): the machine's state +
+    // the offered-act COUNT (the acts themselves are the platform's
+    // vocabulary, echoed back only bounded on the draft path)
+    ...(declared.machine ? { machine: { state: declared.machine.state, offered: declared.machine.acts.length } } : {}),
   };
 }
 
@@ -165,7 +234,14 @@ export function parseAppliedContext(v: any): AppliedContext | null {
           ...(typeof v.model.clause === "string" && v.model.clause.trim() ? { clause: v.model.clause.slice(0, 120) } : {}),
         }
       : undefined;
-  return { kind: v.kind, ...(label ? { label } : {}), scoped_to: scoped, ...(note ? { note } : {}), ...(live ? { live } : {}), ...(model ? { model } : {}) };
+  // The machine echo round-trips bounded too (TODO.ai-platform/08): a
+  // resumed session keeps the "the machine offers N acts at this state"
+  // honesty.
+  const machine =
+    v.machine && typeof v.machine === "object" && typeof v.machine.state === "string" && typeof v.machine.offered === "number"
+      ? { state: v.machine.state.slice(0, MACHINE_STATE_MAX), offered: Math.min(Math.max(0, Math.floor(v.machine.offered)), MACHINE_ACT_MAX) }
+      : undefined;
+  return { kind: v.kind, ...(label ? { label } : {}), scoped_to: scoped, ...(note ? { note } : {}), ...(live ? { live } : {}), ...(model ? { model } : {}), ...(machine ? { machine } : {}) };
 }
 
 /** The prompt note the declared context contributes (rides the
@@ -185,9 +261,18 @@ export function contextNote(declared: DeclaredContext | null, scope: DocScope | 
     return `Context note: the user is viewing ${declared.label || "a page"}${declared.route ? ` (${declared.route})` : ""} in the ${P().publisher.product_name} platform. The passages come from the general corpus; frame procedural guidance for that page when relevant.`;
   }
   if (declared.kind === "entity") {
+    // The affordance channel's sentence (TODO.ai-platform/08): the
+    // machine's state is a fact the answer may use; the offered acts are
+    // the proposal bound — an act the set does not offer is never
+    // proposed, and an empty set is the honest "read but not act".
+    const machineSentence = declared.machine
+      ? declared.machine.acts.length
+        ? ` The entity's lifecycle machine is at ${declared.machine.state}; the acts it offers this user's role there are exactly: ${declared.machine.acts.map((a) => a.action).join(", ")}. Never propose an act outside that set.`
+        : ` The entity's lifecycle machine is at ${declared.machine.state}, and it offers this user's role NO acts there — the user can read but not act; say so when they ask for an act, and propose nothing.`
+      : "";
     return scope
-      ? `Context note: the user is asking about ${declared.label || "an entity"} — the passages are scoped to ${scope.label}, the publication that governs it. You do NOT have the entity's own data; answer what the publication requires and say when the question needs the record itself.`
-      : `Context note: the user is asking about ${declared.label || "an entity"}. You do NOT have the entity's own data; answer from the corpus passages and say when the question needs the record itself.`;
+      ? `Context note: the user is asking about ${declared.label || "an entity"} — the passages are scoped to ${scope.label}, the publication that governs it. You do NOT have the entity's own data; answer what the publication requires and say when the question needs the record itself.${machineSentence}`
+      : `Context note: the user is asking about ${declared.label || "an entity"}. You do NOT have the entity's own data; answer from the corpus passages and say when the question needs the record itself.${machineSentence}`;
   }
   return scope
     ? `Context note: the user scoped this question to ${scope.label} — the passages come from that publication. If they cannot answer the question, say so instead of drawing on other documents.`

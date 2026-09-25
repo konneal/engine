@@ -14,9 +14,11 @@ import {
   identityNote,
   listwiseRerank,
   liveDataConfig,
+  machineOffers,
   namedDocumentIn,
   parseContext,
   portModelRunner,
+  portStore,
   rawSessionToken,
   refCodec,
   resolveDocScope,
@@ -28,14 +30,14 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-NHHQAGBW.js";
+} from "./chunk-DADOI4Q6.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-2RKYO3OC.js";
+} from "./chunk-R2V3X6SQ.js";
 import {
   canonicalRefusal,
   refusalAnswer
@@ -43,8 +45,9 @@ import {
 import {
   entitlementScope,
   requestSalt,
-  resolveRequestScope
-} from "./chunk-JGKSUSF5.js";
+  resolveRequestScope,
+  standardKeysFrom
+} from "./chunk-4GJGBGJK.js";
 import {
   LIMITS,
   MODELS,
@@ -54,7 +57,7 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-OMXAE27N.js";
+} from "./chunk-V46XM2GU.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -1196,6 +1199,11 @@ ${transcript}` }
 }
 var norm = (s) => s.toLowerCase().replace(/[^a-z0-9-]+/g, " ").replace(/\s+/g, " ").trim();
 var docNorm = (s) => norm(s).replace(/\s+/g, "");
+function valueTracesToUser(value, userTurns) {
+  if (typeof value !== "string" || !value.trim()) return false;
+  const haystack = norm(userTurns.join("\n"));
+  return haystack.includes(norm(value));
+}
 var DROP_REASON = "not stated in your own words";
 function traceabilityGuard(extraction, userTurns) {
   const haystack = norm(userTurns.join("\n"));
@@ -1383,6 +1391,263 @@ The draft opens in the real application form with every field editable \u2014 re
     answer,
     citation: { docidentifier: standard.label, ...standard.edition ? { edition: standard.edition } : {}, ...standard.status ? { status: standard.status } : {} }
   };
+}
+
+// workers/worker_public/src/apicalls.ts
+function actsProfile() {
+  const acts = P().publisher?.acts;
+  return acts && typeof acts === "object" ? acts : null;
+}
+function neverOffered(path) {
+  const prefixes = actsProfile()?.never_offer ?? [];
+  return prefixes.some((p) => typeof p === "string" && path.startsWith(p));
+}
+async function operationById(store, id) {
+  try {
+    return await store.prepare("SELECT operation_id, method, path, act_class, summary, tag FROM api_ops WHERE operation_id = ?1").bind(id).first();
+  } catch {
+    return null;
+  }
+}
+async function operationByMethodPath(store, method, path) {
+  try {
+    return await store.prepare("SELECT operation_id, method, path, act_class, summary, tag FROM api_ops WHERE method = ?1 AND path = ?2").bind(method.toLowerCase(), path).first();
+  } catch {
+    return null;
+  }
+}
+async function preferenceOps(store) {
+  try {
+    const rows = await store.prepare("SELECT operation_id, method, path, act_class, summary, tag FROM api_ops WHERE act_class = 'preference' ORDER BY operation_id LIMIT 32").bind().all();
+    return rows.results ?? [];
+  } catch {
+    return [];
+  }
+}
+function resolveEntityRoute(route) {
+  const patterns = actsProfile()?.entity_routes ?? [];
+  if (!route) return null;
+  const segs = route.split("?")[0].split("/").filter(Boolean);
+  for (const p of patterns) {
+    const psegs = String(p.pattern ?? "").split("/").filter(Boolean);
+    if (psegs.length !== segs.length) continue;
+    let id = null;
+    let ok = true;
+    for (let i = 0; i < psegs.length; i++) {
+      const ps = psegs[i];
+      if (ps.startsWith(":")) {
+        id = decodeURIComponent(segs[i]);
+      } else if (ps !== segs[i]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok && id && id.length <= 120 && /^[A-Za-z0-9._~-]+$/.test(id)) return { store: String(p.store), id };
+  }
+  return null;
+}
+var MACHINE_INTENT_RE = /\b(accept|reject|submit|resubmit|withdraw|suspend|reinstate|renew|revise|transfer|issue|register|log|record|dispatch|complete|sign|approve|verify)\b[\s\S]{0,40}\b(this|that|the|it)\b|\b(this|that|the|it)\b[\s\S]{0,40}\b(accept|reject|submit|resubmit|withdraw|suspend|reinstate|renew|revise|transfer|issue|register|log|dispatch|complete|sign|approve|verify)\b/i;
+var PREFERENCE_INTENT_RE = /\b(mute|unmute|unsubscribe|subscribe|notification prefs?|notification rules?|email prefs?|email preferences|saved? filters?|save (?:this|the|that) filter|notify me|stop notifying|inbox)\b/i;
+var QUESTION_OPENER_RE = /^\s*(?:what|how|why|where|when|which|who|whose|explain|describe|define|is|are|does|do)\b/i;
+function detectApiCallIntent(query, declared) {
+  if (QUESTION_OPENER_RE.test(query)) return null;
+  if (declared?.kind === "entity" && declared.machine && MACHINE_INTENT_RE.test(query)) return "machine_act";
+  if (PREFERENCE_INTENT_RE.test(query)) return "preference";
+  return null;
+}
+function pickPrompt(kind, candidates) {
+  if (kind === "machine_act") {
+    return {
+      system: `You map the user's request to one machine act from the OFFERED list, or to none.
+
+Rules:
+- Output ONLY a JSON object \u2014 no prose, no code fence: {"target": "<action id or null>", "title": "<what the act does, plain words>"}.
+- The target must be one of the offered action ids, copied exactly, or null when the request matches none.
+- The title names what the act DOES for the user ("Accept the application"), never the wire (no method, no path, no "/api/").
+- Never invent an act that is not listed.
+
+Offered acts (action id \u2014 lands the entity on):
+${candidates.join("\n")}`,
+      max: 300
+    };
+  }
+  return {
+    system: `You map the user's request to one operation from the PREFERENCE list (the user's own settings), or to none.
+
+Rules:
+- Output ONLY a JSON object \u2014 no prose, no code fence: {"target": "<operation id or null>", "title": "<what the act does, plain words>", "body": {...}}.
+- The target must be one of the listed operation ids, copied exactly, or null when the request matches none.
+- "body" carries only values the user stated in their own words; omit it when the request names no values.
+- The title names what the act DOES for the user ("Save the filter", "Mute these emails"), never the wire (no method, no path, no "/api/").
+- Never invent an operation that is not listed.
+
+Preference operations (id \u2014 method path \u2014 summary):
+${candidates.join("\n")}`,
+    max: 800
+  };
+}
+async function pickTarget(runner, model, kind, candidates, userTurns) {
+  const { system, max } = pickPrompt(kind, candidates);
+  const transcript = userTurns.map((t, i) => `${i + 1}. ${t}`).join("\n").slice(0, 8e3);
+  try {
+    const res = await runner.run({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: `The user's messages, oldest first:
+${transcript}` }
+      ],
+      maxTokens: max,
+      effort: "low",
+      temperature: 0.1
+    });
+    const text = res.text;
+    if (typeof text !== "string") return null;
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) return null;
+    const parsed = JSON.parse(text.slice(start, end + 1));
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      target: typeof parsed.target === "string" && parsed.target.trim() ? parsed.target.trim().slice(0, 120) : null,
+      title: typeof parsed.title === "string" && parsed.title.trim() ? parsed.title.trim().slice(0, 120) : void 0,
+      body: parsed.body && typeof parsed.body === "object" ? parsed.body : void 0
+    };
+  } catch {
+    return null;
+  }
+}
+function honestTitle(proposed, fallback) {
+  const t = (proposed ?? "").trim();
+  if (!t) return fallback;
+  if (/\b(GET|POST|PUT|PATCH|DELETE)\b/.test(t) || t.includes("/api/") || t.includes("{")) return fallback;
+  return t.slice(0, 120);
+}
+function bodyTraces(body, userTurns) {
+  if (body == null) return true;
+  if (typeof body === "boolean" || typeof body === "number") return true;
+  if (typeof body === "string") return valueTracesToUser(body, userTurns);
+  if (Array.isArray(body)) return body.every((v) => bodyTraces(v, userTurns));
+  if (typeof body === "object") return Object.values(body).every((v) => bodyTraces(v, userTurns));
+  return false;
+}
+function refusal2(reason, answer) {
+  return { status: "refused", reason, answer };
+}
+async function prepareApiCall(env, opts) {
+  if (!opts.member) {
+    return refusal2(
+      "sign_in_required",
+      "Preparing an act starts from your own account \u2014 sign in and ask again. The draft would still be yours alone: the card asks for your confirmation, and only your own tap executes it \u2014 I never hold a write credential."
+    );
+  }
+  const acts = actsProfile();
+  const store = portStore(env);
+  const runner = portModelRunner(env);
+  const userTurns = [...opts.history.filter((h) => h.role === "user").map((h) => h.content), opts.query];
+  if (opts.intent === "machine_act") {
+    const machine = opts.declared?.machine;
+    const label = opts.declared?.label || "this record";
+    if (!machine) {
+      return refusal2("no_matching_act", "This page did not declare the record's lifecycle state, so I cannot propose an act on it honestly. Open the record itself and ask again, or act from the platform's own controls \u2014 they always show exactly what your role may do.");
+    }
+    if (machine.acts.length === 0) {
+      return refusal2(
+        "machine_read_only",
+        `The record's lifecycle is at ${machine.state}, and the machine offers your role no acts there \u2014 you can read this record but not act on it. Nothing was drafted. If that looks wrong, an officer of your organization can check the role your account carries.`
+      );
+    }
+    const entity = resolveEntityRoute(opts.declared?.route);
+    if (!entity) {
+      return refusal2("entity_unresolved", "I cannot tell which record the act would land on from this page, so nothing was drafted. The platform's own controls on the record always act on the right one.");
+    }
+    const candidates2 = machine.acts.map((a) => `${a.action} \u2014 lands on ${a.to}${a.guard ? ` (requires ${a.guard})` : ""}`);
+    const pick2 = await pickTarget(runner, opts.model, "machine_act", candidates2, userTurns);
+    if (!pick2) {
+      return refusal2("pick_failed", "I could not map your request to an act reliably just now \u2014 nothing was drafted. Ask again in a moment, or act from the platform's own controls.");
+    }
+    if (!pick2.target || !machineOffers(machine, pick2.target)) {
+      const offered = machine.acts.map((a) => a.action).join(", ");
+      return refusal2(
+        "no_matching_act",
+        `None of the acts the machine offers your role at ${machine.state} matches that request \u2014 the offered set is exactly: ${offered}. I never propose an act outside it. Nothing was drafted.`
+      );
+    }
+    const act = machine.acts.find((a) => a.action === pick2.target);
+    const write = acts?.entity_write;
+    if (!write?.method || !write?.path) {
+      return refusal2("operation_unknown", "This deployment has not wired the entity write operation, so I cannot prepare the act here.");
+    }
+    const op2 = await operationByMethodPath(store, write.method, write.path);
+    if (!op2) {
+      return refusal2("operation_unknown", "The act's operation is not in this deployment's API directory, so I cannot prepare it honestly \u2014 nothing was drafted.");
+    }
+    if (neverOffered(op2.path)) {
+      return refusal2("operation_never_offered", "That act is not one the assistant may propose \u2014 nothing was drafted.");
+    }
+    const path = write.path.replace("{store}", entity.store).replace("{id}", entity.id);
+    const title2 = honestTitle(pick2.title, `${act.action} \u2014 ${label}`.slice(0, 120));
+    const notes = [
+      `The machine act ${act.action} moves the record from ${machine.state} to ${act.to}; the platform re-judges the act against the machine and your role when you confirm.`,
+      ...act.guard ? [`This act declares the ${act.guard} input \u2014 the confirmation card collects it; the draft carries none.`] : []
+    ];
+    const draft2 = {
+      kind: "draft",
+      act: "api_call",
+      version: 1,
+      title: title2,
+      prepared_at: (/* @__PURE__ */ new Date()).toISOString(),
+      requires_confirmation: true,
+      call: { method: write.method, path, body: { status: act.to } },
+      notes
+    };
+    const answer2 = `I've prepared the act "${title2}" for ${label}: the machine act ${act.action}, from ${machine.state} to ${act.to}.
+
+The confirmation card carries it \u2014 a record act, so your own confirmation signs it and the platform's gates judge the write as you. I never hold a write credential, and I never propose an act the machine does not offer your role.`;
+    return { status: "draft", draft: draft2, answer: answer2 };
+  }
+  const family = (await preferenceOps(store)).filter((o) => !neverOffered(o.path));
+  if (!family.length) {
+    return refusal2("operation_unknown", "This deployment's API directory lists no preference operations, so I cannot prepare that here \u2014 nothing was drafted.");
+  }
+  const candidates = family.map((o) => `${o.operation_id} \u2014 ${o.method.toUpperCase()} ${o.path} \u2014 ${o.summary ?? ""}`.slice(0, 300));
+  const pick = await pickTarget(runner, opts.model, "preference", candidates, userTurns);
+  if (!pick) {
+    return refusal2("pick_failed", "I could not map your request to a preference act reliably just now \u2014 nothing was drafted. Ask again in a moment, or change the setting on your account page directly.");
+  }
+  if (!pick.target) {
+    return refusal2("no_matching_act", "None of the preference acts I may propose matches that request \u2014 nothing was drafted. Your account's settings page carries the full set.");
+  }
+  const op = await operationById(store, pick.target);
+  if (!op || op.act_class !== "preference") {
+    return refusal2("operation_unknown", "I cannot match that request to a preference act the platform declares \u2014 nothing was drafted.");
+  }
+  if (neverOffered(op.path)) {
+    return refusal2("operation_never_offered", "That act is not one the assistant may propose \u2014 delegation and sign-in acts stay in your own hands on the settings page. Nothing was drafted.");
+  }
+  if (pick.body !== void 0 && !bodyTraces(pick.body, userTurns)) {
+    return refusal2(
+      "body_untraced",
+      "I can't prepare that change because the values I would set are not ones you stated \u2014 I never invent settings. Tell me exactly what to set, in your own words, and I'll prepare the draft."
+    );
+  }
+  const title = honestTitle(pick.title, (op.summary ?? op.operation_id).slice(0, 120));
+  const draft = {
+    kind: "draft",
+    act: "api_call",
+    version: 1,
+    title,
+    prepared_at: (/* @__PURE__ */ new Date()).toISOString(),
+    requires_confirmation: true,
+    call: { method: op.method.toUpperCase(), path: op.path, ...pick.body !== void 0 ? { body: pick.body } : {} },
+    notes: [
+      "A preference act: with your standing grant the card executes it straight away; without one, your own tap on the card confirms it. The grant is yours on the settings page \u2014 granted or revoked by your hand, never by a message."
+    ]
+  };
+  const answer = `I've prepared the act "${title}" \u2014 a preference act on your own settings.
+
+With your standing grant it executes under the grant's authority; without one, the card asks once and your tap confirms it. The platform re-checks the act against its own specification either way, and the grant never covers record acts.`;
+  return { status: "draft", draft, answer };
 }
 
 // workers/worker_public/src/memories.ts
@@ -1629,6 +1894,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
   const declaredCtx = parseContext(body);
   const draftAct = P().publisher.features?.drafts ? detectDraftIntent(q.query) : null;
+  const apiCallIntent = !draftAct && P().publisher.features?.api_call_drafts ? detectApiCallIntent(q.query, declaredCtx) : null;
   const member = tier === "member" ? await sessionFrom(req, env) : null;
   const effort = requestEffort(env, member, body?.effort);
   const limit = tier === "key" ? key.day_limit : tier === "member" || member ? num(env, "MEMBER_DAY_ASK", 300) : num(env, "ANON_DAY_ASK", 20);
@@ -1649,14 +1915,15 @@ async function handleAsk(env, ctx, req, tier, key) {
     cookie: req.headers.get("cookie") ?? "",
     authorization: req.headers.get("authorization") ?? ""
   };
-  const scope = resolveRequestScope(body, member);
+  const keyLicensed = tier === "key" && standardKeysFrom(body).size > 0;
+  const scope = resolveRequestScope(body, member, { keyWithEntitlements: keyLicensed });
   if ("error" in scope) return err(400, "invalid_input", "datasets: at least one dataset must stay enabled");
   const { corpora, narrowed, isoOn } = scope;
   const standardKeys = entitlementScope(scope.standardKeys);
   const [memNote, memoryUsed] = member && scope.memoryIds.length ? await memoryNote(env, member.sub, scope.memoryIds) : [null, []];
   const requestSaltStr = requestSalt(scope, memoryUsed);
   const salt = requestSaltStr ? `${requestSaltStr}|effort:${effort}` : `effort:${effort}`;
-  const federate = member && service && isoOn ? (q2) => retrieveInternal(service, fedAuth, q2) : void 0;
+  const federate = (member || keyLicensed) && service && isoOn ? (q2) => retrieveInternal(service, fedAuth, q2) : void 0;
   const ns = tier === "key" ? `k:${key.id}` : member ? `m:${member.sub}` : "anon";
   const model = member ? MODELS.member : MODELS.anon;
   const prev = typeof body?.prev === "string" ? body.prev.slice(0, 800) : void 0;
@@ -1673,7 +1940,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   let retrieved;
   const fresh = freshRequested(body);
   const gen = await corpusGen(env.CACHE);
-  const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
+  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   const wantsStream = body?.stream === true || tier === "anon" && body?.stream !== false;
   if (cached) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact", telemetryMeta());
@@ -1697,7 +1964,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   }
   let understanding = null;
   const nodeScoped = !!modelNodeRefIn(q.query) || !!modelNodeRefIn(declaredCtx?.label);
-  if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && !fresh) {
+  if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !apiCallIntent && !q.lang && !userImage && !fresh) {
     const wv0 = await warmEmbed ?? null;
     if (wv0) {
       const sc0 = await semanticCacheGet(env, gen, wv0, salt);
@@ -1795,7 +2062,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   console.log("understand:", understanding?.intent ?? "null", understanding?.doc_number ? `doc#${understanding.doc_number}${understanding.edition ? "@" + understanding.edition : ""}` : "nodoc", "|", q.query.slice(0, 50));
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);
-  if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !userImage && !fresh) {
+  if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !apiCallIntent && !userImage && !fresh) {
     const warmVec = await warmEmbed ?? null;
     if (warmVec) {
       const sc = await semanticCacheGet(env, gen, warmVec, salt);
@@ -1899,6 +2166,33 @@ ${summary}` }] : [],
       );
     }
     return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, quota });
+  }
+  if (apiCallIntent) {
+    const callCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
+    const queryHash2 = await sha256Hex(q.query);
+    const verdict = await prepareApiCall(env, {
+      intent: apiCallIntent,
+      query: q.query,
+      history: keptHistory,
+      member,
+      declared: declaredCtx,
+      model: roleModel(env, "acts")
+    });
+    console.log("api_call draft:", apiCallIntent, "\u2192", verdict.status === "draft" ? `draft (${verdict.draft.call.method} ${verdict.draft.call.path})` : `refused (${verdict.reason})`);
+    const draftPayload = verdict.status === "draft" ? verdict.draft : void 0;
+    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash2, q.lang, void 0, telemetryMeta());
+    if (wantsStream) {
+      return sseResponse(
+        [
+          ...readAs() ? [{ type: "read", read: readAs() }] : [],
+          { type: "citations", citations: [], context_applied: callCtxApplied, ...draftPayload ? { draft: draftPayload } : {}, quota },
+          { type: "token", v: verdict.answer },
+          { type: "done", model, query_hash: queryHash2, context_applied: callCtxApplied, read: readAs() }
+        ],
+        corsHeaders(req)
+      );
+    }
+    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, quota });
   }
   let liveRecords;
   let accountNote;

@@ -1,7 +1,7 @@
 import {
   DATASETS,
   datasetAllowed
-} from "./chunk-OMXAE27N.js";
+} from "./chunk-V46XM2GU.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -20,13 +20,13 @@ function standardKeysFrom(body) {
 function entitlementScope(keys) {
   return licenseDeclared() ? keys : null;
 }
-function resolveRequestScope(body, member) {
+function resolveRequestScope(body, member, opts) {
   const allIds = DATASETS().map((d) => d.id);
   const requested = Array.isArray(body?.datasets) ? body.datasets.filter((x) => typeof x === "string" && allIds.includes(x)) : null;
   if (requested !== null && requested.length === 0) return { error: "empty-datasets" };
   const permittedIds = allIds.filter((id) => {
     const d = DATASETS().find((x) => x.id === id);
-    return d.session ? datasetAllowed(d, member) : true;
+    return d.session ? datasetAllowed(d, member) || !!opts?.keyWithEntitlements : true;
   });
   const scopeIds = (requested ?? permittedIds).filter((id) => permittedIds.includes(id));
   const corpora = /* @__PURE__ */ new Set();

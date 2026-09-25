@@ -1,3 +1,25 @@
+/** One act the declared entity's lifecycle machine offers at its current
+ *  state, FOR THE DECLARING USER'S ROLE (the platform filters before
+ *  publishing; the wire is advisory — the platform re-validates every
+ *  proposed act authoritatively on the way back). */
+export interface MachineAct {
+    /** the machine's own action id (the model's vocabulary) */
+    action: string;
+    /** the state the act lands the entity on */
+    to: string;
+    /** the declared guard (the caller-supplied computed input the
+     *  transition requires), when the transition declares one */
+    guard?: string;
+}
+/** The affordance channel (TODO.ai-platform/08): the entity declaration's
+ *  machine facet — the lifecycle machine's current state (the fact,
+ *  published even when the role fires nothing) + the acts offered to the
+ *  declaring user's role (EMPTY means "the user can read but not act").
+ *  Only ever present on the entity kind. */
+export interface MachineContext {
+    state: string;
+    acts: MachineAct[];
+}
 export interface DeclaredContext {
     kind: "page" | "entity" | "document" | "account";
     /** display label ("this certificate R60/2021-A-EX1-26.01") — echoed
@@ -10,6 +32,8 @@ export interface DeclaredContext {
      *  (urn:oiml:pub:r:60-1:2021) or the plain docidentifier */
     doc?: string;
     edition?: string;
+    /** the affordance channel's machine facet (entity kind only) */
+    machine?: MachineContext;
 }
 /** The account context's live-read echo (TODO.ai-platform/03): WHEN the
  *  live data was read, WHICH stores answered, and how many records the
@@ -44,8 +68,21 @@ export interface AppliedContext {
         standard: string;
         clause?: string;
     };
+    /** the affordance channel's echo (TODO.ai-platform/08): the declared
+     *  machine's state + how many acts it offered the declaring user's role
+     *  — the panel's honest context line reads THIS, never its own copy */
+    machine?: {
+        state: string;
+        offered: number;
+    };
 }
 export declare const NO_CONTEXT: AppliedContext;
+export declare function parseMachine(v: any): MachineContext | undefined;
+/** The proposal bound (TODO.ai-platform/08): a draft act the offered set
+ *  does not carry is never proposed. An absent facet is not a bound (the
+ *  page publishes none); a present facet with an empty acts array bounds
+ *  to NOTHING — the user can read but not act. */
+export declare function machineOffers(machine: MachineContext | undefined, action: string): boolean;
 /** Parse + bound the ask body's optional `context` field. Anything
  *  malformed degrades to null (no context), never to a 400 — a context
  *  the service can't parse is a context it must not apply. */

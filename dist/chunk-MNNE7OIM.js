@@ -7,24 +7,24 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "./chunk-NHHQAGBW.js";
+} from "./chunk-DADOI4Q6.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-2RKYO3OC.js";
+} from "./chunk-R2V3X6SQ.js";
 import {
   entitlementScope,
   standardKeysFrom
-} from "./chunk-JGKSUSF5.js";
+} from "./chunk-4GJGBGJK.js";
 import {
   LIMITS,
   MODELS,
   num,
   sha256Hex
-} from "./chunk-OMXAE27N.js";
+} from "./chunk-V46XM2GU.js";
 
 // workers/worker_public/src/search.ts
 async function handleSearch(env, ctx, req, tier, key) {

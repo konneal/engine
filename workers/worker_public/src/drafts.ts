@@ -231,6 +231,16 @@ const norm = (s: string) =>
 /** The document-name normalization: whitespace-free ("R 60" ≡ "R60"). */
 const docNorm = (s: string) => norm(s).replace(/\s+/g, "");
 
+/** The traceability primitive, shared with the api_call act's body guard
+ *  (apicalls.ts): a value traces when it appears in the user's own
+ *  messages (normalized). The proposing model never gets the benefit of
+ *  the doubt — the user's words are the only source. */
+export function valueTracesToUser(value: unknown, userTurns: string[]): boolean {
+  if (typeof value !== "string" || !value.trim()) return false;
+  const haystack = norm(userTurns.join("\n"));
+  return haystack.includes(norm(value));
+}
+
 export interface GuardedFields {
   standard?: string;
   family_designation?: string;

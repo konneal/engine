@@ -167,6 +167,14 @@ export function cfBlobs(bucket: unknown): Blobs {
   };
 }
 
+// The transitional relational port (ports/store.ts): D1 IS the
+// adapter — the port narrows to semantic repositories when the
+// repository extraction completes.
+import type { StoreQuery } from "../store.ts";
+export function cfStore(db: unknown): StoreQuery {
+  return db as StoreQuery;
+}
+
 export function cfRuntime(ctx: { waitUntil(p: Promise<unknown>): void } | undefined): Runtime {
   return {
     defer(fn) {

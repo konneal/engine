@@ -48,12 +48,13 @@ export interface Env {
 // Domain modules import `portModelRunner(env)` etc. — never env.AI
 // directly; the purity lint enforces it. Zero runtime change: the
 // adapters forward to the same bindings the call sites used before.
-import { cfModelRunner, cfVectorIndex, cfKv, cfBlobs, cfRuntime } from "./ports/cloudflare/adapters.ts";
+import { cfModelRunner, cfVectorIndex, cfKv, cfBlobs, cfRuntime, cfStore } from "./ports/cloudflare/adapters.ts";
 import type { ModelRunner } from "./ports/model.ts";
 import type { VectorIndex } from "./ports/vector.ts";
 import type { Kv } from "./ports/kv.ts";
 import type { Blobs } from "./ports/blobs.ts";
 import type { Runtime } from "./ports/runtime.ts";
+import type { StoreQuery } from "./ports/store.ts";
 
 export function portModelRunner(env: Env): ModelRunner {
   return cfModelRunner(env.AI);
@@ -75,6 +76,9 @@ export function portKv(env: Env): Kv {
 }
 export function portBlobs(env: Env): Blobs {
   return cfBlobs(env.UNIT_ASSETS);
+}
+export function portStore(env: Env): StoreQuery {
+  return cfStore(env.DB);
 }
 /** Does the deployment bind this lane index? Presence wiring stays in
  *  the ports layer so domain stages never touch raw bindings. */

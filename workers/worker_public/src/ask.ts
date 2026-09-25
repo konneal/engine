@@ -26,8 +26,9 @@ import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./co
 import { evaluateAggregation, type AggregationVerdict } from "./aggregation";
 import { matchLicensedTopic, boundaryNoteText } from "./boundary";
 import { detectDraftIntent, prepareDraft } from "./drafts";
+import { detectApiCallIntent, prepareApiCall } from "./apicalls";
 import { memoryNote } from "./memories";
-import { entitlementScope, resolveRequestScope, requestSalt } from "./requestScope";
+import { entitlementScope, resolveRequestScope, requestSalt, standardKeysFrom } from "./requestScope";
 import { rawSessionToken } from "./session";
 import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested, semanticCacheKey } from "./answercache";
 import type { Env } from "./env";
@@ -277,6 +278,13 @@ async function handleAsk(
   // ask bypasses both answer caches (read AND write) exactly as a
   // declared-context ask does.
   const draftAct = P().publisher.features?.drafts ? detectDraftIntent(q.query) : null;
+  // The api_call draft (TODO.ai-platform/09): the operations deployment's
+  // proposal grammar — one platform operation, bounded by the affordance
+  // channel's machine facet (machine acts) or the preference family's
+  // closed world (the operation directory). Same cache posture as the
+  // prefill draft: the answer depends on the conversation and the
+  // account's standing, never on the query alone.
+  const apiCallIntent = !draftAct && P().publisher.features?.api_call_drafts ? detectApiCallIntent(q.query, declaredCtx) : null;
 
   const member = tier === "member" ? await sessionFrom(req, env as any) : null;
   // resolved before the quota check: the effort choice prices the ask
@@ -301,15 +309,20 @@ async function handleAsk(
   // Members get federated retrieval (OIML + ISO/IEC) merged into the same
   // pipeline via the service binding; rag-public never touches the
   // internal index itself, and generation/rerank stay in ONE pipeline.
+  // The key-tier licensed federation (the LIVE_MEMBER_TOKEN retirement):
+  // an API-key caller with a VALIDATED entitlement set rides the same
+  // lane — the key is re-verified server-side by the internal worker and
+  // the entitlement set is the licensed scope the hard cut honors.
   const service = env.INTERNAL_SERVICE;
   const fedAuth = {
     cookie: req.headers.get("cookie") ?? "",
     authorization: req.headers.get("authorization") ?? "",
   };
+  const keyLicensed = tier === "key" && standardKeysFrom(body).size > 0;
   // Dataset scope + memory selection (MECE: the derivation lives in
   // ./requestScope; this path only wires it). A request that explicitly
   // disables every dataset is a user error.
-  const scope = resolveRequestScope(body, member);
+  const scope = resolveRequestScope(body, member, { keyWithEntitlements: keyLicensed });
   if ("error" in scope) return err(400, "invalid_input", "datasets: at least one dataset must stay enabled");
   const { corpora, narrowed, isoOn } = scope;
   // The license entitlement set (TODO.external-refs/08): request-scoped,
@@ -327,7 +340,7 @@ async function handleAsk(
   // per-request depth toggle (⚡ fast / 🧠 thorough): effort changes the
   // answer, so it salts the cache with the selections above
   const salt = requestSaltStr ? `${requestSaltStr}|effort:${effort}` : `effort:${effort}`;
-  const federate = member && service && isoOn
+  const federate = (member || keyLicensed) && service && isoOn
     ? (q2: string) => retrieveInternal(service, fedAuth, q2)
     : undefined;
 
@@ -362,7 +375,7 @@ async function handleAsk(
   // answer caches; corpus surgery bumps it (scripts/invalidate_answer_
   // cache.py) and old-generation entries miss (oimlsmart/rag#72)
   const gen = await corpusGen(env.CACHE);
-  const cached = fresh || contextual || declaredCtx || draftAct || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
+  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
@@ -409,7 +422,7 @@ async function handleAsk(
   // node's answer for another (observed run-to-run across the golden
   // model legs). Node-scoped queries use the exact cache only.
   const nodeScoped = !!modelNodeRefIn(q.query) || !!modelNodeRefIn(declaredCtx?.label);
-  if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !q.lang && !userImage && !fresh) {
+  if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !apiCallIntent && !q.lang && !userImage && !fresh) {
     const wv0 = (await warmEmbed) ?? null;
     if (wv0) {
       const sc0 = await semanticCacheGet(env, gen, wv0, salt);
@@ -553,7 +566,7 @@ async function handleAsk(
   // for standalone knowledge questions; contextual turns, declared-context
   // asks and image asks always run live; fresh regenerates, bypassing
   // this cache too)
-  if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !userImage && !fresh) {
+  if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !apiCallIntent && !userImage && !fresh) {
     const warmVec = (await warmEmbed) ?? null;
     if (warmVec) {
       const sc = await semanticCacheGet(env, gen, warmVec, salt);
@@ -679,6 +692,43 @@ async function handleAsk(
       );
     }
     return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), quota, });
+  }
+
+  // ── The api_call draft (TODO.ai-platform/09) — the operations
+  // assistant's proposal grammar (apicalls.ts): one platform operation,
+  // prepared as a draft, bounded by the affordance channel's machine
+  // facet or the preference family's closed world. THE SERVICE NEVER
+  // WRITES here either: the draft rides the response's `draft` field;
+  // the panel pre-flights it against the platform's specification and
+  // the platform's own gates judge the execution. Branched where the
+  // prefill draft branches — the draft grounds in the conversation +
+  // the operation directory, not the corpus passages.
+  if (apiCallIntent) {
+    const callCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
+    const queryHash = await sha256Hex(q.query);
+    const verdict = await prepareApiCall(env, {
+      intent: apiCallIntent,
+      query: q.query,
+      history: keptHistory,
+      member,
+      declared: declaredCtx,
+      model: roleModel(env, "acts"),
+    });
+    console.log("api_call draft:", apiCallIntent, "→", verdict.status === "draft" ? `draft (${verdict.draft.call.method} ${verdict.draft.call.path})` : `refused (${verdict.reason})`);
+    const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
+    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash, q.lang, undefined, telemetryMeta());
+    if (wantsStream) {
+      return sseResponse(
+        [
+          ...(readAs() ? [{ type: "read", read: readAs() }] : []),
+          { type: "citations", citations: [], context_applied: callCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, },
+          { type: "token", v: verdict.answer },
+          { type: "done", model, query_hash: queryHash, context_applied: callCtxApplied, read: readAs() },
+        ],
+        corsHeaders(req),
+      );
+    }
+    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), quota, });
   }
 
   // (declared before the retrieval try: the account block, the refusal
