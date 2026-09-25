@@ -853,10 +853,16 @@ async function handleAsk(
   // reference the licensed document, and the note instructs the model
   // to attribute, never to recite the licensed parameters.
   let boundaryNote: string | null = null;
+  // the boost rides RETRIEVAL (the lexical lane below): chunks whose
+  // prose references the licensed document — the referencing
+  // publication's own clause — surface for a question the document's
+  // vocabulary alone would miss
+  let boundaryBoost: string | undefined;
   if (P().sources?.licensed?.length) {
     const match = matchLicensedTopic(q.query, P().sources.licensed);
     if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
       const docNum = match.entry.doc_number ?? "";
+      boundaryBoost = docNum || undefined;
       let citing: string[] = [];
       if (docNum) {
         const rows = await env.DB.prepare(
@@ -923,7 +929,7 @@ async function handleAsk(
     // publications there).
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
       sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec,
-      datasetScope: narrowed ? corpora : null, standardKeys });
+      datasetScope: narrowed ? corpora : null, standardKeys, lexicalBoost: boundaryBoost });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
@@ -957,7 +963,7 @@ async function handleAsk(
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost: boundaryBoost });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h: Hit) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better

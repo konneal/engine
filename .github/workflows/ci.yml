@@ -24,9 +24,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: pubid/pubid-testsuite
-          # the merged estate corpus (dual-published, CS, the oiml-pubid
-          # conformance set) — unpin to main when the branch merges
-          ref: oiml-estate-corpus
           path: pubid-testsuite
       - run: npm ci
       - name: openapi surface freshness (the generated route table must match the yaml)
@@ -70,9 +67,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: pubid/pubid-testsuite
-          # the merged estate corpus (dual-published, CS, the oiml-pubid
-          # conformance set) — unpin to main when the branch merges
-          ref: oiml-estate-corpus
           path: pubid-testsuite
       - run: python -m pytest tests/python -q
         env:
