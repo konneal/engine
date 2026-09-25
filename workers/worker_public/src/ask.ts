@@ -864,14 +864,18 @@ async function handleAsk(
   // values read as ungrounded against 2017 passages)
   let modelEditionBoost: string | undefined;
   if (boundModel && !boundModel.gated) {
-    const om = /^oiml-r(\d+)$/.exec(boundModel.standard);
-    if (om) {
+    const prefix = String(P().sources?.models?.standard_prefix ?? "");
+    if (prefix && boundModel.standard.startsWith(prefix)) {
+      // the profile's package prefix derives the graph family
+      // (<prefix><num> → family <LETTER>-<num>) and the boost is the
+      // family's ACTIVE edition
+      const num = boundModel.standard.slice(prefix.length);
+      const family = `${prefix.slice(prefix.lastIndexOf("-") + 1).toUpperCase()}-${num}`;
       const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1")
-        .bind(`R-${om[1]}`).first<any>().catch(() => null);
+        .bind(family).first<any>().catch(() => null);
       if (row?.edition) modelEditionBoost = String(row.edition);
     } else {
-      const im = /^iec-(.+)$/.exec(boundModel.standard);
-      if (im) modelEditionBoost = im[1];
+      modelEditionBoost = boundModel.standard; // the doc number is embedded in the id
     }
   }
   const lexicalBoost = [boundaryBoost, modelEditionBoost].filter(Boolean).join(" ") || undefined;

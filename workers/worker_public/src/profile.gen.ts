@@ -83,7 +83,9 @@ export const PROFILE = {
     },
     "bibliography": {},
     "terminology": {},
-    "models": {},
+    "models": {
+      "standard_prefix": "fx-r"
+    },
     "licensed": [
       {
         "key": "std:fixture-ab-99",

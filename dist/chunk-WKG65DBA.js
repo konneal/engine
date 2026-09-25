@@ -1,7 +1,7 @@
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-FYGJDJPN.js";
+} from "./chunk-2RKYO3OC.js";
 import {
   DATASETS,
   LIMITS,
@@ -12,10 +12,10 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-434NRPSS.js";
+} from "./chunk-OMXAE27N.js";
 import {
   P
-} from "./chunk-HYI32HMI.js";
+} from "./chunk-3FYJM7LH.js";
 
 // workers/worker_public/src/ai.ts
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
