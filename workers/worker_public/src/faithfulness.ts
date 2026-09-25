@@ -19,7 +19,7 @@ export async function scoreFaithfulness(
   ai: any,
   model: string,
   answer: string,
-  passages: string[],
+  passages: (string | { text: string; table?: boolean })[],
   machine: string[] = [],
 ): Promise<FaithfulnessResult | null> {
   if (!answer || !passages.length) return null;
