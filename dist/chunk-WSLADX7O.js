@@ -28,7 +28,7 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-F66NYFUK.js";
+} from "./chunk-NHHQAGBW.js";
 import {
   corsHeaders,
   err,
@@ -1612,7 +1612,7 @@ async function* sseTokens(stream) {
 }
 async function handleAsk(env, ctx, req, tier, key) {
   const tStart = Date.now();
-  const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null });
+  const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null, retries: generateRetries });
   const stageTiming = {};
   let generateRetries = 0;
   const readAs = () => understanding ? {
