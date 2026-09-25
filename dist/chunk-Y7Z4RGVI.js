@@ -2014,6 +2014,18 @@ ${summary}` }] : [],
   if (aggregationVerdict) console.log("aggregation engine:", aggregationVerdict.operation, aggregationVerdict.table, "\u2192", aggregationVerdict.value);
   let boundaryNote = null;
   let boundaryBoost;
+  let modelEditionBoost;
+  if (boundModel && !boundModel.gated) {
+    const om = /^oiml-r(\d+)$/.exec(boundModel.standard);
+    if (om) {
+      const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(`R-${om[1]}`).first().catch(() => null);
+      if (row?.edition) modelEditionBoost = String(row.edition);
+    } else {
+      const im = /^iec-(.+)$/.exec(boundModel.standard);
+      if (im) modelEditionBoost = im[1];
+    }
+  }
+  const lexicalBoost = [boundaryBoost, modelEditionBoost].filter(Boolean).join(" ") || void 0;
   if (P().sources?.licensed?.length) {
     const match = matchLicensedTopic(q.query, P().sources.licensed);
     if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
@@ -2065,7 +2077,7 @@ Answer account questions from these records ONLY: name the record when you use i
       optimisticVec,
       datasetScope: narrowed ? corpora : null,
       standardKeys,
-      lexicalBoost: boundaryBoost
+      lexicalBoost
     });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
@@ -2089,7 +2101,7 @@ Answer account questions from these records ONLY: name the record when you use i
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost: boundaryBoost });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second;

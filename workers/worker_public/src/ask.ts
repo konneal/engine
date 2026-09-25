@@ -858,6 +858,23 @@ async function handleAsk(
   // publication's own clause — surface for a question the document's
   // vocabulary alone would miss
   let boundaryBoost: string | undefined;
+  // the model-bound edition boost: the grounding pool tilts to the
+  // CURRENT edition's chunks (the superseded dirty-corpus editions
+  // otherwise outrank them on shared vocabulary and the answer's model
+  // values read as ungrounded against 2017 passages)
+  let modelEditionBoost: string | undefined;
+  if (boundModel && !boundModel.gated) {
+    const om = /^oiml-r(\d+)$/.exec(boundModel.standard);
+    if (om) {
+      const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1")
+        .bind(`R-${om[1]}`).first<any>().catch(() => null);
+      if (row?.edition) modelEditionBoost = String(row.edition);
+    } else {
+      const im = /^iec-(.+)$/.exec(boundModel.standard);
+      if (im) modelEditionBoost = im[1];
+    }
+  }
+  const lexicalBoost = [boundaryBoost, modelEditionBoost].filter(Boolean).join(" ") || undefined;
   if (P().sources?.licensed?.length) {
     const match = matchLicensedTopic(q.query, P().sources.licensed);
     if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
@@ -929,7 +946,7 @@ async function handleAsk(
     // publications there).
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
       sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec,
-      datasetScope: narrowed ? corpora : null, standardKeys, lexicalBoost: boundaryBoost });
+      datasetScope: narrowed ? corpora : null, standardKeys, lexicalBoost });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
@@ -963,7 +980,7 @@ async function handleAsk(
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost: boundaryBoost });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h: Hit) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better
