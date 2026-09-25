@@ -23275,7 +23275,7 @@ async function retrieve(env, query, opts = {}) {
   let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || folded;
   if (u?.process_intent) rq += processExpansion();
   const vectorP = rq === folded && opts.optimisticVec ? Promise.resolve(opts.optimisticVec) : rq === folded && opts.warmEmbed ? opts.warmEmbed.then((w) => w ?? embed(portModelRunner(env), MODELS.embed, rq)) : embed(portModelRunner(env), MODELS.embed, rq);
-  const lexicalP = lexicalPrefilter(env, rq).catch(() => []);
+  const lexicalP = lexicalPrefilter(env, opts.lexicalBoost ? `${rq} ${opts.lexicalBoost}` : rq).catch(() => []);
   const [vector, lexicalHits0] = await Promise.all([vectorP, lexicalP]);
   const lexicalHits = opts.sealScope || opts.standardKeys ? lexicalHits0.filter(
     (h) => (!opts.sealScope || h.metadata.doc_number === opts.sealScope.doc_number && (!opts.sealScope.edition || h.metadata.edition === opts.sealScope.edition)) && standardKeyAllowed(h.metadata, opts.standardKeys)

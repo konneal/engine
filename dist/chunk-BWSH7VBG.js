@@ -27,7 +27,7 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-HXWDVAVN.js";
+} from "./chunk-6MHR5JI4.js";
 import {
   corsHeaders,
   err,
@@ -2013,10 +2013,12 @@ ${summary}` }] : [],
   } : null;
   if (aggregationVerdict) console.log("aggregation engine:", aggregationVerdict.operation, aggregationVerdict.table, "\u2192", aggregationVerdict.value);
   let boundaryNote = null;
+  let boundaryBoost;
   if (P().sources?.licensed?.length) {
     const match = matchLicensedTopic(q.query, P().sources.licensed);
     if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
       const docNum = match.entry.doc_number ?? "";
+      boundaryBoost = docNum || void 0;
       let citing = [];
       if (docNum) {
         const rows = await env.DB.prepare(
@@ -2062,7 +2064,8 @@ Answer account questions from these records ONLY: name the record when you use i
       optimisticHits,
       optimisticVec,
       datasetScope: narrowed ? corpora : null,
-      standardKeys
+      standardKeys,
+      lexicalBoost: boundaryBoost
     });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
@@ -2086,7 +2089,7 @@ Answer account questions from these records ONLY: name the record when you use i
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost: boundaryBoost });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second;
