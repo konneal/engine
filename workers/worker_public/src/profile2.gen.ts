@@ -91,7 +91,9 @@ export const PROFILE = {
     "corpora": {},
     "bibliography": {},
     "terminology": {},
-    "models": {}
+    "models": {
+      "standard_prefix": "atlas-s"
+    }
   },
   "ui": {
     "suggestions": [
