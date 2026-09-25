@@ -1,6 +1,6 @@
 import {
   handleSearch
-} from "../../chunk-RI2SRLZY.js";
+} from "../../chunk-S7NLWPNX.js";
 import {
   bindModelNode,
   checkQuoteAnchors,
@@ -9,7 +9,7 @@ import {
   modelGroundingBlock,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-ODHIVW3M.js";
+} from "../../chunk-TDKNQPA2.js";
 import {
   buildMessages,
   citations,
@@ -32,7 +32,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-BHWG556Q.js";
+} from "../../chunk-F66NYFUK.js";
 import {
   authenticate,
   corsHeaders,
@@ -996,7 +996,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-UAJHC6U7.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-ICNVGXUY.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-43C2WZZO.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-NHTT5DDI.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1456,21 +1456,21 @@ async function verifyRoute(c) {
   try {
     const u = await understandQuery(env.AI, roleModel(env, "understand"), query, [], []);
     let lexicalBoost;
-    let editionSteer = null;
+    let editionExclude = null;
     try {
       const fam = u?.doc_number ? refCodec().familyOf(u.doc_number) : null;
       if (fam) {
         const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(fam).first().catch(() => null);
         if (row?.edition) {
           lexicalBoost = String(row.edition);
-          editionSteer = { doc_number: fam.split("-").pop() ?? "", edition: String(row.edition) };
+          editionExclude = { doc_number: fam.split("-").pop() ?? "", edition: String(row.edition) };
         }
       }
     } catch {
     }
     const bound = await bindModelNode(env, { query, standardKeys: entitlementScope(standardKeysFrom(body)) });
     const modelGrounding = bound && !bound.gated ? modelGroundingBlock(bound) : null;
-    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionSteer });
+    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionExclude });
     const passages = retrieved.hits.map((h) => h.text);
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);

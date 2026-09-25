@@ -34,6 +34,12 @@ export interface RetrieveOptions {
    *  of the candidate pool — superseded passages stay servable but stop
    *  competing for the window against the current edition. */
   editionSteer?: { doc_number: string; edition: string } | null;
+  /** Verify's grounding cut: hits of the named document whose edition
+   *  differs from the active one are REMOVED — a grounding endpoint
+   *  judges against the current edition; a superseded passage cannot
+   *  ground a current-edition claim. Everything else (other documents,
+   *  undated vocabulary) survives. */
+  editionExclude?: { doc_number: string; edition: string } | null;
   /** Option C: dense-lane results computed concurrently with
    *  understanding (same folded-query vector, retrieve's exact query
    *  parameters). With no filter they REPLACE the primary dense query;
