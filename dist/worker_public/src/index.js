@@ -1,6 +1,6 @@
 import {
   handleSearch
-} from "../../chunk-5LCPKJ6V.js";
+} from "../../chunk-RI2SRLZY.js";
 import {
   bindModelNode,
   checkQuoteAnchors,
@@ -9,7 +9,7 @@ import {
   modelGroundingBlock,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-INCFGVH3.js";
+} from "../../chunk-ODHIVW3M.js";
 import {
   buildMessages,
   citations,
@@ -32,7 +32,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-4G5OGWXY.js";
+} from "../../chunk-BHWG556Q.js";
 import {
   authenticate,
   corsHeaders,
@@ -393,7 +393,11 @@ function parseVerdict(text) {
 
 // workers/worker_public/src/faithfulness-context.ts
 function buildJudgeContext(passages, machine = []) {
-  const context = passages.slice(0, 8).map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 1400)}`).join("\n");
+  const context = passages.slice(0, 8).map((p, i) => {
+    const text = typeof p === "string" ? p : p.text;
+    const limit = typeof p !== "string" && p.table ? 2400 : 1400;
+    return `[${i + 1}] ${text.replace(/\s+/g, " ").slice(0, limit)}`;
+  }).join("\n");
   const machineContext = machine.length ? "\n" + machine.slice(0, 6).map((m) => `[M] ${m.replace(/\s+/g, " ").slice(0, 400)}`).join("\n") : "";
   return context + machineContext;
 }
@@ -992,7 +996,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-KELYM6RJ.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-4UK3RBEQ.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-UAJHC6U7.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-ICNVGXUY.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1452,17 +1456,21 @@ async function verifyRoute(c) {
   try {
     const u = await understandQuery(env.AI, roleModel(env, "understand"), query, [], []);
     let lexicalBoost;
+    let editionSteer = null;
     try {
       const fam = u?.doc_number ? refCodec().familyOf(u.doc_number) : null;
       if (fam) {
         const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(fam).first().catch(() => null);
-        if (row?.edition) lexicalBoost = String(row.edition);
+        if (row?.edition) {
+          lexicalBoost = String(row.edition);
+          editionSteer = { doc_number: fam.split("-").pop() ?? "", edition: String(row.edition) };
+        }
       }
     } catch {
     }
     const bound = await bindModelNode(env, { query, standardKeys: entitlementScope(standardKeysFrom(body)) });
     const modelGrounding = bound && !bound.gated ? modelGroundingBlock(bound) : null;
-    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost });
+    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionSteer });
     const passages = retrieved.hits.map((h) => h.text);
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);
@@ -1474,7 +1482,7 @@ async function verifyRoute(c) {
     ];
     const machine = (Array.isArray(body?.blocks) ? body.blocks : []).filter((b) => b?.type === "verdict" && b?.payload).map((b) => [b.payload.check, b.payload.meaning, b.payload.definition, b.payload.violation_meaning].filter((x) => typeof x === "string" && x).join(" \u2014 ")).filter(Boolean);
     if (modelGrounding) machine.unshift(modelGrounding);
-    const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h) => h.text), machine);
+    const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h) => ({ text: h.text, table: h.metadata.block === "table" || void 0 })), machine);
     return json({
       checks,
       judged: faith ? { name: "faithfulness", deterministic: false, score: faith.score, ungrounded_claims: faith.ungrounded_claims.slice(0, 5) } : null,

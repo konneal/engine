@@ -28,7 +28,7 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-4G5OGWXY.js";
+} from "./chunk-BHWG556Q.js";
 import {
   corsHeaders,
   err,
@@ -2188,7 +2188,7 @@ Answer account questions from these records ONLY: name the record when you use i
             // the evidence view's ground truth: the exact passages this
             // answer was built from, compact — cache hits carry none,
             // because the cache stores the answer and never the passages
-            passages: usedHits.slice(0, 8).map((h) => ({ d: h.metadata.docidentifier ?? "", a: h.metadata.clause_anchor ?? "", t: (h.text ?? "").slice(0, 600), ...h.metadata.table_selection ? { s: h.metadata.table_selection } : {} }))
+            passages: usedHits.slice(0, 8).map((h) => ({ d: h.metadata.docidentifier ?? "", a: h.metadata.clause_anchor ?? "", t: (h.text ?? "").slice(0, h.metadata.block === "table" ? 1400 : 600), b: h.metadata.block === "table" || void 0, ...h.metadata.table_selection ? { s: h.metadata.table_selection } : {} }))
           });
           telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang, void 0, telemetryMeta());
           const canonical = c2.text;
