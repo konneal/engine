@@ -23,6 +23,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      - name: guards (unpublished version; green CI on this exact commit)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view $(node -p "require('./package.json').name")@"$VERSION" version >/dev/null 2>&1; then
+            echo "::error::$VERSION is already on the registry — bump the version; never re-publish"
+            exit 1
+          fi
+          SHA=$(git rev-parse HEAD)
+          BAD=$(gh api "repos/${GITHUB_REPOSITORY}/commits/$SHA/check-runs" --jq '[.check_runs[] | select(.conclusion != "success") | .conclusion] | join(",")')
+          RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/commits/$SHA/check-runs" --jq '.check_runs | length')
+          if [ "$RUNS" -gt 0 ] && [ -n "$BAD" ]; then
+            echo "::error::CI on $SHA is not green ($BAD) — read CI before publishing"
+            exit 1
+          fi
       - name: dist freshness (never publish a stale build)
         run: |
           npm ci
