@@ -13,6 +13,10 @@ var MODELS = {
   member: "@cf/zai-org/glm-5.3-flash",
   // hot-path understanding/summarize stays on the cheap Qwen (cost-first lane)
   understand: "@cf/qwen/qwen3-30b-a3b-fp8",
+  // the api_call act's intent-to-act mapping (TODO.ai-platform/09) — the
+  // operations deployment points ACTS_MODEL at the stronger reasoning
+  // tier; the floor is the understand lane
+  acts: "@cf/qwen/qwen3-30b-a3b-fp8",
   // generation fallback when the answer model is unavailable
   fallback: "@cf/qwen/qwen3-30b-a3b-fp8",
   grader: "@cf/deepseek-ai/deepseek-v4-flash-0731",

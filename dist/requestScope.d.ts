@@ -32,8 +32,16 @@ export declare function entitlementScope(keys: Set<string>): Set<string> | null;
 /** Validate + intersect. Returns { error } when the request explicitly
  *  disables every dataset (a user error, not a scope). The corpora a
  *  dataset searches travel WITH the declaration (profile datasets.yaml,
- *  `corpora:`) — the engine maps no publisher names. */
-export declare function resolveRequestScope(body: any, member: unknown): RequestScope | {
+ *  `corpora:`) — the engine maps no publisher names.
+ *
+ *  `opts.keyWithEntitlements` (the key-tier licensed federation): an
+ *  API-key caller whose request carries a VALIDATED entitlement set is
+ *  admitted to the session-gated (federated) datasets — the key's
+ *  entitlement set is the licensed scope the internal lane honors; the
+ *  internal worker re-validates the key server-side before it answers. */
+export declare function resolveRequestScope(body: any, member: unknown, opts?: {
+    keyWithEntitlements?: boolean;
+}): RequestScope | {
     error: "empty-datasets";
 };
 /** The answer-cache salt: request-scoped context that materially changes

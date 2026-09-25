@@ -104,6 +104,11 @@ interface Extraction {
         source?: string;
     }>;
 }
+/** The traceability primitive, shared with the api_call act's body guard
+ *  (apicalls.ts): a value traces when it appears in the user's own
+ *  messages (normalized). The proposing model never gets the benefit of
+ *  the doubt — the user's words are the only source. */
+export declare function valueTracesToUser(value: unknown, userTurns: string[]): boolean;
 export interface GuardedFields {
     standard?: string;
     family_designation?: string;

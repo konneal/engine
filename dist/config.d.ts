@@ -4,6 +4,7 @@ export declare const MODELS: {
     readonly anon: "@cf/zai-org/glm-5.3-flash";
     readonly member: "@cf/zai-org/glm-5.3-flash";
     readonly understand: "@cf/qwen/qwen3-30b-a3b-fp8";
+    readonly acts: "@cf/qwen/qwen3-30b-a3b-fp8";
     readonly fallback: "@cf/qwen/qwen3-30b-a3b-fp8";
     readonly grader: "@cf/deepseek-ai/deepseek-v4-flash-0731";
     readonly enrich: "@cf/deepseek-ai/deepseek-v4-pro-0813";

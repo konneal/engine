@@ -1,6 +1,6 @@
 import {
   handleSearch
-} from "../../chunk-5LSEBH3J.js";
+} from "../../chunk-MNNE7OIM.js";
 import {
   bindModelNode,
   checkQuoteAnchors,
@@ -9,7 +9,7 @@ import {
   modelGroundingBlock,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-WSLADX7O.js";
+} from "../../chunk-YVC6HPXO.js";
 import {
   buildMessages,
   citations,
@@ -32,7 +32,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-NHHQAGBW.js";
+} from "../../chunk-DADOI4Q6.js";
 import {
   authenticate,
   corsHeaders,
@@ -41,14 +41,14 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-2RKYO3OC.js";
+} from "../../chunk-R2V3X6SQ.js";
 import {
   canonicalRefusal
 } from "../../chunk-A3QHHUN5.js";
 import {
   entitlementScope,
   standardKeysFrom
-} from "../../chunk-JGKSUSF5.js";
+} from "../../chunk-4GJGBGJK.js";
 import {
   LIMITS,
   MODELS,
@@ -59,7 +59,7 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-OMXAE27N.js";
+} from "../../chunk-V46XM2GU.js";
 import {
   P,
   setProfile
@@ -996,7 +996,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-GU554Y45.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-LGDQR43R.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-6HQFQP3F.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-EADF54TY.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });

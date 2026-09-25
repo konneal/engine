@@ -1,7 +1,7 @@
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-2RKYO3OC.js";
+} from "./chunk-R2V3X6SQ.js";
 import {
   DATASETS,
   LIMITS,
@@ -12,7 +12,7 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-OMXAE27N.js";
+} from "./chunk-V46XM2GU.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -21952,6 +21952,27 @@ function refCodec() {
 
 // workers/worker_public/src/context.ts
 var NO_CONTEXT = { kind: "none", scoped_to: null };
+var MACHINE_STATE_MAX = 60;
+var MACHINE_ACT_MAX = 24;
+var MACHINE_FIELD_MAX = 60;
+function parseMachine(v) {
+  if (!v || typeof v !== "object") return void 0;
+  const state = typeof v.state === "string" ? v.state.trim().slice(0, MACHINE_STATE_MAX) : "";
+  if (!state) return void 0;
+  const acts = [];
+  for (const a of Array.isArray(v.acts) ? v.acts.slice(0, MACHINE_ACT_MAX) : []) {
+    const action = typeof a?.action === "string" ? a.action.trim().slice(0, MACHINE_FIELD_MAX) : "";
+    const to = typeof a?.to === "string" ? a.to.trim().slice(0, MACHINE_FIELD_MAX) : "";
+    if (!action || !to) continue;
+    const guard = typeof a?.guard === "string" && a.guard.trim() ? a.guard.trim().slice(0, MACHINE_FIELD_MAX) : void 0;
+    acts.push({ action, to, ...guard ? { guard } : {} });
+  }
+  return { state, acts };
+}
+function machineOffers(machine, action) {
+  if (!machine) return false;
+  return machine.acts.some((a) => a.action === action);
+}
 function parseContext(body) {
   const c = body?.context;
   if (!c || typeof c !== "object") return null;
@@ -21960,7 +21981,8 @@ function parseContext(body) {
   const route = typeof c.route === "string" && c.route.trim() ? c.route.trim().slice(0, 200) : void 0;
   const doc = typeof c.doc === "string" && c.doc.trim() ? c.doc.trim().slice(0, 80) : void 0;
   const edition = typeof c.edition === "string" && /^\d{4}$/.test(c.edition.trim()) ? c.edition.trim() : void 0;
-  return { kind: c.kind, label, ...route ? { route } : {}, ...doc ? { doc } : {}, ...edition ? { edition } : {} };
+  const machine = c.kind === "entity" ? parseMachine(c.machine) : void 0;
+  return { kind: c.kind, label, ...route ? { route } : {}, ...doc ? { doc } : {}, ...edition ? { edition } : {}, ...machine ? { machine } : {} };
 }
 function parseDocRef(doc, edition) {
   return refCodec().parse(doc, edition);
@@ -21987,7 +22009,11 @@ function appliedContext(declared, scope, note, live) {
     label: declared.label,
     scoped_to: scope ? scope.label : null,
     ...note ? { note } : {},
-    ...live ? { live } : {}
+    ...live ? { live } : {},
+    // the affordance echo (TODO.ai-platform/08): the machine's state +
+    // the offered-act COUNT (the acts themselves are the platform's
+    // vocabulary, echoed back only bounded on the draft path)
+    ...declared.machine ? { machine: { state: declared.machine.state, offered: declared.machine.acts.length } } : {}
   };
 }
 function parseAppliedContext(v) {
@@ -22003,7 +22029,8 @@ function parseAppliedContext(v) {
     standard: v.model.standard.slice(0, 40),
     ...typeof v.model.clause === "string" && v.model.clause.trim() ? { clause: v.model.clause.slice(0, 120) } : {}
   } : void 0;
-  return { kind: v.kind, ...label ? { label } : {}, scoped_to: scoped, ...note ? { note } : {}, ...live ? { live } : {}, ...model ? { model } : {} };
+  const machine = v.machine && typeof v.machine === "object" && typeof v.machine.state === "string" && typeof v.machine.offered === "number" ? { state: v.machine.state.slice(0, MACHINE_STATE_MAX), offered: Math.min(Math.max(0, Math.floor(v.machine.offered)), MACHINE_ACT_MAX) } : void 0;
+  return { kind: v.kind, ...label ? { label } : {}, scoped_to: scoped, ...note ? { note } : {}, ...live ? { live } : {}, ...model ? { model } : {}, ...machine ? { machine } : {} };
 }
 function contextNote(declared, scope) {
   if (!declared) return void 0;
@@ -22014,7 +22041,8 @@ function contextNote(declared, scope) {
     return `Context note: the user is viewing ${declared.label || "a page"}${declared.route ? ` (${declared.route})` : ""} in the ${P().publisher.product_name} platform. The passages come from the general corpus; frame procedural guidance for that page when relevant.`;
   }
   if (declared.kind === "entity") {
-    return scope ? `Context note: the user is asking about ${declared.label || "an entity"} \u2014 the passages are scoped to ${scope.label}, the publication that governs it. You do NOT have the entity's own data; answer what the publication requires and say when the question needs the record itself.` : `Context note: the user is asking about ${declared.label || "an entity"}. You do NOT have the entity's own data; answer from the corpus passages and say when the question needs the record itself.`;
+    const machineSentence = declared.machine ? declared.machine.acts.length ? ` The entity's lifecycle machine is at ${declared.machine.state}; the acts it offers this user's role there are exactly: ${declared.machine.acts.map((a) => a.action).join(", ")}. Never propose an act outside that set.` : ` The entity's lifecycle machine is at ${declared.machine.state}, and it offers this user's role NO acts there \u2014 the user can read but not act; say so when they ask for an act, and propose nothing.` : "";
+    return scope ? `Context note: the user is asking about ${declared.label || "an entity"} \u2014 the passages are scoped to ${scope.label}, the publication that governs it. You do NOT have the entity's own data; answer what the publication requires and say when the question needs the record itself.${machineSentence}` : `Context note: the user is asking about ${declared.label || "an entity"}. You do NOT have the entity's own data; answer from the corpus passages and say when the question needs the record itself.${machineSentence}`;
   }
   return scope ? `Context note: the user scoped this question to ${scope.label} \u2014 the passages come from that publication. If they cannot answer the question, say so instead of drawing on other documents.` : `Context note: the user named ${declared.label || declared.doc || "a document"} as context, but it is not in the indexed corpus \u2014 answer from the general corpus and say the document was not found.`;
 }
@@ -22153,6 +22181,9 @@ function cfVectorIndex(index) {
     }
   };
 }
+function cfStore(db) {
+  return db;
+}
 
 // workers/worker_public/src/env.ts
 function portModelRunner(env) {
@@ -22161,6 +22192,9 @@ function portModelRunner(env) {
 function portIndex(env, which = "public") {
   const b = which === "public" ? env.VECTORIZE : which === "primmel" ? env.EXP_PRIMMEL : which === "composed" ? env.EXP_COMPOSED : which === "plain" ? env.EXP_PLAIN : which === "adoc" ? env.EXP_ADC : which === "mko" ? env.EXP_MKO : which === "pflat" ? env.EXP_PFLAT : env.GLOSSARY;
   return cfVectorIndex(b);
+}
+function portStore(env) {
+  return cfStore(env.DB);
 }
 function hasLane(env, which) {
   switch (which) {
@@ -24426,6 +24460,7 @@ export {
   ftsMatchQuery,
   refCodec,
   NO_CONTEXT,
+  machineOffers,
   parseContext,
   namedDocumentIn,
   resolveDocScope,
@@ -24434,6 +24469,7 @@ export {
   contextNote,
   syntheticUnderstanding,
   portModelRunner,
+  portStore,
   promptVars,
   fill,
   retrievalQuery,

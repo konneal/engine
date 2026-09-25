@@ -117,6 +117,43 @@ a corpus document. The service applies it honestly:
   declaration, not just the query) and is never written into them.
 - Conversational turns (greetings, identity) never ground in a declared
   context — the echo reports `none`.
+- The entity declaration may carry the affordance channel's `machine`
+  facet (TODO.ai-platform/08): the lifecycle machine's current `state`
+  (the fact) and the `acts` it offers there for the declaring user's
+  role (already role-filtered by the platform). The facet parses bounded
+  (state ≤ 60 chars, ≤ 24 acts, each `action`/`to`/`guard` ≤ 60), rides
+  the entity kind only, and BOUNDS the proposal grammar: a draft act the
+  set does not offer is never proposed, and an empty `acts` array is the
+  honest "the user can read but not act" — the answer says so and no
+  draft rides. The facet is advisory; the platform re-validates every
+  draft act authoritatively on the way back.
+
+```jsonc
+"context": {
+  "kind": "entity",
+  "label": "this application R60-2026-0042",
+  "route": "/app/ia/applications/R60-2026-0042",
+  "machine": {                            // the affordance channel — entity kind only
+    "state": "UNDER_REVIEW",              // the machine's current state (the fact)
+    "acts": [                             // offered FOR THE DECLARING USER'S ROLE — may be []
+      { "action": "ia_accepts", "to": "ACCEPTED" },
+      { "action": "ia_logs_samples", "to": "SAMPLES_RECEIVED", "guard": "receipt_complete" }
+    ]
+  }
+}
+```
+
+The echo carries the facet's fact + count, so the panel's honest context
+line reads the service's applied truth, never its own copy:
+
+```jsonc
+"context_applied": {
+  "kind": "entity",
+  "label": "this application R60-2026-0042",
+  "scoped_to": "OIML R 60:2021",
+  "machine": { "state": "UNDER_REVIEW", "offered": 2 }
+}
+```
 
 Every ask response — the SSE `citations`/`done` events and the JSON body —
 echoes what was APPLIED, so the panel's context line never invents a
@@ -245,6 +282,52 @@ The honest rules, all eval-gated (the golden suite's `draft-*` legs):
 
 **SSE**: the `draft` rides the first (`citations`) frame beside
 `context_applied`; `token` frames carry the answer; `done` as usual.
+
+##### The api_call act (TODO.ai-platform/09 — the operations deployment)
+
+The second draft act proposes ONE platform operation — the operations
+assistant's grammar, feature-flagged (`features.api_call_drafts`; the
+corpus-only deployment leaves it off):
+
+```jsonc
+"draft": {
+  "kind": "draft",
+  "act": "api_call",
+  "version": 1,
+  "title": "Save the R 60 filter",        // what the act DOES — never the wire shape
+  "prepared_at": "2026-09-26T09:00:00Z",
+  "requires_confirmation": true,           // ALWAYS
+  "call": {
+    "method": "PUT",                       // a real operation from the plane —
+    "path": "/api/notify/preferences",     // an invented path is a service bug
+    "body": { }                            // optional; preference bodies trace
+  }                                        // to the user's own words
+}
+```
+
+The honest rules (the module is structurally write-free — it reads the
+operation directory and calls the pick model; there is no platform IO):
+
+- **The directory is the closed world**: the call names an operation the
+  deployment's `api_ops` directory (loaded from the OpenAPI plane at
+  ingest) actually carries. The model proposes an operation id; the
+  guard resolves it against the directory AFTER the fact — an invented
+  id or path never rides.
+- **The machine facet bounds the machine acts** (§2.1.1): the entity
+  write composes only for an act the offered set carries, addressed to
+  the declared entity (the profile's route-pattern table maps the
+  page's route to the store and id). An empty offered set answers the
+  honest "you can read but not act" and proposes nothing.
+- **The never-offer list holds** (profile data, `publisher.acts
+  .never_offer`): the auth family (signout is the user's own, forever)
+  and the grant's own mint/revoke (delegation is granted by the user's
+  hand on the settings page, never by a chat message) are excluded from
+  the pick prompt AND refused at the guard.
+- **The act class is the platform's word, not the draft's**: the panel
+  pre-flights every api_call draft against the plane and the class
+  decides the arc — preference rides the standing grant's seam, record
+  confirms per act and executes as the user.
+
 The draft is ephemeral — the conversations API never persists it (a
 resumed session keeps the honest context line, not a stale draft).
 
