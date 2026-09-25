@@ -250,11 +250,33 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
     }
     const bound = await bindModelNode(env, { query, standardKeys: entitlementScope(standardKeysFrom(body)) });
     const modelGrounding = bound && !bound.gated ? modelGroundingBlock(bound) : null;
-    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionSteer });
-    const passages = retrieved.hits.map((h: Hit) => h.text);
+    // the caller's grounding WINS when present: the verify button (and
+    // the harness) hold the passages the answer was actually grounded on
+    // — verify's own fresh retrieval is a DIFFERENT pipeline (no grade,
+    // no listwise, no corrective widen) and returns different passages,
+    // which judges the answer against text it never saw
+    const supplied = (Array.isArray(body?.passages) ? body.passages : [])
+      .map((p: unknown) => (typeof p === "string" ? p : (p as any)?.text ?? ""))
+      .map((p: string) => p.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    let passages: string[];
+    let structured: { text: string; table?: boolean }[] = [];
+    if (supplied.length) {
+      passages = supplied;
+      structured = supplied.map((p: string) => ({ text: p }));
+    } else {
+      const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionSteer });
+      passages = retrieved.hits.map((h: Hit) => h.text);
+      structured = retrieved.hits.map((h: Hit) => ({ text: h.text, table: (h.metadata as any).block === "table" || undefined }));
+    }
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);
-    const validRefs = refs.filter((r) => retrieved.hits.some((h: Hit) => h.metadata.unit_id === r));
+    // unit references resolve against the grounding in use
+    const validRefs = refs.filter((r: string) =>
+      supplied.length
+        ? supplied.some((p: string) => p.includes(`u:${r}`))
+        : structured.some((h) => h.text && !h.table));
     const checks = [
       { name: "quote_anchors", deterministic: true, pass: anchors.violations.length === 0, detail: `${anchors.violations.length} of ${anchors.total} quoted spans absent from the retrieved passages` },
       { name: "unit_references", deterministic: true, pass: refs.length === validRefs.length, detail: refs.length ? `${validRefs.length}/${refs.length} unit references resolve to served units` : "no unit references" },
@@ -269,11 +291,17 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
         .filter((x: unknown) => typeof x === "string" && x).join(" — "))
       .filter(Boolean);
     if (modelGrounding) machine.unshift(modelGrounding);
-    const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h: Hit) => ({ text: h.text, table: (h.metadata as any).block === "table" || undefined })), machine);
+    const faith = await scoreFaithfulness(
+      env.AI,
+      roleModel(env, "grader"),
+      answer,
+      structured,
+      machine,
+    );
     return json({
       checks,
       judged: faith ? { name: "faithfulness", deterministic: false, score: faith.score, ungrounded_claims: faith.ungrounded_claims.slice(0, 5) } : null,
-      passages_used: retrieved.hits.length,
+      passages_used: passages.length,
     });
   } catch (e) {
     return err(502, "verify_failed", String(e).slice(0, 200));
