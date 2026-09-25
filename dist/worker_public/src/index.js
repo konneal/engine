@@ -1456,21 +1456,21 @@ async function verifyRoute(c) {
   try {
     const u = await understandQuery(env.AI, roleModel(env, "understand"), query, [], []);
     let lexicalBoost;
-    let editionExclude = null;
+    let editionSteer = null;
     try {
       const fam = u?.doc_number ? refCodec().familyOf(u.doc_number) : null;
       if (fam) {
         const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(fam).first().catch(() => null);
         if (row?.edition) {
           lexicalBoost = String(row.edition);
-          editionExclude = { doc_number: fam.split("-").pop() ?? "", edition: String(row.edition) };
+          editionSteer = { doc_number: fam.split("-").pop() ?? "", edition: String(row.edition) };
         }
       }
     } catch {
     }
     const bound = await bindModelNode(env, { query, standardKeys: entitlementScope(standardKeysFrom(body)) });
     const modelGrounding = bound && !bound.gated ? modelGroundingBlock(bound) : null;
-    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionExclude });
+    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionSteer });
     const passages = retrieved.hits.map((h) => h.text);
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);
