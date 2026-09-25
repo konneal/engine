@@ -13,7 +13,8 @@ import { ftsMatchQuery } from "./lexical";
 import { scoreFaithfulness } from "./faithfulness";
 import { checkQuoteAnchors } from "./anchors";
 import { namedDocumentIn } from "./context";
-import { standardForDocNumber } from "./modelplane";
+import { standardForDocNumber, bindModelNode, modelGroundingBlock } from "./modelplane";
+import { refCodec } from "./codecs";
 import { entitlementScope, standardKeysFrom } from "./requestScope";
 import type { Env } from "./env";
 export type { Env };
@@ -228,7 +229,24 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
   if (!answer || !query) return err(400, "invalid_input", "answer and query are required");
   try {
     const u = await understandQuery(env.AI, roleModel(env, "understand"), query, [], []);
-    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)) });
+    // the grounding must MIRROR the ask path's: the edition boost (the
+    // publication's active edition, the codec's family) and the model
+    // grounding — a verify that grounds against different passages than
+    // the answer used judges a different answer
+    let lexicalBoost: string | undefined;
+    try {
+      const fam = u?.doc_number ? refCodec().familyOf(u.doc_number) : null;
+      if (fam) {
+        const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1")
+          .bind(fam).first().catch(() => null);
+        if (row?.edition) lexicalBoost = String(row.edition);
+      }
+    } catch {
+      // degrade to unsteered retrieval
+    }
+    const bound = await bindModelNode(env, { query, standardKeys: entitlementScope(standardKeysFrom(body)) });
+    const modelGrounding = bound && !bound.gated ? modelGroundingBlock(bound) : null;
+    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost });
     const passages = retrieved.hits.map((h: Hit) => h.text);
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);
@@ -246,6 +264,7 @@ async function verifyRoute(c: RouteContext): Promise<Response> {
       .map((b: any) => [b.payload.check, b.payload.meaning, b.payload.definition, b.payload.violation_meaning]
         .filter((x: unknown) => typeof x === "string" && x).join(" — "))
       .filter(Boolean);
+    if (modelGrounding) machine.unshift(modelGrounding);
     const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h: Hit) => h.text), machine);
     return json({
       checks,

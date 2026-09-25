@@ -2,12 +2,14 @@ import {
   handleSearch
 } from "../../chunk-5LCPKJ6V.js";
 import {
+  bindModelNode,
   checkQuoteAnchors,
   handleAsk,
   handleMemories,
+  modelGroundingBlock,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-JVN6SQAT.js";
+} from "../../chunk-INCFGVH3.js";
 import {
   buildMessages,
   citations,
@@ -25,6 +27,7 @@ import {
   parseAppliedContext,
   portModelRunner,
   promptVars,
+  refCodec,
   retrieve,
   sessionFrom,
   telemetry,
@@ -390,7 +393,7 @@ function parseVerdict(text) {
 
 // workers/worker_public/src/faithfulness-context.ts
 function buildJudgeContext(passages, machine = []) {
-  const context = passages.slice(0, 8).map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 900)}`).join("\n");
+  const context = passages.slice(0, 8).map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 1400)}`).join("\n");
   const machineContext = machine.length ? "\n" + machine.slice(0, 6).map((m) => `[M] ${m.replace(/\s+/g, " ").slice(0, 400)}`).join("\n") : "";
   return context + machineContext;
 }
@@ -989,7 +992,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-Y7L6MDAV.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-4UK3RBEQ.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-KELYM6RJ.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-4UK3RBEQ.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1448,7 +1451,18 @@ async function verifyRoute(c) {
   if (!answer || !query) return err(400, "invalid_input", "answer and query are required");
   try {
     const u = await understandQuery(env.AI, roleModel(env, "understand"), query, [], []);
-    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)) });
+    let lexicalBoost;
+    try {
+      const fam = u?.doc_number ? refCodec().familyOf(u.doc_number) : null;
+      if (fam) {
+        const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(fam).first().catch(() => null);
+        if (row?.edition) lexicalBoost = String(row.edition);
+      }
+    } catch {
+    }
+    const bound = await bindModelNode(env, { query, standardKeys: entitlementScope(standardKeysFrom(body)) });
+    const modelGrounding = bound && !bound.gated ? modelGroundingBlock(bound) : null;
+    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost });
     const passages = retrieved.hits.map((h) => h.text);
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);
@@ -1459,6 +1473,7 @@ async function verifyRoute(c) {
       { name: "citations_present", deterministic: true, pass: new RegExp(`\\[[^\\]]*(${P().publisher.name})[^\\]]*\\]`).test(answer), detail: "normative claims should carry a passage citation" }
     ];
     const machine = (Array.isArray(body?.blocks) ? body.blocks : []).filter((b) => b?.type === "verdict" && b?.payload).map((b) => [b.payload.check, b.payload.meaning, b.payload.definition, b.payload.violation_meaning].filter((x) => typeof x === "string" && x).join(" \u2014 ")).filter(Boolean);
+    if (modelGrounding) machine.unshift(modelGrounding);
     const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h) => h.text), machine);
     return json({
       checks,

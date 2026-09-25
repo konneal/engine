@@ -7,7 +7,7 @@
 export function buildJudgeContext(passages: string[], machine: string[] = []): string {
   const context = passages
     .slice(0, 8)
-    .map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 900)}`)
+    .map((p, i) => `[${i + 1}] ${p.replace(/\s+/g, " ").slice(0, 1400)}`)
     .join("\n");
   const machineContext = machine.length
     ? "\n" + machine.slice(0, 6).map((m) => `[M] ${m.replace(/\s+/g, " ").slice(0, 400)}`).join("\n")
