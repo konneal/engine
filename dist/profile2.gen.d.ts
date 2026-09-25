@@ -63,7 +63,9 @@ export declare const PROFILE: {
         readonly corpora: {};
         readonly bibliography: {};
         readonly terminology: {};
-        readonly models: {};
+        readonly models: {
+            readonly standard_prefix: "atlas-s";
+        };
     };
     readonly ui: {
         readonly suggestions: readonly ["What does ATLAS 12 specify?", "Which errata are open?"];
