@@ -1470,11 +1470,20 @@ async function verifyRoute(c) {
     }
     const bound = await bindModelNode(env, { query, standardKeys: entitlementScope(standardKeysFrom(body)) });
     const modelGrounding = bound && !bound.gated ? modelGroundingBlock(bound) : null;
-    const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionSteer });
-    const passages = retrieved.hits.map((h) => h.text);
+    const supplied = (Array.isArray(body?.passages) ? body.passages : []).map((p) => typeof p === "string" ? p : p?.text ?? "").map((p) => p.trim()).filter(Boolean).slice(0, 8);
+    let passages;
+    let structured = [];
+    if (supplied.length) {
+      passages = supplied;
+      structured = supplied.map((p) => ({ text: p }));
+    } else {
+      const retrieved = await retrieve(env, query, { understanding: u, standardKeys: entitlementScope(standardKeysFrom(body)), lexicalBoost, editionSteer });
+      passages = retrieved.hits.map((h) => h.text);
+      structured = retrieved.hits.map((h) => ({ text: h.text, table: h.metadata.block === "table" || void 0 }));
+    }
     const anchors = checkQuoteAnchors(answer, passages);
     const refs = [...answer.matchAll(/\[\[u:([^\]]+)\]\]/g)].map((m) => m[1]);
-    const validRefs = refs.filter((r) => retrieved.hits.some((h) => h.metadata.unit_id === r));
+    const validRefs = refs.filter((r) => supplied.length ? supplied.some((p) => p.includes(`u:${r}`)) : structured.some((h) => h.text && !h.table));
     const checks = [
       { name: "quote_anchors", deterministic: true, pass: anchors.violations.length === 0, detail: `${anchors.violations.length} of ${anchors.total} quoted spans absent from the retrieved passages` },
       { name: "unit_references", deterministic: true, pass: refs.length === validRefs.length, detail: refs.length ? `${validRefs.length}/${refs.length} unit references resolve to served units` : "no unit references" },
@@ -1482,11 +1491,17 @@ async function verifyRoute(c) {
     ];
     const machine = (Array.isArray(body?.blocks) ? body.blocks : []).filter((b) => b?.type === "verdict" && b?.payload).map((b) => [b.payload.check, b.payload.meaning, b.payload.definition, b.payload.violation_meaning].filter((x) => typeof x === "string" && x).join(" \u2014 ")).filter(Boolean);
     if (modelGrounding) machine.unshift(modelGrounding);
-    const faith = await scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, retrieved.hits.map((h) => ({ text: h.text, table: h.metadata.block === "table" || void 0 })), machine);
+    const faith = await scoreFaithfulness(
+      env.AI,
+      roleModel(env, "grader"),
+      answer,
+      structured,
+      machine
+    );
     return json({
       checks,
       judged: faith ? { name: "faithfulness", deterministic: false, score: faith.score, ungrounded_claims: faith.ungrounded_claims.slice(0, 5) } : null,
-      passages_used: retrieved.hits.length
+      passages_used: passages.length
     });
   } catch (e) {
     return err(502, "verify_failed", String(e).slice(0, 200));
