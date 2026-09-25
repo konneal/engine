@@ -18,6 +18,7 @@ import {
   parseContext,
   portModelRunner,
   rawSessionToken,
+  refCodec,
   resolveDocScope,
   resolveLiveAccount,
   retrievalQuery,
@@ -27,7 +28,7 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-WKG65DBA.js";
+} from "./chunk-4G5OGWXY.js";
 import {
   corsHeaders,
   err,
@@ -2014,19 +2015,16 @@ ${summary}` }] : [],
   if (aggregationVerdict) console.log("aggregation engine:", aggregationVerdict.operation, aggregationVerdict.table, "\u2192", aggregationVerdict.value);
   let boundaryNote = null;
   let boundaryBoost;
-  let modelEditionBoost;
-  if (boundModel && !boundModel.gated) {
-    const prefix = String(P().sources?.models?.standard_prefix ?? "");
-    if (prefix && boundModel.standard.startsWith(prefix)) {
-      const num3 = boundModel.standard.slice(prefix.length);
-      const family = `${prefix.slice(prefix.lastIndexOf("-") + 1).toUpperCase()}-${num3}`;
-      const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(family).first().catch(() => null);
-      if (row?.edition) modelEditionBoost = String(row.edition);
-    } else {
-      modelEditionBoost = boundModel.standard;
+  let editionBoost;
+  try {
+    const fam = understanding?.doc ? refCodec().familyOf(understanding.doc) : null;
+    if (fam) {
+      const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(fam).first().catch(() => null);
+      if (row?.edition) editionBoost = String(row.edition);
     }
+  } catch {
   }
-  const lexicalBoost = [boundaryBoost, modelEditionBoost].filter(Boolean).join(" ") || void 0;
+  const lexicalBoost = [boundaryBoost, editionBoost].filter(Boolean).join(" ") || void 0;
   if (P().sources?.licensed?.length) {
     const match = matchLicensedTopic(q.query, P().sources.licensed);
     if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
