@@ -237,7 +237,7 @@ async function handleAsk(
   // the latency program's clock: every telemetry write below reports the
   // wall time from request entry to its own exit
   const tStart = Date.now();
-  const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null });
+  const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null, retries: generateRetries });
   // the latency anatomy, surfaced as standard Server-Timing headers on
   // the JSON response — the reduction program's per-stage data
   const stageTiming: Record<string, number> = {};
