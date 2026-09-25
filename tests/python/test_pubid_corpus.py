@@ -96,16 +96,25 @@ def test_testsuite_dual_published_resolves_the_oiml_side():
     assert checked >= 2, f"only {checked} dual cases exercised — the merged corpus is missing"
 
 
-def test_testsuite_rejections_never_match():
-    rej_file = Path(TESTSUITE_DIR) / "_rejections.yaml"
+def test_testsuite_negative_cases_never_match():
+    rej_file = Path(TESTSUITE_DIR) / "_negative.yaml"
     if not rej_file.is_file():
         return
-    for rej in yaml.safe_load(rej_file.read_text()) or []:
-        m = FAMILY_RE.search(str(rej).upper())
+    checked = 0
+    for case in yaml.safe_load(rej_file.read_text()) or []:
+        rej = str(case.get("input") or "")
+        if not rej:
+            continue
+        m = FAMILY_RE.search(rej.upper())
         if m and m.group(1) in "RDBGEVS":
-            continue  # a valid shape in prose: the scan legitimately extracts
-        refs = dict(codec.cited_refs(str(rej)))
+            # a valid shape inside prose ("extra words here"): the scan is a
+            # SEARCH and legitimately extracts it — only the shape-invalid
+            # cases (X 99, CS XX, non-OIML) must never match
+            continue
+        refs = dict(codec.cited_refs(rej))
         assert not any(nid.startswith("cite:OIML-") for nid in refs), rej
+        checked += 1
+    assert checked >= 3, f"only {checked} negative cases exercised — the corpus load is broken"
 
 
 def test_normalize_cite_is_pubid_shaped():
