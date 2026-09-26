@@ -37,6 +37,7 @@ export type { Env };
 import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
 import { clientIp, checkQuota, telemetry } from "./quota";
 import { graphExpand, editionNote } from "./graph";
+import { registerNote, searchRegister } from "./certificates";
 import { P } from "./profile.ts";
 
 /** User-uploaded image for multimodal questions: a data URL
@@ -577,6 +578,12 @@ async function handleAsk(
   console.log("understand:", understanding?.intent ?? "null", understanding?.doc_number ? `doc#${understanding.doc_number}${understanding.edition ? "@" + understanding.edition : ""}` : "nodoc", "|", q.query.slice(0, 50));
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);
+  // the certificate register as a database (TODO.new-era/6): a
+  // register-shaped question queries the D1 table directly and the rows
+  // join the prompt as an authoritative note — exact matches, never a
+  // similarity guess about certification standing
+  const register = await searchRegister(env.DB, q.query);
+  const regNote = register ? registerNote(register.rows) : undefined;
 
   // semantic cache: near-duplicate of a recently answered question —
   // serves the stored answer with a `similar: true` marker (checked only
@@ -1108,7 +1115,7 @@ async function handleAsk(
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
