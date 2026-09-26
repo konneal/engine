@@ -43,8 +43,11 @@ export function routeMatchesPath(pattern: string, path: string): Record<string, 
 }
 
 export function matchRoute(routes: Route[], method: string, path: string): { route: Route; params: Record<string, string> } | null {
+  // HEAD rides the GET route (the fetch pipeline strips the body) — a
+  // bare HEAD / must not answer 405 to link previewers and probes.
+  const effective = method === "HEAD" ? "GET" : method;
   for (const route of routes) {
-    if (route.method !== method && route.method !== "*") continue;
+    if (route.method !== effective && route.method !== "*") continue;
     const params = routeMatchesPath(route.pattern, path);
     if (params) return { route, params };
   }

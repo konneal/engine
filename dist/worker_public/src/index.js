@@ -1028,8 +1028,9 @@ function routeMatchesPath(pattern, path) {
   return params;
 }
 function matchRoute(routes, method, path) {
+  const effective = method === "HEAD" ? "GET" : method;
   for (const route of routes) {
-    if (route.method !== method && route.method !== "*") continue;
+    if (route.method !== effective && route.method !== "*") continue;
     const params = routeMatchesPath(route.pattern, path);
     if (params) return { route, params };
   }

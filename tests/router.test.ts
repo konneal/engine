@@ -43,3 +43,11 @@ test("routeMatchesPath: params, wildcards, segment exactness", () => {
   assert.deepEqual(routeMatchesPath("/a", "/a/"), {}, "trailing slashes are equivalent");
   assert.equal(routeMatchesPath("/a", "/b"), null);
 });
+
+test("HEAD rides the GET route (no 405 for link previewers)", async (t) => {
+  const { matchRoute } = await import("../workers/shared/router.ts");
+  const routes = [{ method: "GET", pattern: "/", handler: async () => new Response("ok") }];
+  assert.ok(matchRoute(routes, "HEAD", "/"));
+  assert.ok(matchRoute(routes, "GET", "/"));
+  assert.equal(matchRoute(routes, "POST", "/"), null);
+});
