@@ -19,7 +19,7 @@ import { canonicalRefusal } from "./refusal";
 import { contractV2, tableRetyped } from "./refs";
 import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
-import { liveDataConfig, liveTokenFor, opTokenMember, resolveLiveAccount, type LiveRecord } from "./livedata";
+import { liveDataConfig, liveTokenFor, opCfg, opTokenMember, resolveLiveAccount, type LiveRecord } from "./livedata";
 import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, licensedEntryForPackage, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./conditions";
@@ -291,7 +291,7 @@ async function handleAsk(
   // bearer → the OP's introspection answer admits a member-READ
   // credential (livedata.ts). No sessionRaw behind it, so the draft and
   // live-data lanes keep their honest "unsigned" refusals.
-  const opMember = !session && tier === "member" ? await opTokenMember(env, { issuer: (env.OIDC_ISSUER ?? "").trim(), clientId: String(env.OIDC_CLIENT_ID ?? "") }, req) : null;
+  const opMember = !session && tier === "member" ? await opTokenMember(env, opCfg(env), req) : null;
   const member: SessionClaims | null = session
     ?? (opMember
       ? {

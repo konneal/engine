@@ -23806,6 +23806,14 @@ async function resolveLiveAccount(env, sessionRaw, member) {
 function deviceClientIds(env) {
   return String(env.OIDC_DEVICE_CLIENT_IDS ?? "").split(/[\s,]+/).filter(Boolean);
 }
+function opCfg(env) {
+  return { issuer: String(env.OIDC_ISSUER ?? "").trim().replace(/\/+$/, ""), clientId: String(env.OIDC_CLIENT_ID ?? "") };
+}
+function opMemberCanWrite(member) {
+  if (!member) return false;
+  if (member.via !== "op-token") return true;
+  return /\bwrite\b/.test(member.scope ?? "");
+}
 function opMemberFromIntrospection(answer, ids) {
   if (!answer?.active) return null;
   const clientId = String(answer.client_id ?? "");
@@ -24578,6 +24586,8 @@ export {
   liveDataConfig,
   liveTokenFor,
   resolveLiveAccount,
+  opCfg,
+  opMemberCanWrite,
   opTokenMember,
   handleLogin,
   handleCallback,

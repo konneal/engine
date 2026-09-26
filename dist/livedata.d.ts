@@ -91,11 +91,25 @@ export declare function resolveLiveAccount(env: any, sessionRaw: string | null, 
 /** The device-grant clients this deployment admits. Empty = the tier is
  *  off (a Bearer token that is not a service session stays anonymous). */
 export declare function deviceClientIds(env: any): string[];
+/** The introspection call's OP coordinates, read once per call site. */
+export declare function opCfg(env: any): {
+    issuer: string;
+    clientId: string;
+};
 export interface OpMember {
     sub: string;
     scope: string;
     via: "op-token";
 }
+/** Mutations through the device-grant bearer (memories, conversations,
+ *  projects — the member's OWN data) need the token's scope to state a
+ *  write. The grammar is the OP's PAT vocabulary (`<service>:write`);
+ *  a read-only approval stays read-only here, and service sessions
+ *  (the browser) are always full-strength. */
+export declare function opMemberCanWrite(member: {
+    via?: string;
+    scope?: string;
+} | null): boolean;
 /** The introspection answer → the member credential, judged against the
  *  deployment's allowlist. Inactive, foreign-client or subject-less
  *  answers all resolve to null — never to a widened guess. */

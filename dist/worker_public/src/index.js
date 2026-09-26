@@ -1,6 +1,6 @@
 import {
   handleSearch
-} from "../../chunk-ACH3SUYT.js";
+} from "../../chunk-YEAAGFHB.js";
 import {
   bindModelNode,
   checkQuoteAnchors,
@@ -9,7 +9,7 @@ import {
   modelGroundingBlock,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-L63E7GRC.js";
+} from "../../chunk-SEOQWW77.js";
 import {
   buildMessages,
   citations,
@@ -24,6 +24,8 @@ import {
   handleLogout,
   handleMe,
   namedDocumentIn,
+  opCfg,
+  opMemberCanWrite,
   opTokenMember,
   parseAppliedContext,
   portModelRunner,
@@ -33,7 +35,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-2AQYUGLB.js";
+} from "../../chunk-37FSCXBQ.js";
 import {
   authenticate,
   corsHeaders,
@@ -997,7 +999,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-I3PTT3MW.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-EC665NLS.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-J6NGXPOD.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-V6M4KASL.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1308,30 +1310,54 @@ async function serveIndexPage(c) {
   }
   return err(404, "not_found", "Page not found");
 }
-async function memoriesRoute(c) {
+var MUTATING_METHODS = /* @__PURE__ */ new Set(["POST", "PUT", "PATCH", "DELETE"]);
+async function opIdentity(c, signIn) {
   const session = await sessionFrom(c.req, c.env);
-  if (!session) return withCors(err(401, "unauthorized", "Sign in to use memory files"), corsHeaders(c.req));
-  return withCors(await handleMemories(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+  if (session) return { sub: session.sub, write: true };
+  const member = await opTokenMember(c.env, opCfg(c.env), c.req);
+  if (!member) return err(401, "unauthorized", signIn);
+  return { sub: member.sub, write: opMemberCanWrite(member) };
+}
+function opWriteRefused(c, who) {
+  if (!(who instanceof Response) && MUTATING_METHODS.has(c.req.method) && !who.write) {
+    return err(403, "forbidden", "This sign-in grants read only \u2014 request a write scope at login.");
+  }
+  return null;
+}
+async function memoriesRoute(c) {
+  const who = await opIdentity(c, "Sign in to use memory files");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  return withCors(await handleMemories(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 async function projectsRoute(c) {
-  const session = await sessionFrom(c.req, c.env);
-  if (!session) return withCors(err(401, "unauthorized", "Sign in to use projects"), corsHeaders(c.req));
-  return withCors(await handleProjects(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+  const who = await opIdentity(c, "Sign in to use projects");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  return withCors(await handleProjects(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 async function projectFilesRoute(c) {
-  const session = await sessionFrom(c.req, c.env);
-  if (!session) return withCors(err(401, "unauthorized", "Sign in to use projects"), corsHeaders(c.req));
-  return withCors(await handleProjectFiles(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+  const who = await opIdentity(c, "Sign in to use projects");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  return withCors(await handleProjectFiles(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 async function conversationsRoute(c) {
-  const session = await sessionFrom(c.req, c.env);
-  if (!session) return withCors(err(401, "unauthorized", "Sign in to sync your conversations across devices"), corsHeaders(c.req));
-  return withCors(await handleConversations(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+  const who = await opIdentity(c, "Sign in to sync your conversations across devices");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  return withCors(await handleConversations(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 async function appendMessageRoute(c) {
-  const session = await sessionFrom(c.req, c.env);
-  if (!session) return withCors(err(401, "unauthorized", "Sign in to sync your conversations across devices"), corsHeaders(c.req));
-  return withCors(await handleAppendMessage(c.env, session.sub, c.req, c.params.id), corsHeaders(c.req));
+  const who = await opIdentity(c, "Sign in to sync your conversations across devices");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  return withCors(await handleAppendMessage(c.env, who.sub, c.req, c.params.id), corsHeaders(c.req));
 }
 async function shareRoute(c) {
   const session = await sessionFrom(c.req, c.env);
@@ -1361,7 +1387,7 @@ async function tierFor(c) {
   }
   let tier = isApi ? "key" : "anon";
   if (!isApi && await sessionFrom(c.req, c.env)) tier = "member";
-  else if (!isApi && await opTokenMember(c.env, { issuer: (c.env.OIDC_ISSUER ?? "").trim(), clientId: String(c.env.OIDC_CLIENT_ID ?? "") }, c.req)) tier = "member";
+  else if (!isApi && await opTokenMember(c.env, opCfg(c.env), c.req)) tier = "member";
   return { tier, key };
 }
 async function mcpRoute(c) {
