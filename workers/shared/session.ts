@@ -14,6 +14,16 @@ export interface SessionClaims {
   roles: string[];
   iat: number;
   exp: number;
+  /** the credential kind: absent = the service session; "delegated" =
+   *  the OP-minted RFC 8693 bearer (TODO.ai-platform/12 — the session
+   *  bridge; delegated.ts) */
+  via?: "delegated";
+  /** the delegating surface (the delegated bearer's act.sub — the
+   *  platform instance's OP client) */
+  delegator?: string;
+  /** the delegated bearer's granted scope string (the platform read
+   *  cone it carries — livedata reads through it directly) */
+  scope?: string;
 }
 
 export const SESSION_COOKIE = "rag_session";

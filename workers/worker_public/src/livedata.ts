@@ -186,6 +186,28 @@ export async function exchangeForLiveToken(env: any, sessionRaw: string): Promis
   return { ok: true, token: granted.access_token };
 }
 
+/** The live read token for one ask (TODO.ai-platform/12 — the session
+ *  bridge): when the member arrived on the delegated bearer, the Bearer
+ *  IS already the OP-minted platform-scoped JWT — the platform exchanged
+ *  it before forwarding, so a second exchange here would have no subject
+ *  token to ride (the bubble never signed into THIS service). If the
+ *  token's scope cone covers the platform read, present it directly;
+ *  otherwise (a service session, or a delegation that never scoped the
+ *  platform in) fall through to the RFC 8693 exchange. */
+export async function liveTokenFor(
+  env: any,
+  sessionRaw: string,
+  member: { via?: string; scope?: string } | null,
+): Promise<LiveTokenVerdict> {
+  const cfg = liveDataConfig(env);
+  if (!cfg) return { ok: false, reason: "not_configured" };
+  if (member?.via === "delegated" && typeof member.scope === "string") {
+    const need = `${cfg.platformClientId}:read`;
+    if (member.scope.split(/\s+/).includes(need)) return { ok: true, token: sessionRaw };
+  }
+  return exchangeForLiveToken(env, sessionRaw);
+}
+
 // ── the platform reads (the records the answer grounds in) ───────────
 
 export interface LiveRecord {
@@ -357,12 +379,12 @@ export type LiveAccount =
 export async function resolveLiveAccount(
   env: any,
   sessionRaw: string | null,
-  member: { sub: string } | null,
+  member: { sub: string; via?: string; scope?: string } | null,
 ): Promise<LiveAccount> {
   if (!member || !sessionRaw) return { status: "unavailable", reason: "sign_in_required" };
   const cfg = liveDataConfig(env);
   if (!cfg) return { status: "unavailable", reason: "not_configured" };
-  const exchanged = await exchangeForLiveToken(env, sessionRaw);
+  const exchanged = await liveTokenFor(env, sessionRaw, member);
   if (!exchanged.ok) return { status: "unavailable", reason: exchanged.reason };
   const read = await readMyAccount(env, cfg, exchanged.token);
   if (!read.ok) return { status: "unavailable", reason: read.reason };

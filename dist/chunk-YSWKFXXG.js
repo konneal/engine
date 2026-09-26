@@ -8,12 +8,12 @@ import {
   contextNote,
   editionNote,
   embed,
-  exchangeForLiveToken,
   generateOnce,
   graphExpand,
   identityNote,
   listwiseRerank,
   liveDataConfig,
+  liveTokenFor,
   machineOffers,
   namedDocumentIn,
   parseContext,
@@ -30,7 +30,7 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-JHFYBPRD.js";
+} from "./chunk-GHDRKT4K.js";
 import {
   corsHeaders,
   err,
@@ -2138,7 +2138,7 @@ ${summary}` }] : [],
     if (!member || !sessionRaw) delegation = { status: "unsigned" };
     else if (!liveCfg) delegation = { status: "not_configured" };
     else {
-      const exchanged = await exchangeForLiveToken(env, sessionRaw);
+      const exchanged = await liveTokenFor(env, sessionRaw, member);
       delegation = exchanged.ok ? { status: "ok", token: exchanged.token } : { status: exchanged.reason };
     }
     const verdict = await prepareDraft(env, {

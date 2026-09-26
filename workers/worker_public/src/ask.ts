@@ -19,7 +19,7 @@ import { canonicalRefusal } from "./refusal";
 import { contractV2, tableRetyped } from "./refs";
 import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
-import { exchangeForLiveToken, liveDataConfig, resolveLiveAccount, type LiveRecord } from "./livedata";
+import { liveDataConfig, liveTokenFor, resolveLiveAccount, type LiveRecord } from "./livedata";
 import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, licensedEntryForPackage, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./conditions";
@@ -662,7 +662,7 @@ async function handleAsk(
     if (!member || !sessionRaw) delegation = { status: "unsigned" as const };
     else if (!liveCfg) delegation = { status: "not_configured" as const };
     else {
-      const exchanged = await exchangeForLiveToken(env, sessionRaw);
+      const exchanged = await liveTokenFor(env, sessionRaw, member);
       delegation = exchanged.ok
         ? { status: "ok" as const, token: exchanged.token }
         : { status: exchanged.reason };

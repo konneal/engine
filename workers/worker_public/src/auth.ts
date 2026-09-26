@@ -15,6 +15,7 @@ import {
 } from "./oidc";
 import { clearSessionCookie, mintSessionCookie, mintSessionToken, rawSessionToken, readSession, sessionCookieFromToken, SessionClaims } from "./session";
 import { renewSessionClaims } from "./oidc-refresh";
+import { delegatedBearerFrom } from "./delegated";
 import { retainRefreshToken } from "./livedata";
 import { bubbleConfirmPage, isAllowedBubbleOrigin } from "./bubble";
 import { dropOpAccessToken, retainOpAccessToken } from "./livedata";
@@ -214,7 +215,12 @@ export async function handleCallback(env: any, req: Request): Promise<Response> 
 }
 
 export async function sessionFrom(req: Request, env: any): Promise<SessionClaims | null> {
-  return readSession(req, authConfig(env)?.sessionSecret);
+  const session = await readSession(req, authConfig(env)?.sessionSecret);
+  if (session) return session;
+  // The session bridge (TODO.ai-platform/12): no service session, but the
+  // Bearer may be the OP-minted delegated JWT the platform-embedded bubble
+  // forwards — admit it as the member principal when the profile opts in.
+  return delegatedBearerFrom(req, env);
 }
 
 export async function handleMe(env: any, req: Request): Promise<Response> {
