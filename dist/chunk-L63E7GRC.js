@@ -16,6 +16,7 @@ import {
   liveTokenFor,
   machineOffers,
   namedDocumentIn,
+  opTokenMember,
   parseContext,
   portModelRunner,
   portStore,
@@ -30,7 +31,7 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-GHDRKT4K.js";
+} from "./chunk-2AQYUGLB.js";
 import {
   corsHeaders,
   err,
@@ -1895,7 +1896,16 @@ async function handleAsk(env, ctx, req, tier, key) {
   const declaredCtx = parseContext(body);
   const draftAct = P().publisher.features?.drafts ? detectDraftIntent(q.query) : null;
   const apiCallIntent = !draftAct && P().publisher.features?.api_call_drafts ? detectApiCallIntent(q.query, declaredCtx) : null;
-  const member = tier === "member" ? await sessionFrom(req, env) : null;
+  const session = tier === "member" ? await sessionFrom(req, env) : null;
+  const opMember = !session && tier === "member" ? await opTokenMember(env, { issuer: (env.OIDC_ISSUER ?? "").trim(), clientId: String(env.OIDC_CLIENT_ID ?? "") }, req) : null;
+  const member = session ?? (opMember ? {
+    sub: opMember.sub,
+    roles: [],
+    iat: Math.floor(Date.now() / 1e3),
+    exp: Math.floor(Date.now() / 1e3) + 3600,
+    via: "op-token",
+    scope: opMember.scope
+  } : null);
   const effort = requestEffort(env, member, body?.effort);
   const limit = tier === "key" ? key.day_limit : tier === "member" || member ? num(env, "MEMBER_DAY_ASK", 300) : num(env, "ANON_DAY_ASK", 20);
   const bucketId = tier === "key" ? `key:${key.id}` : member ? `sub:${member.sub}` : clientIp(req);

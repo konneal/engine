@@ -23803,6 +23803,47 @@ async function resolveLiveAccount(env, sessionRaw, member) {
   if (!read.ok) return { status: "unavailable", reason: read.reason };
   return { status: "ok", records: read.records, stores: read.stores, readAt: read.readAt };
 }
+function deviceClientIds(env) {
+  return String(env.OIDC_DEVICE_CLIENT_IDS ?? "").split(/[\s,]+/).filter(Boolean);
+}
+function opMemberFromIntrospection(answer, ids) {
+  if (!answer?.active) return null;
+  const clientId = String(answer.client_id ?? "");
+  if (!ids.includes(clientId)) return null;
+  const sub = String(answer.sub ?? "");
+  if (!sub) return null;
+  return { sub, scope: String(answer.scope ?? ""), via: "op-token" };
+}
+async function opTokenMember(env, cfg, req) {
+  const m = /^Bearer\s+(.+)$/i.exec((req.headers.get("Authorization") ?? "").trim());
+  const token = m?.[1]?.trim();
+  if (!token || token.split(".").length === 3) return null;
+  const ids = deviceClientIds(env);
+  if (!ids.length || !cfg.issuer || !cfg.clientId) return null;
+  const key = `opint:${await sha256Hex2(token)}`;
+  let answer = null;
+  try {
+    answer = await env.CACHE.get(key, "json");
+  } catch {
+  }
+  if (answer === void 0 || answer === null) {
+    try {
+      const res = await fetch(`${cfg.issuer}/op/introspect`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token, client_id: cfg.clientId })
+      });
+      answer = res.ok ? await res.json() : { active: false };
+    } catch {
+      return null;
+    }
+    try {
+      await env.CACHE.put(key, JSON.stringify(answer ?? { active: false }), { expirationTtl: 45 });
+    } catch {
+    }
+  }
+  return opMemberFromIntrospection(answer, ids);
+}
 
 // workers/worker_public/src/oidc.ts
 var OidcError = class extends Error {
@@ -24537,6 +24578,7 @@ export {
   liveDataConfig,
   liveTokenFor,
   resolveLiveAccount,
+  opTokenMember,
   handleLogin,
   handleCallback,
   sessionFrom,

@@ -31,6 +31,11 @@ export interface Env {
     OIDC_CLIENT_ID?: string;
     OIDC_CLIENT_SECRET?: string;
     OIDC_REDIRECT_URI?: string;
+    /** TODO.ai-platform/14 — the Ommisa tier: the OP device-grant client
+     *  ids (comma/space separated) whose opaque access tokens this
+     *  deployment admits as member-read credentials via introspection.
+     *  Empty/absent = the tier is off. */
+    OIDC_DEVICE_CLIENT_IDS?: string;
     SESSION_SECRET?: string;
     /** TODO.ai-platform/03 — the "my account" live-data delegation: the
      *  platform instance's API base + its client id at the OP (the
