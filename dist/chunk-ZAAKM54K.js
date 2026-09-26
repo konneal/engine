@@ -1777,7 +1777,6 @@ function registerTokens(query) {
     "valid",
     "suspended",
     "revoked",
-    "oiml",
     "recommendation",
     "per",
     "under",
@@ -1801,9 +1800,11 @@ function registerTokens(query) {
     "show"
   ]);
   const tokens2 = [];
+  const publisherWord = P().publisher.name.toLowerCase();
   for (const w of query.split(/[^A-Za-z0-9&-]+/)) {
     if (w.length < 2) continue;
     if (stop.has(w.toLowerCase())) continue;
+    if (w.toLowerCase() === publisherWord) continue;
     if (/^\d+$/.test(w) && w.length < 2) continue;
     if (!tokens2.includes(w)) tokens2.push(w);
   }
@@ -1824,7 +1825,7 @@ async function searchRegister(db, query) {
 }
 function registerNote(rows) {
   if (!rows.length) {
-    return "Certificate register: NO certificate matching the asked holder or model appears in the OIML-CS register snapshot. State plainly that no such certificate is in this register, and that the register is a snapshot rather than the live certification status.";
+    return `Certificate register: NO certificate matching the asked holder or model appears in the ${P().publisher.name}-CS register snapshot. State plainly that no such certificate is in this register, and that the register is a snapshot rather than the live certification status.`;
   }
   const lines = rows.map((r) => `- ${r.num}: holder ${r.holder}, model "${r.model}"${r.year ? `, issued ${r.year}` : ""} \u2014 status ${r.status}`);
   return [
