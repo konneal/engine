@@ -431,15 +431,35 @@ export function opMemberCanWrite(member: { via?: string; scope?: string } | null
 }
 
 /** The introspection answer → the member credential, judged against the
- *  deployment's allowlist. Inactive, foreign-client or subject-less
- *  answers all resolve to null — never to a widened guess. */
-export function opMemberFromIntrospection(answer: any, ids: string[]): OpMember | null {
+ *  deployment's two allowlists. The OP answers client-bearing tokens
+ *  WITH client_id (the access-token table, the machine JWTs) and its
+ *  PAT form WITHOUT one — a PAT's identity on the wire is its granted
+ *  SERVICES (the PAT grammar's whole vocabulary). So the deployment
+ *  names device-grant clients (OIDC_DEVICE_CLIENT_IDS) and, separately,
+ *  the services whose personal access tokens it admits
+ *  (OIDC_PAT_SERVICES). Both lists empty = the tier stays off; a token
+ *  matching neither list resolves to null — never a widened guess. */
+export function opMemberFromIntrospection(answer: any, ids: string[], patServices: string[] = []): OpMember | null {
   if (!answer?.active) return null;
-  const clientId = String(answer.client_id ?? "");
-  if (!ids.includes(clientId)) return null;
   const sub = String(answer.sub ?? "");
   if (!sub) return null;
-  return { sub, scope: String(answer.scope ?? ""), via: "op-token" };
+  const clientId = String(answer.client_id ?? "");
+  if (clientId) {
+    if (!ids.includes(clientId)) return null;
+    return { sub, scope: String(answer.scope ?? ""), via: "op-token" };
+  }
+  if (!patServices.length) return null;
+  const scope = String(answer.scope ?? "");
+  const services = scope.split(/\s+/).filter(Boolean).map((s) => s.split(":")[0]);
+  if (!services.some((s) => patServices.includes(s))) return null;
+  return { sub, scope, via: "op-token" };
+}
+
+/** The PAT-services allowlist (see opMemberFromIntrospection). */
+export function patServiceIds(env: any): string[] {
+  return String(env.OIDC_PAT_SERVICES ?? "")
+    .split(/[\s,]+/)
+    .filter(Boolean);
 }
 
 /** The Bearer read + introspection, KV-cached 45s keyed by the token's
@@ -482,5 +502,5 @@ export async function opTokenMember(
       /* cacheless = introspect per ask */
     }
   }
-  return opMemberFromIntrospection(answer, ids);
+  return opMemberFromIntrospection(answer, ids, patServiceIds(env));
 }

@@ -111,9 +111,17 @@ export declare function opMemberCanWrite(member: {
     scope?: string;
 } | null): boolean;
 /** The introspection answer → the member credential, judged against the
- *  deployment's allowlist. Inactive, foreign-client or subject-less
- *  answers all resolve to null — never to a widened guess. */
-export declare function opMemberFromIntrospection(answer: any, ids: string[]): OpMember | null;
+ *  deployment's two allowlists. The OP answers client-bearing tokens
+ *  WITH client_id (the access-token table, the machine JWTs) and its
+ *  PAT form WITHOUT one — a PAT's identity on the wire is its granted
+ *  SERVICES (the PAT grammar's whole vocabulary). So the deployment
+ *  names device-grant clients (OIDC_DEVICE_CLIENT_IDS) and, separately,
+ *  the services whose personal access tokens it admits
+ *  (OIDC_PAT_SERVICES). Both lists empty = the tier stays off; a token
+ *  matching neither list resolves to null — never a widened guess. */
+export declare function opMemberFromIntrospection(answer: any, ids: string[], patServices?: string[]): OpMember | null;
+/** The PAT-services allowlist (see opMemberFromIntrospection). */
+export declare function patServiceIds(env: any): string[];
 /** The Bearer read + introspection, KV-cached 45s keyed by the token's
  *  hash (an ask burst costs one introspection; a deactivation lands
  *  within a minute). The cached object is the OP's RAW answer — the

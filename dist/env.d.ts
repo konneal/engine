@@ -36,6 +36,10 @@ export interface Env {
      *  deployment admits as member-read credentials via introspection.
      *  Empty/absent = the tier is off. */
     OIDC_DEVICE_CLIENT_IDS?: string;
+    /** the services whose OP-minted personal access tokens (the PAT form
+     *  of introspection — no client_id on the wire) this deployment admits
+     *  as member-read credentials. Empty/absent = PATs stay anonymous. */
+    OIDC_PAT_SERVICES?: string;
     SESSION_SECRET?: string;
     /** TODO.ai-platform/03 — the "my account" live-data delegation: the
      *  platform instance's API base + its client id at the OP (the
