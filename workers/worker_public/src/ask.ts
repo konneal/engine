@@ -25,7 +25,7 @@ import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./conditions";
 import { evaluateAggregation, type AggregationVerdict } from "./aggregation";
 import { matchLicensedTopic, boundaryNoteText } from "./boundary";
-import { answerQuality, qualityNote } from "./quality";
+import { answerQuality, experimentalSourceLabels, qualityNote } from "./quality";
 import { detectDraftIntent, prepareDraft } from "./drafts";
 import { detectApiCallIntent, prepareApiCall } from "./apicalls";
 import { memoryNote } from "./memories";
@@ -1147,7 +1147,7 @@ async function handleAsk(
           // retrieval, before a single token of the answer
           send({ type: "read", read: readAs() });
           const sourceQuality = answerQuality(cites.map((c: any) => c.quality));
-          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(sourceQuality ? { source_quality: sourceQuality, quality_note: qualityNote(sourceQuality) } : {}), ...(liveRecords ? { records: liveRecords } : {}), quota, });
+          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(sourceQuality ? { source_quality: sourceQuality, quality_note: qualityNote(sourceQuality), ...(sourceQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(cites) } : {}) } : {}), ...(liveRecords ? { records: liveRecords } : {}), quota, });
           let full = "";
           try {
             for await (const tok of sseTokens(stream)) {
@@ -1342,7 +1342,7 @@ async function handleAsk(
   completionBlocks.push(...(await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used)));
 
   const jsonQuality = answerQuality(finalCites.map((c: any) => c.quality));
-  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, quality_note: qualityNote(jsonQuality) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
+  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, quality_note: qualityNote(jsonQuality), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = (await warmEmbed) ?? null;
