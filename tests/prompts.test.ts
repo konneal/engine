@@ -18,7 +18,7 @@ test("every prompt token resolves under the fixture profile", () => {
     const tpl = readFileSync(`${DIR}/${f}`, "utf8");
     for (const m of tpl.matchAll(/\{\{(\w+)\}\}/g)) {
       assert.ok(
-        m[1] in vars || ["CORPORA", "UPSELL", "HISTORY_CONTEXT", "CORPUS_NOTES", "LANG_CLAUSE"].includes(m[1]),
+        m[1] in vars || ["CORPORA", "UPSELL", "HISTORY_CONTEXT", "CORPUS_NOTES", "LANG_CLAUSE", "SERVICE_POSTURE"].includes(m[1]),
         `${f}: token {{${m[1]}}} resolves neither from the profile nor at a call site`,
       );
     }
