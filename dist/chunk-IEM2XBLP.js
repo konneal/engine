@@ -1814,7 +1814,10 @@ async function searchRegister(db, query) {
   if (!isRegisterShaped(query)) return null;
   const tokens2 = registerTokens(query);
   if (!tokens2.length) return null;
-  const clauses = tokens2.map(() => "(holder LIKE ?1 OR model LIKE ?1 OR num LIKE ?1)").join(" OR ");
+  const clauses = tokens2.map((_, i) => {
+    const n = i + 1;
+    return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
+  }).join(" OR ");
   const params = tokens2.map((t) => `%${t}%`);
   try {
     const res = await db.prepare(`SELECT num, family, holder, model, year, status FROM certificates WHERE ${clauses} LIMIT 6`).bind(...params).all();

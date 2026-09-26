@@ -52,7 +52,13 @@ export async function searchRegister(db: any, query: string): Promise<{ rows: Re
   if (!isRegisterShaped(query)) return null;
   const tokens = registerTokens(query);
   if (!tokens.length) return null;
-  const clauses = tokens.map(() => "(holder LIKE ?1 OR model LIKE ?1 OR num LIKE ?1)").join(" OR ");
+  // each token takes its own numbered placeholder, referenced three
+  // times (holder, model, number) — a shared ?1 would silently search
+  // the first token only
+  const clauses = tokens.map((_, i) => {
+    const n = i + 1;
+    return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
+  }).join(" OR ");
   const params = tokens.map((t) => `%${t}%`);
   try {
     const res = await db
