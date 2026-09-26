@@ -6,6 +6,8 @@
 // an authoritative note for the prompt. A miss is a MISS: "not in this
 // register snapshot" is stated verbatim, never softened into a guess.
 
+import { P } from './profile.ts';
+
 export interface RegisterRow {
   num: string;
   family: string;
@@ -31,13 +33,15 @@ export function registerTokens(query: string): string[] {
   const stop = new Set([
     "the", "a", "an", "is", "are", "was", "were", "still", "currently", "in", "on", "for", "of", "and", "or",
     "certificate", "certificates", "certified", "certification", "register", "status", "valid", "suspended",
-    "revoked", "oiml", "recommendation", "per", "under", "by", "with", "what", "which", "who", "does", "do",
+    "revoked", "recommendation", "per", "under", "by", "with", "what", "which", "who", "does", "do",
     "load", "cell", "model", "manufacturer", "holder", "company", "r", "how", "to", "list", "show",
   ]);
   const tokens: string[] = [];
+  const publisherWord = P().publisher.name.toLowerCase();
   for (const w of query.split(/[^A-Za-z0-9&-]+/)) {
     if (w.length < 2) continue;
     if (stop.has(w.toLowerCase())) continue;
+    if (w.toLowerCase() === publisherWord) continue;
     if (/^\d+$/.test(w) && w.length < 2) continue;
     if (!tokens.includes(w)) tokens.push(w);
   }
@@ -64,7 +68,7 @@ export async function searchRegister(db: any, query: string): Promise<{ rows: Re
 
 export function registerNote(rows: RegisterRow[]): string {
   if (!rows.length) {
-    return "Certificate register: NO certificate matching the asked holder or model appears in the OIML-CS register snapshot. State plainly that no such certificate is in this register, and that the register is a snapshot rather than the live certification status.";
+    return `Certificate register: NO certificate matching the asked holder or model appears in the ${P().publisher.name}-CS register snapshot. State plainly that no such certificate is in this register, and that the register is a snapshot rather than the live certification status.`;
   }
   const lines = rows.map((r) => `- ${r.num}: holder ${r.holder}, model "${r.model}"${r.year ? `, issued ${r.year}` : ""} — status ${r.status}`);
   return [
