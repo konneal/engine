@@ -88,3 +88,25 @@ export declare function resolveLiveAccount(env: any, sessionRaw: string | null, 
     via?: string;
     scope?: string;
 } | null): Promise<LiveAccount>;
+/** The device-grant clients this deployment admits. Empty = the tier is
+ *  off (a Bearer token that is not a service session stays anonymous). */
+export declare function deviceClientIds(env: any): string[];
+export interface OpMember {
+    sub: string;
+    scope: string;
+    via: "op-token";
+}
+/** The introspection answer → the member credential, judged against the
+ *  deployment's allowlist. Inactive, foreign-client or subject-less
+ *  answers all resolve to null — never to a widened guess. */
+export declare function opMemberFromIntrospection(answer: any, ids: string[]): OpMember | null;
+/** The Bearer read + introspection, KV-cached 45s keyed by the token's
+ *  hash (an ask burst costs one introspection; a deactivation lands
+ *  within a minute). The cached object is the OP's RAW answer — the
+ *  allowlist re-judges on every read, so a config change takes effect
+ *  inside the cache window too. JWTs (3 dot-segments) are NOT opaque:
+ *  they belong to the delegated lane and never reach the OP here. */
+export declare function opTokenMember(env: any, cfg: {
+    issuer: string;
+    clientId: string;
+}, req: Request): Promise<OpMember | null>;

@@ -7,7 +7,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "./chunk-GHDRKT4K.js";
+} from "./chunk-2AQYUGLB.js";
 import {
   corsHeaders,
   err,
