@@ -1747,6 +1747,92 @@ function semanticCacheKey(indexVersion, gen, signature) {
   return `sc:${indexVersion}:g${gen}:${signature}`;
 }
 
+// workers/worker_public/src/certificates.ts
+function isRegisterShaped(query) {
+  return /\bcertif(ied|icates?|ication)s?\b/i.test(query) && /\b(is|are|still|currently|valid|status|suspended|revoked|was|were)\b/i.test(query);
+}
+function registerTokens(query) {
+  const stop = /* @__PURE__ */ new Set([
+    "the",
+    "a",
+    "an",
+    "is",
+    "are",
+    "was",
+    "were",
+    "still",
+    "currently",
+    "in",
+    "on",
+    "for",
+    "of",
+    "and",
+    "or",
+    "certificate",
+    "certificates",
+    "certified",
+    "certification",
+    "register",
+    "status",
+    "valid",
+    "suspended",
+    "revoked",
+    "oiml",
+    "recommendation",
+    "per",
+    "under",
+    "by",
+    "with",
+    "what",
+    "which",
+    "who",
+    "does",
+    "do",
+    "load",
+    "cell",
+    "model",
+    "manufacturer",
+    "holder",
+    "company",
+    "r",
+    "how",
+    "to",
+    "list",
+    "show"
+  ]);
+  const tokens2 = [];
+  for (const w of query.split(/[^A-Za-z0-9&-]+/)) {
+    if (w.length < 2) continue;
+    if (stop.has(w.toLowerCase())) continue;
+    if (/^\d+$/.test(w) && w.length < 2) continue;
+    if (!tokens2.includes(w)) tokens2.push(w);
+  }
+  return tokens2.slice(0, 6);
+}
+async function searchRegister(db, query) {
+  if (!isRegisterShaped(query)) return null;
+  const tokens2 = registerTokens(query);
+  if (!tokens2.length) return null;
+  const clauses = tokens2.map(() => "(holder LIKE ?1 OR model LIKE ?1 OR num LIKE ?1)").join(" OR ");
+  const params = tokens2.map((t) => `%${t}%`);
+  try {
+    const res = await db.prepare(`SELECT num, family, holder, model, year, status FROM certificates WHERE ${clauses} LIMIT 6`).bind(...params).all();
+    return { rows: res.results ?? [], tokens: tokens2 };
+  } catch {
+    return { rows: [], tokens: tokens2 };
+  }
+}
+function registerNote(rows) {
+  if (!rows.length) {
+    return "Certificate register: NO certificate matching the asked holder or model appears in the OIML-CS register snapshot. State plainly that no such certificate is in this register, and that the register is a snapshot rather than the live certification status.";
+  }
+  const lines = rows.map((r) => `- ${r.num}: holder ${r.holder}, model "${r.model}"${r.year ? `, issued ${r.year}` : ""} \u2014 status ${r.status}`);
+  return [
+    "Certificate register \u2014 the following certificates matched the asked holder or model. Quote the certificate number, the holder and the status verbatim; the register is a snapshot, so qualify any statement about current certification accordingly.",
+    ...lines
+  ].join("\n");
+}
+
 // workers/worker_public/src/ask.ts
 function userImageDataUrl(body) {
   const img = body?.image;
@@ -2077,6 +2163,8 @@ async function handleAsk(env, ctx, req, tier, key) {
   console.log("understand:", understanding?.intent ?? "null", understanding?.doc_number ? `doc#${understanding.doc_number}${understanding.edition ? "@" + understanding.edition : ""}` : "nodoc", "|", q.query.slice(0, 50));
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);
+  const register = await searchRegister(env.DB, q.query);
+  const regNote = register ? registerNote(register.rows) : void 0;
   if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !apiCallIntent && !userImage && !fresh) {
     const warmVec = await warmEmbed ?? null;
     if (warmVec) {
@@ -2443,7 +2531,7 @@ Answer account questions from these records ONLY: name the record when you use i
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
+    [processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
     summary,
     budget
   );

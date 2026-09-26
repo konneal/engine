@@ -27,7 +27,7 @@
     "playwright": "^1.62.1",
     "yaml": "^2.9.1"
   },
-  "version": "0.2.41",
+  "version": "0.2.42",
   "description": "The Konneal engine: the publisher-agnostic build pipeline and API plane for standards intelligence (retrieval, answer contract, verdicts, evaluation).",
   "license": "BSD-3-Clause",
   "type": "module",
