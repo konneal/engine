@@ -408,10 +408,26 @@ export function deviceClientIds(env: any): string[] {
     .filter(Boolean);
 }
 
+/** The introspection call's OP coordinates, read once per call site. */
+export function opCfg(env: any): { issuer: string; clientId: string } {
+  return { issuer: String(env.OIDC_ISSUER ?? "").trim().replace(/\/+$/, ""), clientId: String(env.OIDC_CLIENT_ID ?? "") };
+}
+
 export interface OpMember {
   sub: string;
   scope: string;
   via: "op-token";
+}
+
+/** Mutations through the device-grant bearer (memories, conversations,
+ *  projects — the member's OWN data) need the token's scope to state a
+ *  write. The grammar is the OP's PAT vocabulary (`<service>:write`);
+ *  a read-only approval stays read-only here, and service sessions
+ *  (the browser) are always full-strength. */
+export function opMemberCanWrite(member: { via?: string; scope?: string } | null): boolean {
+  if (!member) return false;
+  if (member.via !== "op-token") return true;
+  return /\bwrite\b/.test(member.scope ?? "");
 }
 
 /** The introspection answer → the member credential, judged against the

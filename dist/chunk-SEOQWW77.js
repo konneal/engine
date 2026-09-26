@@ -16,6 +16,7 @@ import {
   liveTokenFor,
   machineOffers,
   namedDocumentIn,
+  opCfg,
   opTokenMember,
   parseContext,
   portModelRunner,
@@ -31,7 +32,7 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-2AQYUGLB.js";
+} from "./chunk-37FSCXBQ.js";
 import {
   corsHeaders,
   err,
@@ -1897,7 +1898,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   const draftAct = P().publisher.features?.drafts ? detectDraftIntent(q.query) : null;
   const apiCallIntent = !draftAct && P().publisher.features?.api_call_drafts ? detectApiCallIntent(q.query, declaredCtx) : null;
   const session = tier === "member" ? await sessionFrom(req, env) : null;
-  const opMember = !session && tier === "member" ? await opTokenMember(env, { issuer: (env.OIDC_ISSUER ?? "").trim(), clientId: String(env.OIDC_CLIENT_ID ?? "") }, req) : null;
+  const opMember = !session && tier === "member" ? await opTokenMember(env, opCfg(env), req) : null;
   const member = session ?? (opMember ? {
     sub: opMember.sub,
     roles: [],

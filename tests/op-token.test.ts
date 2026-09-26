@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deviceClientIds, opMemberFromIntrospection, opTokenMember } from "../workers/worker_public/src/livedata.ts";
+import { deviceClientIds, opCfg, opMemberCanWrite, opMemberFromIntrospection, opTokenMember } from "../workers/worker_public/src/livedata.ts";
 
 function bearer(token: string): Request {
   return new Request("https://ai.example.org/api/ask", { headers: { authorization: `Bearer ${token}` } });
@@ -40,6 +40,18 @@ test("inactive, foreign-client or subject-less answers are null", () => {
   assert.equal(opMemberFromIntrospection({ active: true, client_id: "someone-else", sub: "acct-9" }, ["oiml-ommisa"]), null);
   assert.equal(opMemberFromIntrospection({ active: true, client_id: "oiml-ommisa" }, ["oiml-ommisa"]), null);
   assert.equal(opMemberFromIntrospection(null, ["oiml-ommisa"]), null);
+});
+
+test("opCfg reads the OP coordinates; opMemberCanWrite judges the scope", () => {
+  assert.deepEqual(opCfg({ OIDC_ISSUER: " https://id.example.org/ ", OIDC_CLIENT_ID: "oiml-ai" }), {
+    issuer: "https://id.example.org",
+    clientId: "oiml-ai",
+  });
+  // a service session is full-strength; the bearer needs a stated write
+  assert.equal(opMemberCanWrite({ via: "op-token", scope: "oiml-ai:read offline_access" }), false);
+  assert.equal(opMemberCanWrite({ via: "op-token", scope: "oiml-ai:read oiml-ai:write offline_access" }), true);
+  assert.equal(opMemberCanWrite({ sub: "s", roles: [] }), true);
+  assert.equal(opMemberCanWrite(null), false);
 });
 
 test("opTokenMember introspects once, caches the raw answer, and excludes JWTs", async () => {

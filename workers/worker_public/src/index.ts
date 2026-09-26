@@ -3,7 +3,7 @@ export { setProfile } from "./profile.ts";
 import { retrieve } from "./pipeline";
 import type { Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
-import { opTokenMember } from "./livedata";
+import { opCfg, opMemberCanWrite, opTokenMember } from "./livedata";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleMemories } from "./memories";
 import { handleProjects, handleProjectFiles } from "./projects";
@@ -61,34 +61,63 @@ async function serveIndexPage(c: RouteContext): Promise<Response> {
   return err(404, "not_found", "Page not found");
 }
 
-async function memoriesRoute(c: RouteContext): Promise<Response> {
+/** The member identity behind one member-data request: the service
+ *  session first; else the Ommisa tier's introspected device-grant
+ *  bearer (READ by default — mutations also need `opMemberCanWrite`).
+ *  The CLI's memories/conversations/projects ride this. */
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+async function opIdentity(c: RouteContext, signIn: string): Promise<{ sub: string; write: boolean } | Response> {
   const session = await sessionFrom(c.req, c.env as any);
-  if (!session) return withCors(err(401, "unauthorized", "Sign in to use memory files"), corsHeaders(c.req));
-  return withCors(await handleMemories(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+  if (session) return { sub: session.sub, write: true };
+  const member = await opTokenMember(c.env, opCfg(c.env), c.req);
+  if (!member) return err(401, "unauthorized", signIn);
+  return { sub: member.sub, write: opMemberCanWrite(member) };
+}
+function opWriteRefused(c: RouteContext, who: { write: boolean } | Response): Response | null {
+  if (!(who instanceof Response) && MUTATING_METHODS.has(c.req.method) && !who.write) {
+    return err(403, "forbidden", "This sign-in grants read only — request a write scope at login.");
+  }
+  return null;
+}
+
+async function memoriesRoute(c: RouteContext): Promise<Response> {
+  const who = await opIdentity(c, "Sign in to use memory files");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  return withCors(await handleMemories(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 
 async function projectsRoute(c: RouteContext): Promise<Response> {
-  const session = await sessionFrom(c.req, c.env as any);
-  if (!session) return withCors(err(401, "unauthorized", "Sign in to use projects"), corsHeaders(c.req));
-  return withCors(await handleProjects(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+  const who = await opIdentity(c, "Sign in to use projects");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  return withCors(await handleProjects(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 
 async function projectFilesRoute(c: RouteContext): Promise<Response> {
-  const session = await sessionFrom(c.req, c.env as any);
-  if (!session) return withCors(err(401, "unauthorized", "Sign in to use projects"), corsHeaders(c.req));
-  return withCors(await handleProjectFiles(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+  const who = await opIdentity(c, "Sign in to use projects");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  return withCors(await handleProjectFiles(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 
 async function conversationsRoute(c: RouteContext): Promise<Response> {
-  const session = await sessionFrom(c.req, c.env as any);
-  if (!session) return withCors(err(401, "unauthorized", "Sign in to sync your conversations across devices"), corsHeaders(c.req));
-  return withCors(await handleConversations(c.env, session.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+  const who = await opIdentity(c, "Sign in to sync your conversations across devices");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  return withCors(await handleConversations(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 
 async function appendMessageRoute(c: RouteContext): Promise<Response> {
-  const session = await sessionFrom(c.req, c.env as any);
-  if (!session) return withCors(err(401, "unauthorized", "Sign in to sync your conversations across devices"), corsHeaders(c.req));
-  return withCors(await handleAppendMessage(c.env, session.sub, c.req, c.params.id!), corsHeaders(c.req));
+  const who = await opIdentity(c, "Sign in to sync your conversations across devices");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  return withCors(await handleAppendMessage(c.env, who.sub, c.req, c.params.id!), corsHeaders(c.req));
 }
 
 async function shareRoute(c: RouteContext): Promise<Response> {
@@ -132,7 +161,7 @@ async function tierFor(c: RouteContext): Promise<{ tier: "anon" | "key" | "membe
   // The Ommisa tier rides the same admission: a device-grant CLI's
   // opaque bearer, introspected at the OP (livedata.ts).
   if (!isApi && (await sessionFrom(c.req, c.env as any))) tier = "member";
-  else if (!isApi && (await opTokenMember(c.env, { issuer: (c.env.OIDC_ISSUER ?? "").trim(), clientId: String(c.env.OIDC_CLIENT_ID ?? "") }, c.req))) tier = "member";
+  else if (!isApi && (await opTokenMember(c.env, opCfg(c.env), c.req))) tier = "member";
   return { tier, key };
 }
 
