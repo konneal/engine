@@ -77,9 +77,21 @@ function answerQuality(qualities) {
   return worst;
 }
 function qualityNote(q) {
-  if (q === "verified") return "Grounded in verified sources: this publication's requirements ride a machine-checkable data model.";
-  if (q === "curated") return "Grounded in the edited corpus: Metanorma-authored documents, chunked at clause boundaries.";
-  return "Partly grounded in experimental OCR text: verify quotations and table values against the official publication.";
+  if (q === "verified") return "High confidence: this publication's requirements ride a machine-checkable data model.";
+  if (q === "curated") return "Established sources: Metanorma-edited documents, chunked at clause boundaries.";
+  return "WARNING: Partly grounded in experimental data source that was derived from OCR content. Please verify content against official publications.";
+}
+function experimentalSourceLabels(cites, cap = 6) {
+  const labels = [];
+  for (const c of cites) {
+    if (c.quality !== "ocr") continue;
+    const id = String(c.docidentifier || c.doc_id || "source");
+    const anchor = String(c.clause_anchor ?? "");
+    const garbage = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(anchor) || anchor.startsWith("_") && anchor.length > 12;
+    labels.push(garbage || !anchor || anchor === "overview" ? id : `${id} \xA7${anchor}`);
+    if (labels.length >= cap) break;
+  }
+  return labels;
 }
 
 // workers/worker_public/src/lexical.ts
@@ -24594,6 +24606,7 @@ export {
   generateOnce,
   answerQuality,
   qualityNote,
+  experimentalSourceLabels,
   ftsMatchQuery,
   refCodec,
   NO_CONTEXT,
