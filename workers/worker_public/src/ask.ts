@@ -19,7 +19,7 @@ import { canonicalRefusal } from "./refusal";
 import { contractV2, tableRetyped } from "./refs";
 import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
-import { liveDataConfig, liveTokenFor, resolveLiveAccount, type LiveRecord } from "./livedata";
+import { liveDataConfig, liveTokenFor, opTokenMember, resolveLiveAccount, type LiveRecord } from "./livedata";
 import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, licensedEntryForPackage, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./conditions";
@@ -29,7 +29,7 @@ import { detectDraftIntent, prepareDraft } from "./drafts";
 import { detectApiCallIntent, prepareApiCall } from "./apicalls";
 import { memoryNote } from "./memories";
 import { entitlementScope, resolveRequestScope, requestSalt, standardKeysFrom } from "./requestScope";
-import { rawSessionToken } from "./session";
+import { rawSessionToken, type SessionClaims } from "./session";
 import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested, semanticCacheKey } from "./answercache";
 import type { Env } from "./env";
 export type { Env };
@@ -286,7 +286,23 @@ async function handleAsk(
   // account's standing, never on the query alone.
   const apiCallIntent = !draftAct && P().publisher.features?.api_call_drafts ? detectApiCallIntent(q.query, declaredCtx) : null;
 
-  const member = tier === "member" ? await sessionFrom(req, env as any) : null;
+  const session = tier === "member" ? await sessionFrom(req, env as any) : null;
+  // The Ommisa tier: no service session but a device-grant CLI's opaque
+  // bearer → the OP's introspection answer admits a member-READ
+  // credential (livedata.ts). No sessionRaw behind it, so the draft and
+  // live-data lanes keep their honest "unsigned" refusals.
+  const opMember = !session && tier === "member" ? await opTokenMember(env, { issuer: (env.OIDC_ISSUER ?? "").trim(), clientId: String(env.OIDC_CLIENT_ID ?? "") }, req) : null;
+  const member: SessionClaims | null = session
+    ?? (opMember
+      ? {
+          sub: opMember.sub,
+          roles: [],
+          iat: Math.floor(Date.now() / 1000),
+          exp: Math.floor(Date.now() / 1000) + 3600,
+          via: "op-token",
+          scope: opMember.scope,
+        }
+      : null);
   // resolved before the quota check: the effort choice prices the ask
   const effort = requestEffort(env, member, (body as any)?.effort);
 

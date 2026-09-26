@@ -16,8 +16,9 @@ export interface SessionClaims {
   exp: number;
   /** the credential kind: absent = the service session; "delegated" =
    *  the OP-minted RFC 8693 bearer (TODO.ai-platform/12 — the session
-   *  bridge; delegated.ts) */
-  via?: "delegated";
+   *  bridge; delegated.ts); "op-token" = the device-grant CLI's opaque
+   *  bearer, admitted through RFC 7662 introspection (livedata.ts) */
+  via?: "delegated" | "op-token";
   /** the delegating surface (the delegated bearer's act.sub — the
    *  platform instance's OP client) */
   delegator?: string;

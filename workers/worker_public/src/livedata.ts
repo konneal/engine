@@ -390,3 +390,81 @@ export async function resolveLiveAccount(
   if (!read.ok) return { status: "unavailable", reason: read.reason };
   return { status: "ok", records: read.records, stores: read.stores, readAt: read.readAt };
 }
+
+// ── the Ommisa tier (RFC 7662 introspection) ─────────────────────────
+// The CLI signs in through the OP's device grant (RFC 8628) and holds an
+// OPAQUE access token. This deployment never saw that grant — it learns
+// the token the only honest way: it asks the OP (introspection, as an
+// active registered client), then admits the caller as a member-READ
+// credential. Writes, drafts and the live-data exchange stay session
+// acts (the CLI has no service session to exchange — rawSessionToken is
+// null, so those lanes already refuse honestly).
+
+/** The device-grant clients this deployment admits. Empty = the tier is
+ *  off (a Bearer token that is not a service session stays anonymous). */
+export function deviceClientIds(env: any): string[] {
+  return String(env.OIDC_DEVICE_CLIENT_IDS ?? "")
+    .split(/[\s,]+/)
+    .filter(Boolean);
+}
+
+export interface OpMember {
+  sub: string;
+  scope: string;
+  via: "op-token";
+}
+
+/** The introspection answer → the member credential, judged against the
+ *  deployment's allowlist. Inactive, foreign-client or subject-less
+ *  answers all resolve to null — never to a widened guess. */
+export function opMemberFromIntrospection(answer: any, ids: string[]): OpMember | null {
+  if (!answer?.active) return null;
+  const clientId = String(answer.client_id ?? "");
+  if (!ids.includes(clientId)) return null;
+  const sub = String(answer.sub ?? "");
+  if (!sub) return null;
+  return { sub, scope: String(answer.scope ?? ""), via: "op-token" };
+}
+
+/** The Bearer read + introspection, KV-cached 45s keyed by the token's
+ *  hash (an ask burst costs one introspection; a deactivation lands
+ *  within a minute). The cached object is the OP's RAW answer — the
+ *  allowlist re-judges on every read, so a config change takes effect
+ *  inside the cache window too. JWTs (3 dot-segments) are NOT opaque:
+ *  they belong to the delegated lane and never reach the OP here. */
+export async function opTokenMember(
+  env: any,
+  cfg: { issuer: string; clientId: string },
+  req: Request,
+): Promise<OpMember | null> {
+  const m = /^Bearer\s+(.+)$/i.exec((req.headers.get("Authorization") ?? "").trim());
+  const token = m?.[1]?.trim();
+  if (!token || token.split(".").length === 3) return null;
+  const ids = deviceClientIds(env);
+  if (!ids.length || !cfg.issuer || !cfg.clientId) return null;
+  const key = `opint:${await sha256Hex(token)}`;
+  let answer: any = null;
+  try {
+    answer = await env.CACHE.get(key, "json");
+  } catch {
+    /* a KV hiccup costs one extra introspection */
+  }
+  if (answer === undefined || answer === null) {
+    try {
+      const res = await fetch(`${cfg.issuer}/op/introspect`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token, client_id: cfg.clientId }),
+      });
+      answer = res.ok ? await res.json() : { active: false };
+    } catch {
+      return null;
+    }
+    try {
+      await env.CACHE.put(key, JSON.stringify(answer ?? { active: false }), { expirationTtl: 45 });
+    } catch {
+      /* cacheless = introspect per ask */
+    }
+  }
+  return opMemberFromIntrospection(answer, ids);
+}
