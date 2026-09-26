@@ -3,6 +3,7 @@ export { setProfile } from "./profile.ts";
 import { retrieve } from "./pipeline";
 import type { Hit } from "./pipeline";
 import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from "./auth";
+import { opTokenMember } from "./livedata";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleMemories } from "./memories";
 import { handleProjects, handleProjectFiles } from "./projects";
@@ -128,7 +129,10 @@ async function tierFor(c: RouteContext): Promise<{ tier: "anon" | "key" | "membe
   // No SESSION_SECRET precondition: the delegated bearer (the platform
   // bubble's OP-minted JWT, delegated.ts) admits the member lane on its
   // own — sessionFrom returns null honestly when neither lane applies.
+  // The Ommisa tier rides the same admission: a device-grant CLI's
+  // opaque bearer, introspected at the OP (livedata.ts).
   if (!isApi && (await sessionFrom(c.req, c.env as any))) tier = "member";
+  else if (!isApi && (await opTokenMember(c.env, { issuer: (c.env.OIDC_ISSUER ?? "").trim(), clientId: String(c.env.OIDC_CLIENT_ID ?? "") }, c.req))) tier = "member";
   return { tier, key };
 }
 
