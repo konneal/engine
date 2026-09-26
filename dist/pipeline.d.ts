@@ -61,6 +61,7 @@ export declare function citations(hits: Hit[]): {
     status: string;
     superseded_by: string | undefined;
     corpus: any;
+    quality: import("./quality").SourceQuality;
     url: string | undefined;
     snippet: string;
     score: number;

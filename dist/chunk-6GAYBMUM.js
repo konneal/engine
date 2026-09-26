@@ -61,6 +61,27 @@ async function generateOnce(env, model, messages, effort) {
   return null;
 }
 
+// workers/worker_public/src/quality.ts
+var ORDER = { verified: 0, curated: 1, ocr: 2 };
+function hitQuality(m) {
+  if (m.model_node || m.model_version || m.producer === "primmel") return "verified";
+  if (m.tier === "curated") return "curated";
+  return "ocr";
+}
+function answerQuality(qualities) {
+  let worst = null;
+  for (const q of qualities) {
+    if (!q) continue;
+    if (!worst || ORDER[q] > ORDER[worst]) worst = q;
+  }
+  return worst;
+}
+function qualityNote(q) {
+  if (q === "verified") return "Grounded in verified sources: this publication's requirements ride a machine-checkable data model.";
+  if (q === "curated") return "Grounded in the edited corpus: Metanorma-authored documents, chunked at clause boundaries.";
+  return "Partly grounded in experimental OCR text: verify quotations and table values against the official publication.";
+}
+
 // workers/worker_public/src/lexical.ts
 var LEXICAL_K = 40;
 function ftsMatchQuery(query) {
@@ -23515,6 +23536,7 @@ function citations(hits) {
     status: h.metadata.status ?? "unknown",
     superseded_by: h.metadata.superseded_by || void 0,
     corpus: h.metadata.corpus || P().publisher.id,
+    quality: hitQuality(h.metadata),
     url: publicationUrl(h.metadata),
     snippet: h.text.slice(0, 400),
     score: h.rerank_score ?? h.score
@@ -24560,6 +24582,8 @@ async function editionNote(env, u) {
 export {
   embed,
   generateOnce,
+  answerQuality,
+  qualityNote,
   ftsMatchQuery,
   refCodec,
   NO_CONTEXT,

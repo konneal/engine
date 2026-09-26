@@ -1,5 +1,6 @@
 import {
   NO_CONTEXT,
+  answerQuality,
   appliedContext,
   buildMessages,
   checkQuota,
@@ -21,6 +22,7 @@ import {
   parseContext,
   portModelRunner,
   portStore,
+  qualityNote,
   rawSessionToken,
   refCodec,
   resolveDocScope,
@@ -32,7 +34,7 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-37FSCXBQ.js";
+} from "./chunk-6GAYBMUM.js";
 import {
   corsHeaders,
   err,
@@ -497,6 +499,7 @@ function modelCitation(node) {
     clause_title: `${node.kind.replace(/_/g, " ")} \u2014 ${node.name} (${node.node_id})`,
     status: "in-force",
     corpus: "smart-model",
+    quality: "verified",
     url: void 0,
     snippet: `${node.node_id}${node.clause ? ` \xB7 ${node.clause.urn}` : ""}${node.content?.statement ? ` \u2014 ${clip(node.content.statement, 240)}` : ""}`,
     score: 1
@@ -2471,7 +2474,8 @@ Answer account questions from these records ONLY: name the record when you use i
 
 `));
           send({ type: "read", read: readAs() });
-          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, quota });
+          const sourceQuality = answerQuality(cites.map((c) => c.quality));
+          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...sourceQuality ? { source_quality: sourceQuality, quality_note: qualityNote(sourceQuality) } : {}, ...liveRecords ? { records: liveRecords } : {}, quota });
           let full = "";
           try {
             for await (const tok of sseTokens(stream)) {
@@ -2604,7 +2608,8 @@ Answer account questions from these records ONLY: name the record when you use i
     if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
   }
   completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
-  const out = { answer, citations: finalCites, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
+  const jsonQuality = answerQuality(finalCites.map((c) => c.quality));
+  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, quality_note: qualityNote(jsonQuality) } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = await warmEmbed ?? null;

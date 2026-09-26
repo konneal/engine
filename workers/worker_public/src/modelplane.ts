@@ -287,6 +287,7 @@ export function modelCitation(node: BoundModelNode) {
     clause_title: `${node.kind.replace(/_/g, " ")} — ${node.name} (${node.node_id})`,
     status: "in-force",
     corpus: "smart-model",
+    quality: "verified",
     url: undefined,
     snippet: `${node.node_id}${node.clause ? ` · ${node.clause.urn}` : ""}${node.content?.statement ? ` — ${clip(node.content.statement, 240)}` : ""}`,
     score: 1,
