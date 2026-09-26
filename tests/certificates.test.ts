@@ -44,3 +44,20 @@ test("a D1 failure degrades to no-note, never an error", async () => {
   assert.ok(out);
   assert.equal(out.rows.length, 0);
 });
+
+import { buildRegisterQuery } from "../workers/worker_public/src/certificates.ts";
+
+test("numeric tokens match standalone values, never substrings", () => {
+  const { sql, params } = buildRegisterQuery(["190", "Utilcell"]);
+  // the numeric clause: exact model/num + the delimiter-separated LIKE
+  assert.ok(sql.includes("model = ?1 OR num = ?1"));
+  assert.ok(sql.includes("LIKE ?3"));
+  // the word clause: the plain substring LIKE
+  assert.ok(sql.includes("holder LIKE ?4 OR model LIKE ?4 OR num LIKE ?4"));
+  assert.deepEqual(params, ["190", "190", "% 190 %", "%Utilcell%"]);
+});
+
+test("the padded comparison normalizes punctuation to spaces", () => {
+  const { params } = buildRegisterQuery(["190"]);
+  assert.equal(params[2], "% 190 %");
+});

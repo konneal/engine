@@ -1810,17 +1810,32 @@ function registerTokens(query) {
   }
   return tokens2.slice(0, 6);
 }
+function buildRegisterQuery(tokens2) {
+  const params = [];
+  const clauses = tokens2.map((t) => {
+    if (/^\d+$/.test(t)) {
+      const padded = `% ${t.toLowerCase()} %`;
+      params.push(t, t, padded);
+      const n1 = params.length - 2;
+      const n2 = params.length;
+      return `(model = ?${n1} OR num = ?${n1} OR (' ' || REPLACE(REPLACE(REPLACE(LOWER(model), '-', ' '), ',', ' '), '.', ' ') || ' ') LIKE ?${n2})`;
+    }
+    params.push(`%${t}%`);
+    const n = params.length;
+    return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
+  });
+  return {
+    sql: `SELECT num, family, holder, model, year, status FROM certificates WHERE ${clauses.join(" OR ")} LIMIT 6`,
+    params
+  };
+}
 async function searchRegister(db, query) {
   if (!isRegisterShaped(query)) return null;
   const tokens2 = registerTokens(query);
   if (!tokens2.length) return null;
-  const clauses = tokens2.map((_, i) => {
-    const n = i + 1;
-    return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
-  }).join(" OR ");
-  const params = tokens2.map((t) => `%${t}%`);
+  const { sql, params } = buildRegisterQuery(tokens2);
   try {
-    const res = await db.prepare(`SELECT num, family, holder, model, year, status FROM certificates WHERE ${clauses} LIMIT 6`).bind(...params).all();
+    const res = await db.prepare(sql).bind(...params).all();
     return { rows: res.results ?? [], tokens: tokens2 };
   } catch {
     return { rows: [], tokens: tokens2 };

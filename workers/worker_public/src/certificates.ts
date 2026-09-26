@@ -48,23 +48,45 @@ export function registerTokens(query: string): string[] {
   return tokens.slice(0, 6);
 }
 
+/** The register query for a token set. Numeric tokens (a model number
+ *  like "190") must match as a STANDALONE value — `LIKE '%190%'` also
+ *  catches "XK3190", which the live Utilcell probe demonstrated — so a
+ *  number matches the exact model, or as a delimiter-separated word
+ *  (hyphens and punctuation normalize to spaces). Word tokens keep the
+ *  substring LIKE (names and model words do not overmatch the way
+ *  numbers do). Each token takes its own numbered placeholder,
+ *  referenced three times (holder, model, number). */
+export function buildRegisterQuery(tokens: string[]): { sql: string; params: string[] } {
+  const params: string[] = [];
+  const clauses = tokens.map((t) => {
+    if (/^\d+$/.test(t)) {
+      // a number matches as a STANDALONE value: the exact model or
+      // certificate number, or a delimiter-separated word (hyphens and
+      // punctuation normalize to spaces) — never a substring ("190"
+      // must not catch "XK3190")
+      const padded = `% ${t.toLowerCase()} %`;
+      params.push(t, t, padded);
+      const n1 = params.length - 2;
+      const n2 = params.length;
+      return `(model = ?${n1} OR num = ?${n1} OR (' ' || REPLACE(REPLACE(REPLACE(LOWER(model), '-', ' '), ',', ' '), '.', ' ') || ' ') LIKE ?${n2})`;
+    }
+    params.push(`%${t}%`);
+    const n = params.length;
+    return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
+  });
+  return {
+    sql: `SELECT num, family, holder, model, year, status FROM certificates WHERE ${clauses.join(" OR ")} LIMIT 6`,
+    params,
+  };
+}
+
 export async function searchRegister(db: any, query: string): Promise<{ rows: RegisterRow[]; tokens: string[] } | null> {
   if (!isRegisterShaped(query)) return null;
   const tokens = registerTokens(query);
   if (!tokens.length) return null;
-  // each token takes its own numbered placeholder, referenced three
-  // times (holder, model, number) — a shared ?1 would silently search
-  // the first token only
-  const clauses = tokens.map((_, i) => {
-    const n = i + 1;
-    return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
-  }).join(" OR ");
-  const params = tokens.map((t) => `%${t}%`);
+  const { sql, params } = buildRegisterQuery(tokens);
   try {
-    const res = await db
-      .prepare(`SELECT num, family, holder, model, year, status FROM certificates WHERE ${clauses} LIMIT 6`)
-      .bind(...params)
-      .all();
+    const res = await db.prepare(sql).bind(...params).all();
     return { rows: (res.results ?? []) as RegisterRow[], tokens };
   } catch {
     // a missing table or a D1 hiccup degrades to no-note honestly
