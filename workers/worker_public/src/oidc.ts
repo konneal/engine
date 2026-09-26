@@ -18,9 +18,11 @@ export type OidcFailureReason =
   | 'token_nonce';
 
 export class OidcError extends Error {
-  constructor(readonly reason: OidcFailureReason, message: string) {
+  readonly reason: OidcFailureReason;
+  constructor(reason: OidcFailureReason, message: string) {
     super(message);
     this.name = "OidcError";
+    this.reason = reason;
   }
 }
 
@@ -252,31 +254,36 @@ export interface OidcIdTokenClaims {
 
 const EXPIRY_LEEWAY_MS = 60_000;
 
-export async function validateIdToken(
-  idToken: string,
-  expectations: { issuer: string; clientId: string; nonce: string; jwksUri: string },
-): Promise<OidcIdTokenClaims> {
-  const parts = idToken.split(".");
+/** Decode + signature-verify a JWT against the issuer's JWKS (RS256 or
+ *  ES256; the JWKS fetch caches an hour and force-refreshes once on a
+ *  miss). Claim semantics (issuer, audience, expiry, nonce) are the
+ *  CALLER's — the ID token and the delegated bearer check different
+ *  claim sets over the same verified signature. */
+export async function verifyJwtSignature(
+  token: string,
+  jwksUri: string,
+): Promise<{ header: { alg?: string; kid?: string }; claims: Record<string, unknown> }> {
+  const parts = token.split(".");
   if (parts.length !== 3) {
-    throw new OidcError("token_malformed", "the ID token is not a three-part JWT");
+    throw new OidcError("token_malformed", "the token is not a three-part JWT");
   }
   let header: { alg?: string; kid?: string };
-  let claims: OidcIdTokenClaims;
+  let claims: Record<string, unknown>;
   try {
     header = JSON.parse(new TextDecoder().decode(base64urlDecode(parts[0])));
-    claims = JSON.parse(new TextDecoder().decode(base64urlDecode(parts[1]))) as OidcIdTokenClaims;
+    claims = JSON.parse(new TextDecoder().decode(base64urlDecode(parts[1]))) as Record<string, unknown>;
   } catch {
-    throw new OidcError("token_malformed", "the ID token header/claims are not JSON");
+    throw new OidcError("token_malformed", "the token header/claims are not JSON");
   }
   if (header.alg !== "RS256" && header.alg !== "ES256") {
-    throw new OidcError("token_alg", `the ID token uses ${header.alg ?? "no declared algorithm"}`);
+    throw new OidcError("token_alg", `the token uses ${header.alg ?? "no declared algorithm"}`);
   }
 
   const signedContent = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
   const signature = base64urlDecode(parts[2]) as BufferSource;
   let verified = false;
   for (const force of [false, true]) {
-    const keys = await fetchJwks(expectations.jwksUri, force);
+    const keys = await fetchJwks(jwksUri, force);
     const candidates = keys.filter(
       (k) => (!header.kid || k.kid === header.kid) && (header.alg === "RS256" ? k.kty === "RSA" : k.kty === "EC"),
     );
@@ -303,26 +310,35 @@ export async function validateIdToken(
     if (verified) break;
   }
   if (!verified) {
-    throw new OidcError("token_signature", "the ID token signature does not verify against the issuer's published keys");
+    throw new OidcError("token_signature", "the token signature does not verify against the issuer's published keys");
   }
+  return { header, claims };
+}
 
-  if (claims.iss?.replace(/\/$/, "") !== expectations.issuer.replace(/\/$/, "")) {
+export async function validateIdToken(
+  idToken: string,
+  expectations: { issuer: string; clientId: string; nonce: string; jwksUri: string },
+): Promise<OidcIdTokenClaims> {
+  const { claims } = await verifyJwtSignature(idToken, expectations.jwksUri);
+  const idClaims = claims as OidcIdTokenClaims;
+
+  if (idClaims.iss?.replace(/\/$/, "") !== expectations.issuer.replace(/\/$/, "")) {
     throw new OidcError("token_issuer", "the ID token's issuer is not the configured issuer");
   }
-  const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  const audiences = Array.isArray(idClaims.aud) ? idClaims.aud : [idClaims.aud];
   if (!audiences.includes(expectations.clientId)) {
     throw new OidcError("token_audience", "the ID token was not issued for this application");
   }
-  if (audiences.length > 1 && claims.azp && claims.azp !== expectations.clientId) {
+  if (audiences.length > 1 && idClaims.azp && idClaims.azp !== expectations.clientId) {
     throw new OidcError("token_audience", "the ID token's authorized party is not this application");
   }
-  if (typeof claims.exp !== "number" || claims.exp * 1000 + EXPIRY_LEEWAY_MS < Date.now()) {
+  if (typeof idClaims.exp !== "number" || idClaims.exp * 1000 + EXPIRY_LEEWAY_MS < Date.now()) {
     throw new OidcError("token_expired", "the ID token has expired");
   }
-  if (claims.nonce !== expectations.nonce) {
+  if (idClaims.nonce !== expectations.nonce) {
     throw new OidcError("token_nonce", "the ID token's nonce does not match the request");
   }
-  return claims;
+  return idClaims;
 }
 
 export function buildEndSessionUrl(

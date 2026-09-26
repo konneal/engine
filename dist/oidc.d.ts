@@ -64,6 +64,18 @@ export interface OidcIdTokenClaims {
     org?: unknown;
     [claim: string]: unknown;
 }
+/** Decode + signature-verify a JWT against the issuer's JWKS (RS256 or
+ *  ES256; the JWKS fetch caches an hour and force-refreshes once on a
+ *  miss). Claim semantics (issuer, audience, expiry, nonce) are the
+ *  CALLER's — the ID token and the delegated bearer check different
+ *  claim sets over the same verified signature. */
+export declare function verifyJwtSignature(token: string, jwksUri: string): Promise<{
+    header: {
+        alg?: string;
+        kid?: string;
+    };
+    claims: Record<string, unknown>;
+}>;
 export declare function validateIdToken(idToken: string, expectations: {
     issuer: string;
     clientId: string;

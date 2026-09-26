@@ -125,7 +125,10 @@ async function tierFor(c: RouteContext): Promise<{ tier: "anon" | "key" | "membe
     if (!key) return err(401, "unauthorized", `Provide a valid API key: Authorization: Bearer ${P().publisher.id}_...`);
   }
   let tier: "anon" | "key" | "member" = isApi ? "key" : "anon";
-  if (!isApi && c.env.SESSION_SECRET && (await sessionFrom(c.req, c.env as any))) tier = "member";
+  // No SESSION_SECRET precondition: the delegated bearer (the platform
+  // bubble's OP-minted JWT, delegated.ts) admits the member lane on its
+  // own — sessionFrom returns null honestly when neither lane applies.
+  if (!isApi && (await sessionFrom(c.req, c.env as any))) tier = "member";
   return { tier, key };
 }
 

@@ -30,6 +30,18 @@ export type LiveTokenVerdict = {
  *  platform-scoped JWT (identity's §9b). The exchanged token caches for
  *  its own short life; the refusal lattice is honest per leg. */
 export declare function exchangeForLiveToken(env: any, sessionRaw: string): Promise<LiveTokenVerdict>;
+/** The live read token for one ask (TODO.ai-platform/12 — the session
+ *  bridge): when the member arrived on the delegated bearer, the Bearer
+ *  IS already the OP-minted platform-scoped JWT — the platform exchanged
+ *  it before forwarding, so a second exchange here would have no subject
+ *  token to ride (the bubble never signed into THIS service). If the
+ *  token's scope cone covers the platform read, present it directly;
+ *  otherwise (a service session, or a delegation that never scoped the
+ *  platform in) fall through to the RFC 8693 exchange. */
+export declare function liveTokenFor(env: any, sessionRaw: string, member: {
+    via?: string;
+    scope?: string;
+} | null): Promise<LiveTokenVerdict>;
 export interface LiveRecord {
     /** the platform store the record came from */
     store: string;
@@ -73,4 +85,6 @@ export type LiveAccount = {
  *  invented record. */
 export declare function resolveLiveAccount(env: any, sessionRaw: string | null, member: {
     sub: string;
+    via?: string;
+    scope?: string;
 } | null): Promise<LiveAccount>;

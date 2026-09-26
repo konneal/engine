@@ -23677,6 +23677,15 @@ async function exchangeForLiveToken(env, sessionRaw) {
   }
   return { ok: true, token: granted.access_token };
 }
+async function liveTokenFor(env, sessionRaw, member) {
+  const cfg = liveDataConfig(env);
+  if (!cfg) return { ok: false, reason: "not_configured" };
+  if (member?.via === "delegated" && typeof member.scope === "string") {
+    const need = `${cfg.platformClientId}:read`;
+    if (member.scope.split(/\s+/).includes(need)) return { ok: true, token: sessionRaw };
+  }
+  return exchangeForLiveToken(env, sessionRaw);
+}
 function recordUrl(cfg, roleFamily, store, row) {
   const std = typeof row.standard_id === "string" ? row.standard_id.replace(new RegExp(`^${P().publisher.id}-`, "i"), "") : null;
   if (store === "certificates") {
@@ -23788,7 +23797,7 @@ async function resolveLiveAccount(env, sessionRaw, member) {
   if (!member || !sessionRaw) return { status: "unavailable", reason: "sign_in_required" };
   const cfg = liveDataConfig(env);
   if (!cfg) return { status: "unavailable", reason: "not_configured" };
-  const exchanged = await exchangeForLiveToken(env, sessionRaw);
+  const exchanged = await liveTokenFor(env, sessionRaw, member);
   if (!exchanged.ok) return { status: "unavailable", reason: exchanged.reason };
   const read = await readMyAccount(env, cfg, exchanged.token);
   if (!read.ok) return { status: "unavailable", reason: read.reason };
@@ -23797,12 +23806,12 @@ async function resolveLiveAccount(env, sessionRaw, member) {
 
 // workers/worker_public/src/oidc.ts
 var OidcError = class extends Error {
+  reason;
   constructor(reason, message) {
     super(message);
-    this.reason = reason;
     this.name = "OidcError";
+    this.reason = reason;
   }
-  reason;
 };
 var metadataCache = /* @__PURE__ */ new Map();
 var METADATA_TTL_MS = 60 * 60 * 1e3;
@@ -23931,10 +23940,10 @@ async function fetchJwks(jwksUri, force) {
   return keys;
 }
 var EXPIRY_LEEWAY_MS = 6e4;
-async function validateIdToken(idToken, expectations) {
-  const parts = idToken.split(".");
+async function verifyJwtSignature(token, jwksUri) {
+  const parts = token.split(".");
   if (parts.length !== 3) {
-    throw new OidcError("token_malformed", "the ID token is not a three-part JWT");
+    throw new OidcError("token_malformed", "the token is not a three-part JWT");
   }
   let header;
   let claims;
@@ -23942,16 +23951,16 @@ async function validateIdToken(idToken, expectations) {
     header = JSON.parse(new TextDecoder().decode(base64urlDecode(parts[0])));
     claims = JSON.parse(new TextDecoder().decode(base64urlDecode(parts[1])));
   } catch {
-    throw new OidcError("token_malformed", "the ID token header/claims are not JSON");
+    throw new OidcError("token_malformed", "the token header/claims are not JSON");
   }
   if (header.alg !== "RS256" && header.alg !== "ES256") {
-    throw new OidcError("token_alg", `the ID token uses ${header.alg ?? "no declared algorithm"}`);
+    throw new OidcError("token_alg", `the token uses ${header.alg ?? "no declared algorithm"}`);
   }
   const signedContent = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
   const signature = base64urlDecode(parts[2]);
   let verified = false;
   for (const force of [false, true]) {
-    const keys = await fetchJwks(expectations.jwksUri, force);
+    const keys = await fetchJwks(jwksUri, force);
     const candidates = keys.filter(
       (k) => (!header.kid || k.kid === header.kid) && (header.alg === "RS256" ? k.kty === "RSA" : k.kty === "EC")
     );
@@ -23978,25 +23987,30 @@ async function validateIdToken(idToken, expectations) {
     if (verified) break;
   }
   if (!verified) {
-    throw new OidcError("token_signature", "the ID token signature does not verify against the issuer's published keys");
+    throw new OidcError("token_signature", "the token signature does not verify against the issuer's published keys");
   }
-  if (claims.iss?.replace(/\/$/, "") !== expectations.issuer.replace(/\/$/, "")) {
+  return { header, claims };
+}
+async function validateIdToken(idToken, expectations) {
+  const { claims } = await verifyJwtSignature(idToken, expectations.jwksUri);
+  const idClaims = claims;
+  if (idClaims.iss?.replace(/\/$/, "") !== expectations.issuer.replace(/\/$/, "")) {
     throw new OidcError("token_issuer", "the ID token's issuer is not the configured issuer");
   }
-  const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  const audiences = Array.isArray(idClaims.aud) ? idClaims.aud : [idClaims.aud];
   if (!audiences.includes(expectations.clientId)) {
     throw new OidcError("token_audience", "the ID token was not issued for this application");
   }
-  if (audiences.length > 1 && claims.azp && claims.azp !== expectations.clientId) {
+  if (audiences.length > 1 && idClaims.azp && idClaims.azp !== expectations.clientId) {
     throw new OidcError("token_audience", "the ID token's authorized party is not this application");
   }
-  if (typeof claims.exp !== "number" || claims.exp * 1e3 + EXPIRY_LEEWAY_MS < Date.now()) {
+  if (typeof idClaims.exp !== "number" || idClaims.exp * 1e3 + EXPIRY_LEEWAY_MS < Date.now()) {
     throw new OidcError("token_expired", "the ID token has expired");
   }
-  if (claims.nonce !== expectations.nonce) {
+  if (idClaims.nonce !== expectations.nonce) {
     throw new OidcError("token_nonce", "the ID token's nonce does not match the request");
   }
-  return claims;
+  return idClaims;
 }
 function buildEndSessionUrl(metadata, params) {
   if (!metadata.end_session_endpoint) return null;
@@ -24081,6 +24095,44 @@ async function renewSessionClaims(env, cfg, session, sessionRaw) {
   }
   await retainRefreshToken(env, sessionRaw, token.refresh_token);
   return { kind: "ok", renewed: { claims: fresh, refreshToken: token.refresh_token } };
+}
+
+// workers/worker_public/src/delegated.ts
+var EXPIRY_LEEWAY_MS2 = 6e4;
+async function delegatedBearerFrom(req, env) {
+  if (!P().publisher.features?.delegated_bearer) return null;
+  const issuer = (env.OIDC_ISSUER ?? "").trim();
+  if (!issuer) return null;
+  const m = (req.headers.get("authorization") ?? "").match(/^Bearer\s+(.+)$/i);
+  if (!m) return null;
+  const token = m[1].trim();
+  if (token.split(".").length !== 3) return null;
+  const delegators = P().publisher.identity?.delegators;
+  if (!Array.isArray(delegators) || delegators.length === 0) return null;
+  try {
+    const meta = await discoverIssuer(issuer);
+    const { claims } = await verifyJwtSignature(token, meta.jwks_uri);
+    const c = claims;
+    if (c.iss?.replace(/\/$/, "") !== meta.issuer.replace(/\/$/, "")) return null;
+    if (typeof c.exp !== "number" || c.exp * 1e3 + EXPIRY_LEEWAY_MS2 < Date.now()) return null;
+    const actSub = typeof c.act?.sub === "string" ? c.act.sub : null;
+    if (!actSub || !delegators.includes(actSub)) return null;
+    if (typeof c.sub !== "string" || !c.sub) return null;
+    const ourRoles = c.service_roles?.[env.OIDC_CLIENT_ID];
+    return {
+      sub: c.sub,
+      name: typeof c.name === "string" ? c.name : void 0,
+      email: typeof c.email === "string" ? c.email : void 0,
+      roles: Array.isArray(ourRoles) ? ourRoles.filter((r) => typeof r === "string") : [],
+      iat: typeof c.iat === "number" ? c.iat * 1e3 : Date.now(),
+      exp: c.exp * 1e3,
+      scope: typeof c.scope === "string" ? c.scope : void 0,
+      via: "delegated",
+      delegator: actSub
+    };
+  } catch {
+    return null;
+  }
 }
 
 // workers/worker_public/src/auth.ts
@@ -24228,7 +24280,9 @@ async function handleCallback(env, req) {
   }
 }
 async function sessionFrom(req, env) {
-  return readSession(req, authConfig(env)?.sessionSecret);
+  const session = await readSession(req, authConfig(env)?.sessionSecret);
+  if (session) return session;
+  return delegatedBearerFrom(req, env);
 }
 async function handleMe(env, req) {
   const cfg = authConfig(env);
@@ -24481,7 +24535,7 @@ export {
   citations,
   rawSessionToken,
   liveDataConfig,
-  exchangeForLiveToken,
+  liveTokenFor,
   resolveLiveAccount,
   handleLogin,
   handleCallback,

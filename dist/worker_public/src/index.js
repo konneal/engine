@@ -1,6 +1,6 @@
 import {
   handleSearch
-} from "../../chunk-3VYRUVYG.js";
+} from "../../chunk-Z7AQEW6G.js";
 import {
   bindModelNode,
   checkQuoteAnchors,
@@ -9,7 +9,7 @@ import {
   modelGroundingBlock,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-UC6AKFNS.js";
+} from "../../chunk-YSWKFXXG.js";
 import {
   buildMessages,
   citations,
@@ -32,7 +32,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-JHFYBPRD.js";
+} from "../../chunk-GHDRKT4K.js";
 import {
   authenticate,
   corsHeaders,
@@ -996,7 +996,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-MPDHVWDZ.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-ATEV73ZM.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-P6KLPBKL.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-IBZ2BK2E.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1359,7 +1359,7 @@ async function tierFor(c) {
     if (!key) return err(401, "unauthorized", `Provide a valid API key: Authorization: Bearer ${P().publisher.id}_...`);
   }
   let tier = isApi ? "key" : "anon";
-  if (!isApi && c.env.SESSION_SECRET && await sessionFrom(c.req, c.env)) tier = "member";
+  if (!isApi && await sessionFrom(c.req, c.env)) tier = "member";
   return { tier, key };
 }
 async function mcpRoute(c) {
