@@ -87,6 +87,7 @@ export declare function modelCitation(node: BoundModelNode): {
     clause_title: string;
     status: string;
     corpus: string;
+    quality: string;
     url: undefined;
     snippet: string;
     score: number;

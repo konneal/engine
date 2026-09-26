@@ -33,6 +33,7 @@ export function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => (k in vars ? vars[k] : ""));
 }
 import { QueryFilters, toVectorizeFilter, standardKeyAllowed } from "./selfquery";
+import { hitQuality } from "./quality";
 import { lexicalPrefilter } from "./lexical";
 import { positionOrder } from "./structural";
 import { STAGES, runStages } from "./stages";
@@ -404,6 +405,7 @@ export function citations(hits: Hit[]) {
       status: h.metadata.status ?? "unknown",
       superseded_by: h.metadata.superseded_by || undefined,
       corpus: h.metadata.corpus || P().publisher.id,
+      quality: hitQuality(h.metadata),
       url: publicationUrl(h.metadata),
       snippet: h.text.slice(0, 400),
       score: h.rerank_score ?? h.score,
