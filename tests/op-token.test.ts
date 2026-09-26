@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deviceClientIds, opCfg, opMemberCanWrite, opMemberFromIntrospection, opTokenMember } from "../workers/worker_public/src/livedata.ts";
+import { deviceClientIds, opCfg, opMemberCanWrite, opMemberFromIntrospection, opTokenMember, patServiceIds } from "../workers/worker_public/src/livedata.ts";
 
 function bearer(token: string): Request {
   return new Request("https://ai.example.org/api/ask", { headers: { authorization: `Bearer ${token}` } });
@@ -33,6 +33,19 @@ test("deviceClientIds parses the allowlist; empty is off", () => {
 test("an active, allowlisted introspection answer resolves to the member credential", () => {
   const member = opMemberFromIntrospection({ active: true, client_id: "oiml-ommisa", sub: "acct-9", scope: "ai:read oiml:read" }, ["oiml-ommisa"]);
   assert.deepEqual(member, { sub: "acct-9", scope: "ai:read oiml:read", via: "op-token" });
+});
+
+test("the PAT form (no client_id on the wire) admits by service allowlist", () => {
+  const answer = { active: true, sub: "acct-9", scope: "oiml-ai:read oiml-ai:write", pat: "pat-1", token_type: "access_token" };
+  assert.deepEqual(opMemberFromIntrospection(answer, [], ["oiml-ai"]), { sub: "acct-9", scope: "oiml-ai:read oiml-ai:write", via: "op-token" });
+  // no PAT services listed → the PAT form stays anonymous
+  assert.equal(opMemberFromIntrospection(answer, [], []), null);
+  // a PAT scoped to other services only → refused
+  assert.equal(opMemberFromIntrospection({ ...answer, scope: "platform:read" }, [], ["oiml-ai"]), null);
+  // a client-bearing answer for a foreign client is still refused even
+  // with the PAT list populated (the lists are independent gates)
+  assert.equal(opMemberFromIntrospection({ active: true, client_id: "someone", sub: "acct-9", scope: "oiml-ai:read" }, ["oiml-ommisa"], ["oiml-ai"]), null);
+  assert.deepEqual(patServiceIds({ OIDC_PAT_SERVICES: " oiml-ai,other " }), ["oiml-ai", "other"]);
 });
 
 test("inactive, foreign-client or subject-less answers are null", () => {

@@ -23836,13 +23836,23 @@ function opMemberCanWrite(member) {
   if (member.via !== "op-token") return true;
   return /\bwrite\b/.test(member.scope ?? "");
 }
-function opMemberFromIntrospection(answer, ids) {
+function opMemberFromIntrospection(answer, ids, patServices = []) {
   if (!answer?.active) return null;
-  const clientId = String(answer.client_id ?? "");
-  if (!ids.includes(clientId)) return null;
   const sub = String(answer.sub ?? "");
   if (!sub) return null;
-  return { sub, scope: String(answer.scope ?? ""), via: "op-token" };
+  const clientId = String(answer.client_id ?? "");
+  if (clientId) {
+    if (!ids.includes(clientId)) return null;
+    return { sub, scope: String(answer.scope ?? ""), via: "op-token" };
+  }
+  if (!patServices.length) return null;
+  const scope = String(answer.scope ?? "");
+  const services = scope.split(/\s+/).filter(Boolean).map((s8) => s8.split(":")[0]);
+  if (!services.some((s8) => patServices.includes(s8))) return null;
+  return { sub, scope, via: "op-token" };
+}
+function patServiceIds(env) {
+  return String(env.OIDC_PAT_SERVICES ?? "").split(/[\s,]+/).filter(Boolean);
 }
 async function opTokenMember(env, cfg, req) {
   const m = /^Bearer\s+(.+)$/i.exec((req.headers.get("Authorization") ?? "").trim());
@@ -23872,7 +23882,7 @@ async function opTokenMember(env, cfg, req) {
     } catch {
     }
   }
-  return opMemberFromIntrospection(answer, ids);
+  return opMemberFromIntrospection(answer, ids, patServiceIds(env));
 }
 
 // workers/worker_public/src/oidc.ts
