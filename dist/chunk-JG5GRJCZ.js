@@ -2449,8 +2449,9 @@ Answer account questions from these records ONLY: name the record when you use i
   );
   await attachFigureImages(env, messages, usedHits, q.query);
   if (userImage) {
+    const wantsMarkings = /\b(mark(ing|ings)?|nameplate|label|inscription|engrav|sticker|plate)\b|certificat/i.test(q.query);
     const last = messages[messages.length - 1];
-    const note = "\n\n(The user attached an image with this question; interpret it directly when answering.)";
+    const note = wantsMarkings ? "\n\n(The user attached a photo with this question. First transcribe every inscription you can actually read in the image \u2014 names, model references, accuracy classes, numeric values with their units, certificate or approval numbers \u2014 quoting them verbatim. Then answer the question from the numbered passages, citing the requirement each interpretation rests on. If an inscription is unreadable, say so; never invent a marking.)" : "\n\n(The user attached an image with this question; interpret it directly when answering.)";
     if (Array.isArray(last.content)) {
       const textPart = last.content.find((p) => p.type === "text");
       if (textPart) textPart.text += note;
@@ -2476,7 +2477,7 @@ Answer account questions from these records ONLY: name the record when you use i
 `));
           send({ type: "read", read: readAs() });
           const sourceQuality = answerQuality(cites.map((c) => c.quality));
-          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...sourceQuality ? { source_quality: sourceQuality, quality_note: qualityNote(sourceQuality), ...sourceQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(cites) } : {} } : {}, ...liveRecords ? { records: liveRecords } : {}, quota });
+          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: qualityNote(sourceQuality), ...sourceQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(cites) } : {} } : {}, ...liveRecords ? { records: liveRecords } : {}, quota });
           let full = "";
           try {
             for await (const tok of sseTokens(stream)) {
@@ -2610,7 +2611,7 @@ Answer account questions from these records ONLY: name the record when you use i
   }
   completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
   const jsonQuality = answerQuality(finalCites.map((c) => c.quality));
-  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, quality_note: qualityNote(jsonQuality), ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
+  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: qualityNote(jsonQuality), ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const warmVec = await warmEmbed ?? null;
