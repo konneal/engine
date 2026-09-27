@@ -291,11 +291,6 @@ function buildJudgeContext(passages, machine = []) {
 }
 
 // workers/worker_public/src/faithfulness.ts
-function entailmentVerdict(score, supportedFloor, partialFloor) {
-  if (score >= supportedFloor) return { support: "supported", note: "" };
-  if (score >= partialFloor) return { support: "partial", note: "Partially grounded \u2014 some claims lack support in the cited passages; verify against the cited clauses." };
-  return { support: "unsupported", note: "WARNING: This answer's claims are largely unsupported by the retrieved passages. Verify against official publications." };
-}
 async function scoreFaithfulness(ai, model, answer, passages, machine = []) {
   if (!answer || !passages.length) return null;
   const context = buildJudgeContext(passages, machine);
@@ -332,6 +327,13 @@ ${context}${machine.length ? buildJudgeContext([], machine) : ""}` }
     return verdict;
   })();
   return await Promise.race([call, timeout]);
+}
+
+// workers/worker_public/src/entailment.ts
+function entailmentVerdict(score, supportedFloor, partialFloor) {
+  if (score >= supportedFloor) return { support: "supported", note: "" };
+  if (score >= partialFloor) return { support: "partial", note: "Partially grounded \u2014 some claims lack support in the cited passages; verify against the cited clauses." };
+  return { support: "unsupported", note: "WARNING: This answer's claims are largely unsupported by the retrieved passages. Verify against official publications." };
 }
 
 // workers/worker_public/src/anchors.ts
