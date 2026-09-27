@@ -1751,6 +1751,10 @@ function semanticCacheKey(indexVersion, gen, signature) {
 function isRegisterShaped(query) {
   return /\bcertif(ied|icates?|ication)s?\b/i.test(query) && /\b(is|are|still|currently|valid|status|suspended|revoked|was|were)\b/i.test(query);
 }
+function queryFamily(query) {
+  const m = /\b([RDMB])\s?-?(\d{2,3})\b/i.exec(query);
+  return m ? `${m[1].toUpperCase()}${m[2].padStart(2, "0")}` : null;
+}
 function registerTokens(query) {
   const stop = /* @__PURE__ */ new Set([
     "the",
@@ -1833,7 +1837,13 @@ async function searchRegister(db, query) {
   if (!isRegisterShaped(query)) return null;
   const tokens2 = registerTokens(query);
   if (!tokens2.length) return null;
-  const { sql, params } = buildRegisterQuery(tokens2);
+  const built = buildRegisterQuery(tokens2);
+  let { sql, params } = built;
+  const family = queryFamily(query);
+  if (family) {
+    sql = sql.replace(" WHERE ", " WHERE family = ?0 AND ");
+    params.unshift(family);
+  }
   try {
     const res = await db.prepare(sql).bind(...params).all();
     return { rows: res.results ?? [], tokens: tokens2 };
@@ -2183,6 +2193,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);
   const register = await searchRegister(env.DB, q.query);
+  console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
   const regNote = register ? registerNote(register.rows) : void 0;
   if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !apiCallIntent && !userImage && !fresh) {
     const warmVec = await warmEmbed ?? null;

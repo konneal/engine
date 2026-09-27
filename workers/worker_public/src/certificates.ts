@@ -29,6 +29,14 @@ export function isRegisterShaped(query: string): boolean {
  *  2+ characters that are not register question words, plus bare model
  *  numbers ("190", "HM14H1"). Upper-cased tokens match case-insensitively
  *  in SQL LIKE. */
+/** The family the question names ("R 60", "R60", "D 31") — the register
+ *  search filters to it, so a question about R 60 never presents R 76
+ *  rows. */
+export function queryFamily(query: string): string | null {
+  const m = /\b([RDMB])\s?-?(\d{2,3})\b/i.exec(query);
+  return m ? `${m[1].toUpperCase()}${m[2].padStart(2, "0")}` : null;
+}
+
 export function registerTokens(query: string): string[] {
   const stop = new Set([
     "the", "a", "an", "is", "are", "was", "were", "still", "currently", "in", "on", "for", "of", "and", "or",
@@ -84,7 +92,13 @@ export async function searchRegister(db: any, query: string): Promise<{ rows: Re
   if (!isRegisterShaped(query)) return null;
   const tokens = registerTokens(query);
   if (!tokens.length) return null;
-  const { sql, params } = buildRegisterQuery(tokens);
+  const built = buildRegisterQuery(tokens);
+  let { sql, params } = built;
+  const family = queryFamily(query);
+  if (family) {
+    sql = sql.replace(" WHERE ", " WHERE family = ?0 AND ");
+    params.unshift(family);
+  }
   try {
     const res = await db.prepare(sql).bind(...params).all();
     return { rows: (res.results ?? []) as RegisterRow[], tokens };

@@ -61,3 +61,12 @@ test("the padded comparison normalizes punctuation to spaces", () => {
   const { params } = buildRegisterQuery(["190"]);
   assert.equal(params[2], "% 190 %");
 });
+
+import { queryFamily } from "../workers/worker_public/src/certificates.ts";
+
+test("the question's family scopes the register search", () => {
+  assert.equal(queryFamily("Is the Utilcell 190 still certified in the OIML R 60 certificate register?"), "R60");
+  assert.equal(queryFamily("What is the status of certificate R60/1999-GB1-99.01?"), "R60");
+  assert.equal(queryFamily("Is the Acme D 31 meter certified?"), "D31");
+  assert.equal(queryFamily("Is the Acme meter certified?"), null);
+});

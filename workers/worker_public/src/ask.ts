@@ -583,6 +583,7 @@ async function handleAsk(
   // join the prompt as an authoritative note — exact matches, never a
   // similarity guess about certification standing
   const register = await searchRegister(env.DB, q.query);
+  console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
   const regNote = register ? registerNote(register.rows) : undefined;
 
   // semantic cache: near-duplicate of a recently answered question —
