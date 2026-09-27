@@ -1643,7 +1643,8 @@ async function feedbackRoute(c) {
   if (!/^[a-f0-9]{64}$/.test(queryHash) || ![1, -1].includes(rating)) {
     return withCors(err(400, "invalid_input", "query_hash and rating (1 or -1) are required"), corsHeaders(c.req));
   }
-  await c.env.DB.prepare("INSERT INTO feedback (query_hash, rating, ts) VALUES (?1,?2,?3)").bind(queryHash, rating, (/* @__PURE__ */ new Date()).toISOString()).run();
+  const note = typeof body?.note === "string" ? body.note.trim().slice(0, 280) : "";
+  await c.env.DB.prepare("INSERT INTO feedback (query_hash, rating, ts, note) VALUES (?1,?2,?3,?4)").bind(queryHash, rating, (/* @__PURE__ */ new Date()).toISOString(), note || null).run();
   return json({ ok: true, ...corsHeaders(c.req) });
 }
 async function unitAssetRoute(c) {
