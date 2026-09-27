@@ -35,14 +35,14 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-IUMHKBOY.js";
+} from "./chunk-VVLNUHW2.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-R2V3X6SQ.js";
+} from "./chunk-JWTIPQ4L.js";
 import {
   canonicalRefusal,
   refusalAnswer
@@ -52,17 +52,18 @@ import {
   requestSalt,
   resolveRequestScope,
   standardKeysFrom
-} from "./chunk-4GJGBGJK.js";
+} from "./chunk-O6VZIDPW.js";
 import {
   LIMITS,
   MODELS,
+  THRESHOLDS,
   answerEffort,
   effortBudget,
   num,
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-V46XM2GU.js";
+} from "./chunk-Z24IAKB6.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -214,6 +215,123 @@ ${ctx}`
   } catch {
     return null;
   }
+}
+
+// workers/worker_public/prompts/faithfulness.md
+var faithfulness_default = `You are a factuality judge. Given an answer and the retrieved passages it was based on, identify any claims in the answer that are NOT directly supported by the passages. Reply with ONLY a JSON object: {"score": 0.0-1.0, "ungrounded_claims": ["claim text", ...]} \u2014 score is the fraction of claims that ARE grounded in the passages; if every claim is supported, score is 1.0 and ungrounded_claims is [].
+
+Passages prefixed [M] are this service's own machine-computed model data (typed blocks the answer was given) \u2014 a claim restating [M] content is grounded.
+`;
+
+// workers/worker_public/src/verdict-parse.ts
+function coerceVerdict(obj) {
+  if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return null;
+  const raw = obj.score;
+  const score = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
+  if (!Number.isFinite(score)) return null;
+  const claims = obj.ungrounded_claims;
+  return {
+    score: Math.max(0, Math.min(1, score)),
+    ungrounded_claims: Array.isArray(claims) ? claims.map(String).slice(0, 5) : []
+  };
+}
+function parseVerdict(text) {
+  const stripped = text.replace(/```[a-zA-Z]*\n?/g, "").replace(/```/g, "").trim();
+  try {
+    const whole = coerceVerdict(JSON.parse(stripped));
+    if (whole) return whole;
+  } catch {
+  }
+  let verdict = null;
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (inString && ch === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}" && depth > 0) {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        try {
+          const v = coerceVerdict(JSON.parse(stripped.slice(start, i + 1)));
+          if (v) verdict = v;
+        } catch {
+        }
+      }
+    }
+  }
+  return verdict;
+}
+
+// workers/worker_public/src/faithfulness-context.ts
+function buildJudgeContext(passages, machine = []) {
+  const context = passages.slice(0, 8).map((p, i) => {
+    const text = typeof p === "string" ? p : p.text;
+    const limit = typeof p !== "string" && p.table ? 2400 : 1400;
+    return `[${i + 1}] ${text.replace(/\s+/g, " ").slice(0, limit)}`;
+  }).join("\n");
+  const machineContext = machine.length ? "\n" + machine.slice(0, 6).map((m) => `[M] ${m.replace(/\s+/g, " ").slice(0, 400)}`).join("\n") : "";
+  return context + machineContext;
+}
+
+// workers/worker_public/src/faithfulness.ts
+function entailmentVerdict(score, supportedFloor, partialFloor) {
+  if (score >= supportedFloor) return { support: "supported", note: "" };
+  if (score >= partialFloor) return { support: "partial", note: "Partially grounded \u2014 some claims lack support in the cited passages; verify against the cited clauses." };
+  return { support: "unsupported", note: "WARNING: This answer's claims are largely unsupported by the retrieved passages. Verify against official publications." };
+}
+async function scoreFaithfulness(ai, model, answer, passages, machine = []) {
+  if (!answer || !passages.length) return null;
+  const context = buildJudgeContext(passages, machine);
+  const t0 = Date.now();
+  const timeout = new Promise((r) => setTimeout(() => {
+    console.log(`faithfulness: timeout (${Date.now() - t0}ms)`);
+    r(null);
+  }, 24e4));
+  const call = (async () => {
+    const res = await ai.run(model, {
+      messages: [
+        {
+          role: "system",
+          content: faithfulness_default.trimEnd()
+        },
+        { role: "user", content: `Answer:
+${answer.slice(0, 2e3)}
+
+Passages:
+${context}${machine.length ? buildJudgeContext([], machine) : ""}` }
+      ],
+      max_tokens: 6144,
+      reasoning_effort: "low",
+      // DeepSeek-V4 card: temp 1.0 / top_p 1.0
+      temperature: 1,
+      top_p: 1
+    });
+    const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+    const verdict = parseVerdict(text ?? "");
+    if (!verdict) {
+      console.log(`faithfulness: no parse (${Date.now() - t0}ms, text ${(text ?? "").length} chars) raw=${JSON.stringify((text ?? "").replace(/\s+/g, " ").slice(0, 500))}`);
+      return null;
+    }
+    return verdict;
+  })();
+  return await Promise.race([call, timeout]);
 }
 
 // workers/worker_public/src/anchors.ts
@@ -2688,7 +2806,21 @@ Answer account questions from these records ONLY: name the record when you use i
   }
   completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
   const jsonQuality = answerQuality(finalCites.map((c) => c.quality));
-  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: qualityNote(jsonQuality), ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
+  let entailment = null;
+  let entailmentNote = "";
+  if (THRESHOLDS.entailmentGate && jsonQuality && used.length && !answer.includes(refusalAnswer())) {
+    const raced = await Promise.race([
+      scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, used.map((h) => h.text)),
+      new Promise((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs))
+    ]);
+    if (raced) {
+      const v = entailmentVerdict(raced.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
+      entailment = { support: v.support, score: Math.round(raced.score * 100) / 100, ...raced.ungrounded_claims?.length ? { ungrounded: raced.ungrounded_claims.slice(0, 3) } : {} };
+      entailmentNote = v.note;
+      if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
+    }
+  }
+  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
@@ -2720,6 +2852,7 @@ function sseResponse(events, cors) {
 
 export {
   handleMemories,
+  scoreFaithfulness,
   checkQuoteAnchors,
   standardForDocNumber,
   bindModelNode,

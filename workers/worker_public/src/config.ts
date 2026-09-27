@@ -56,6 +56,15 @@ export const THRESHOLDS = {
    *  pool below the primary dense lane; they must earn their window
    *  slot under the cross-encoder, not by graph membership alone. */
   graphLaneDiscount: 0.75,
+  /** The entailment gate (TODO.new-era/10): the faithfulness scorer
+   *  promoted from eval-only onto the serving path. The confidence line
+   *  then states a measurement — claim support in the cited passages —
+   *  not only the source rung. Fails open (a slow or unparseable check
+   *  leaves the source-rung note unchanged). */
+  entailmentGate: true,
+  entailmentBudgetMs: 6000,
+  entailmentSupportedFloor: 0.9,
+  entailmentPartialFloor: 0.5,
   /** Concept-graph candidate discount — same rationale as the graph
    *  lane: definitional content enters discounted. */
   conceptGraphDiscount: 0.75,
