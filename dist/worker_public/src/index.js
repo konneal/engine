@@ -1,15 +1,16 @@
 import {
   handleSearch
-} from "../../chunk-47VBMM7I.js";
+} from "../../chunk-DMIOBGQU.js";
 import {
   bindModelNode,
   checkQuoteAnchors,
   handleAsk,
   handleMemories,
   modelGroundingBlock,
+  scoreFaithfulness,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-SONICKNY.js";
+} from "../../chunk-OZRVP2MR.js";
 import {
   buildMessages,
   cfBlobs,
@@ -36,7 +37,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-IUMHKBOY.js";
+} from "../../chunk-VVLNUHW2.js";
 import {
   authenticate,
   corsHeaders,
@@ -45,14 +46,14 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-R2V3X6SQ.js";
+} from "../../chunk-JWTIPQ4L.js";
 import {
   canonicalRefusal
 } from "../../chunk-A3QHHUN5.js";
 import {
   entitlementScope,
   standardKeysFrom
-} from "../../chunk-4GJGBGJK.js";
+} from "../../chunk-O6VZIDPW.js";
 import {
   LIMITS,
   MODELS,
@@ -63,7 +64,7 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-V46XM2GU.js";
+} from "../../chunk-Z24IAKB6.js";
 import {
   P,
   setProfile
@@ -331,118 +332,6 @@ async function handleGetShared(env, slug) {
     created_at: row.created_at,
     messages: JSON.parse(row.messages)
   });
-}
-
-// workers/worker_public/prompts/faithfulness.md
-var faithfulness_default = `You are a factuality judge. Given an answer and the retrieved passages it was based on, identify any claims in the answer that are NOT directly supported by the passages. Reply with ONLY a JSON object: {"score": 0.0-1.0, "ungrounded_claims": ["claim text", ...]} \u2014 score is the fraction of claims that ARE grounded in the passages; if every claim is supported, score is 1.0 and ungrounded_claims is [].
-
-Passages prefixed [M] are this service's own machine-computed model data (typed blocks the answer was given) \u2014 a claim restating [M] content is grounded.
-`;
-
-// workers/worker_public/src/verdict-parse.ts
-function coerceVerdict(obj) {
-  if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return null;
-  const raw = obj.score;
-  const score = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : NaN;
-  if (!Number.isFinite(score)) return null;
-  const claims = obj.ungrounded_claims;
-  return {
-    score: Math.max(0, Math.min(1, score)),
-    ungrounded_claims: Array.isArray(claims) ? claims.map(String).slice(0, 5) : []
-  };
-}
-function parseVerdict(text) {
-  const stripped = text.replace(/```[a-zA-Z]*\n?/g, "").replace(/```/g, "").trim();
-  try {
-    const whole = coerceVerdict(JSON.parse(stripped));
-    if (whole) return whole;
-  } catch {
-  }
-  let verdict = null;
-  let depth = 0;
-  let start = -1;
-  let inString = false;
-  let escaped = false;
-  for (let i = 0; i < stripped.length; i++) {
-    const ch = stripped[i];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (inString && ch === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-    if (ch === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === "}" && depth > 0) {
-      depth--;
-      if (depth === 0 && start >= 0) {
-        try {
-          const v = coerceVerdict(JSON.parse(stripped.slice(start, i + 1)));
-          if (v) verdict = v;
-        } catch {
-        }
-      }
-    }
-  }
-  return verdict;
-}
-
-// workers/worker_public/src/faithfulness-context.ts
-function buildJudgeContext(passages, machine = []) {
-  const context = passages.slice(0, 8).map((p, i) => {
-    const text = typeof p === "string" ? p : p.text;
-    const limit = typeof p !== "string" && p.table ? 2400 : 1400;
-    return `[${i + 1}] ${text.replace(/\s+/g, " ").slice(0, limit)}`;
-  }).join("\n");
-  const machineContext = machine.length ? "\n" + machine.slice(0, 6).map((m) => `[M] ${m.replace(/\s+/g, " ").slice(0, 400)}`).join("\n") : "";
-  return context + machineContext;
-}
-
-// workers/worker_public/src/faithfulness.ts
-async function scoreFaithfulness(ai, model, answer, passages, machine = []) {
-  if (!answer || !passages.length) return null;
-  const context = buildJudgeContext(passages, machine);
-  const t0 = Date.now();
-  const timeout = new Promise((r) => setTimeout(() => {
-    console.log(`faithfulness: timeout (${Date.now() - t0}ms)`);
-    r(null);
-  }, 24e4));
-  const call = (async () => {
-    const res = await ai.run(model, {
-      messages: [
-        {
-          role: "system",
-          content: faithfulness_default.trimEnd()
-        },
-        { role: "user", content: `Answer:
-${answer.slice(0, 2e3)}
-
-Passages:
-${context}${machine.length ? buildJudgeContext([], machine) : ""}` }
-      ],
-      max_tokens: 6144,
-      reasoning_effort: "low",
-      // DeepSeek-V4 card: temp 1.0 / top_p 1.0
-      temperature: 1,
-      top_p: 1
-    });
-    const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
-    const verdict = parseVerdict(text ?? "");
-    if (!verdict) {
-      console.log(`faithfulness: no parse (${Date.now() - t0}ms, text ${(text ?? "").length} chars) raw=${JSON.stringify((text ?? "").replace(/\s+/g, " ").slice(0, 500))}`);
-      return null;
-    }
-    return verdict;
-  })();
-  return await Promise.race([call, timeout]);
 }
 
 // workers/worker_public/prompts/enrichment.md
@@ -1058,7 +947,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-KL7XUELS.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-NTQVSSAE.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-E3K7TFXJ.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-KNB2S2PS.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });

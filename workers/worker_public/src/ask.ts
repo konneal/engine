@@ -3,7 +3,7 @@
 // echo — everything between "request validated" and "response written".
 // index.ts routes here; this module owns the answer contract.
 
-import { LIMITS, MODELS, num, sha256Hex, roleModel, answerEffort, requestEffort, effortBudget } from "./config";
+import { LIMITS, MODELS, THRESHOLDS, num, sha256Hex, roleModel, answerEffort, requestEffort, effortBudget } from "./config";
 import { portModelRunner } from "./env.ts";
 import { refCodec } from "./codecs";
 import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, refusalAnswer, Hit } from "./pipeline";
@@ -14,6 +14,8 @@ import { gradeRetrieval } from "./grader";
 import summarizePrompt from "../prompts/summarize.md";
 import { embed, generateOnce } from "./ai";
 import { reflect } from "./reflect";
+import { scoreFaithfulness } from "./faithfulness";
+import { entailmentVerdict } from "./entailment";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
 import { canonicalRefusal } from "./refusal";
 import { contractV2, tableRetyped } from "./refs";
@@ -1309,7 +1311,26 @@ async function handleAsk(
   completionBlocks.push(...(await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used)));
 
   const jsonQuality = answerQuality(finalCites.map((c: any) => c.quality));
-  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: qualityNote(jsonQuality), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
+  // the entailment gate (TODO.new-era/10): the eval battery's faithfulness
+  // scorer, promoted onto the serving path — the confidence line states a
+  // measurement (claim support in the cited passages), not only the source
+  // rung. Budgeted and fail-open: a slow or unparseable check leaves the
+  // rung note untouched; refusals and uncited answers have nothing to gate.
+  let entailment: { support: string; score: number; ungrounded?: string[] } | null = null;
+  let entailmentNote = "";
+  if (THRESHOLDS.entailmentGate && jsonQuality && used.length && !answer.includes(refusalAnswer())) {
+    const raced = await Promise.race([
+      scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, (used as Hit[]).map((h: Hit) => h.text)),
+      new Promise<null>((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs)),
+    ]);
+    if (raced) {
+      const v = entailmentVerdict(raced.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
+      entailment = { support: v.support, score: Math.round(raced.score * 100) / 100, ...(raced.ungrounded_claims?.length ? { ungrounded: raced.ungrounded_claims.slice(0, 3) } : {}) };
+      entailmentNote = v.note;
+      if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
+    }
+  }
+  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
