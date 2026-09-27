@@ -459,8 +459,11 @@ async function feedbackRoute(c: RouteContext): Promise<Response> {
   if (!/^[a-f0-9]{64}$/.test(queryHash) || ![1, -1].includes(rating)) {
     return withCors(err(400, "invalid_input", "query_hash and rating (1 or -1) are required"), corsHeaders(c.req));
   }
-  await c.env.DB.prepare("INSERT INTO feedback (query_hash, rating, ts) VALUES (?1,?2,?3)")
-    .bind(queryHash, rating, new Date().toISOString())
+  // an optional free-text note (the reason chips) - capped, stored with
+  // the vote, and read by the triage script's clustering
+  const note = typeof body?.note === "string" ? body.note.trim().slice(0, 280) : "";
+  await c.env.DB.prepare("INSERT INTO feedback (query_hash, rating, ts, note) VALUES (?1,?2,?3,?4)")
+    .bind(queryHash, rating, new Date().toISOString(), note || null)
     .run();
   return json({ ok: true, ...corsHeaders(c.req) });
 }
