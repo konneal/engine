@@ -4,4 +4,5 @@
 export interface Blobs {
   get(key: string): Promise<{ body: ReadableStream | null; contentType?: string } | null>;
   put(key: string, value: string | ReadableStream | ArrayBuffer, contentType?: string): Promise<void>;
+  delete(key: string): Promise<void>;
 }

@@ -24,7 +24,8 @@ import { json, err, corsHeaders, withCors, readJson, authenticate, type ApiKey }
 import { handleSearch } from "./search";
 import { handleEnrich, handleSectionUnit, handleCaption, handleVectors, handleJudge, handleCreateKey, handleListKeys, handleRevokeKey, handleKeyUsage } from "./admin";
 import { handleResearch } from "./research";
-import { uploadAttachment, readAttachment, deleteAttachment } from "./attachments";
+import { uploadAttachment, readAttachment, deleteAttachment, type AttachmentDeps } from "./attachments";
+import { cfBlobs } from "./ports/cloudflare/adapters";
 import { handleAsk } from "./ask";
 import { handleMcp } from "./mcp";
 
@@ -84,8 +85,9 @@ function opWriteRefused(c: RouteContext, who: { write: boolean } | Response): Re
 async function attachmentsUploadRoute(c: RouteContext): Promise<Response> {
   const session = await sessionFrom(c.req, c.env as any);
   if (!session) return withCors(err(401, "unauthorized", "Sign in to store attachments"), corsHeaders(c.req));
+  const deps: AttachmentDeps = { blobs: cfBlobs(c.env.CHAT_UPLOADS), store: c.env.DB };
   const body = await readJson(c.req);
-  const out = await uploadAttachment(c.env, session.sub, String(body?.data_url ?? ""));
+  const out = await uploadAttachment(deps, session.sub, String(body?.data_url ?? ""));
   if (out instanceof Response) return withCors(out, corsHeaders(c.req));
   return withCors(json({ id: out.id }, 201), corsHeaders(c.req));
 }
@@ -102,14 +104,16 @@ async function attachmentsListRoute(c: RouteContext): Promise<Response> {
 async function attachmentsGetRoute(c: RouteContext): Promise<Response> {
   const session = await sessionFrom(c.req, c.env as any);
   if (!session) return err(404, "not_found", "No such attachment");
-  const out = await readAttachment(c.env, session.sub, c.params.id!);
+  const deps: AttachmentDeps = { blobs: cfBlobs(c.env.CHAT_UPLOADS), store: c.env.DB };
+  const out = await readAttachment(deps, session.sub, c.params.id!);
   return out ?? err(404, "not_found", "No such attachment");
 }
 
 async function attachmentsDeleteRoute(c: RouteContext): Promise<Response> {
   const session = await sessionFrom(c.req, c.env as any);
   if (!session) return withCors(err(401, "unauthorized", "Sign in to manage attachments"), corsHeaders(c.req));
-  const gone = await deleteAttachment(c.env, session.sub, c.params.id!);
+  const deps: AttachmentDeps = { blobs: cfBlobs(c.env.CHAT_UPLOADS), store: c.env.DB };
+  const gone = await deleteAttachment(deps, session.sub, c.params.id!);
   if (!gone) return withCors(err(404, "not_found", "No such attachment"), corsHeaders(c.req));
   return withCors(json({ ok: true }), corsHeaders(c.req));
 }

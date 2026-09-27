@@ -10,6 +10,17 @@
 //      their conversation is deleted. No TTL quietly eats member files.
 //   3. The content is verified, not the extension: the magic bytes
 //      decide what the file is.
+//
+// Storage rides the Blobs port and the row rides the StoreQuery port —
+// the module never names a provider binding (the ports purity lint).
+
+import type { Blobs } from "./ports/blobs.ts";
+import type { StoreQuery } from "./ports/store.ts";
+
+export interface AttachmentDeps {
+  blobs: Blobs;
+  store: StoreQuery;
+}
 
 const MAX_BYTES = 4_000_000;
 const ALLOWED: Record<string, string> = {
@@ -51,7 +62,7 @@ export function parseDataUrl(dataUrl: string): { mime: string; bytes: Uint8Array
   return { mime, bytes };
 }
 
-export async function uploadAttachment(env: any, sub: string, dataUrl: string): Promise<{ id: string } | Response> {
+export async function uploadAttachment(deps: AttachmentDeps, sub: string, dataUrl: string): Promise<{ id: string } | Response> {
   const parsed = parseDataUrl(dataUrl);
   if (!parsed) {
     return new Response(JSON.stringify({ error: { code: "invalid_input", message: "A PNG, JPEG, WebP or GIF image of at most 4 MB is required" } }), { status: 400, headers: { "content-type": "application/json" } });
@@ -59,37 +70,33 @@ export async function uploadAttachment(env: any, sub: string, dataUrl: string): 
   const id = crypto.randomUUID();
   // the key embeds the owner — the storage partition IS the isolation
   const key = `att/${sub}/${id}`;
-  await env.CHAT_UPLOADS.put(key, parsed.bytes, { httpMetadata: { contentType: parsed.mime } });
-  await env.DB.prepare("INSERT INTO attachments (id, sub, mime, bytes, r2_key) VALUES (?1,?2,?3,?4,?5)")
-    .bind(id, sub, parsed.mime, parsed.bytes.length, key)
-    .run();
+  await deps.blobs.put(key, parsed.bytes.buffer as ArrayBuffer, parsed.mime);
+  await deps.store.prepare("INSERT INTO attachments (id, sub, mime, bytes, r2_key) VALUES (?1,?2,?3,?4,?5)").bind(id, sub, parsed.mime, parsed.bytes.length, key).run();
   return { id };
 }
 
 /** The ownership check every access runs first: the row must exist and
  *  belong to the caller. A foreign id is indistinguishable from a
  *  missing one (404 — never a confirmation of someone else's file). */
-export async function ownedAttachment(env: any, sub: string, id: string): Promise<AttachmentRow | null> {
-  const row = await env.DB.prepare("SELECT id, sub, mime, bytes, created_at FROM attachments WHERE id = ?1 AND sub = ?2")
-    .bind(id, sub)
-    .first();
+export async function ownedAttachment(deps: AttachmentDeps, sub: string, id: string): Promise<AttachmentRow | null> {
+  const row = await deps.store.prepare("SELECT id, sub, mime, bytes, created_at FROM attachments WHERE id = ?1 AND sub = ?2").bind(id, sub).first();
   return (row as AttachmentRow) ?? null;
 }
 
-export async function readAttachment(env: any, sub: string, id: string): Promise<Response | null> {
-  const row = await ownedAttachment(env, sub, id);
+export async function readAttachment(deps: AttachmentDeps, sub: string, id: string): Promise<Response | null> {
+  const row = await ownedAttachment(deps, sub, id);
   if (!row) return null;
-  const obj = await env.CHAT_UPLOADS.get(`att/${row.sub}/${row.id}`);
+  const obj = await deps.blobs.get(`att/${row.sub}/${row.id}`);
   if (!obj) return null;
   return new Response(obj.body, {
-    headers: { "content-type": row.mime, "cache-control": "private, max-age=86400" },
+    headers: { "content-type": obj.contentType ?? row.mime, "cache-control": "private, max-age=86400" },
   });
 }
 
-export async function deleteAttachment(env: any, sub: string, id: string): Promise<boolean> {
-  const row = await ownedAttachment(env, sub, id);
+export async function deleteAttachment(deps: AttachmentDeps, sub: string, id: string): Promise<boolean> {
+  const row = await ownedAttachment(deps, sub, id);
   if (!row) return false;
-  await env.CHAT_UPLOADS.delete(`att/${sub}/${id}`);
-  await env.DB.prepare("DELETE FROM attachments WHERE id = ?1 AND sub = ?2").bind(id, sub).run();
+  await deps.blobs.delete(`att/${sub}/${id}`);
+  await deps.store.prepare("DELETE FROM attachments WHERE id = ?1 AND sub = ?2").bind(id, sub).run();
   return true;
 }
