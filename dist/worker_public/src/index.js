@@ -1,6 +1,6 @@
 import {
   handleSearch
-} from "../../chunk-AKAFLMIB.js";
+} from "../../chunk-47VBMM7I.js";
 import {
   bindModelNode,
   checkQuoteAnchors,
@@ -9,9 +9,10 @@ import {
   modelGroundingBlock,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-SE67PTJ6.js";
+} from "../../chunk-SONICKNY.js";
 import {
   buildMessages,
+  cfBlobs,
   citations,
   editionNote,
   embed,
@@ -35,7 +36,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-N2UOENDY.js";
+} from "../../chunk-IUMHKBOY.js";
 import {
   authenticate,
   corsHeaders,
@@ -962,35 +963,35 @@ function parseDataUrl(dataUrl) {
   if (!mime || bytes.length > MAX_BYTES) return null;
   return { mime, bytes };
 }
-async function uploadAttachment(env, sub, dataUrl) {
+async function uploadAttachment(deps, sub, dataUrl) {
   const parsed = parseDataUrl(dataUrl);
   if (!parsed) {
     return new Response(JSON.stringify({ error: { code: "invalid_input", message: "A PNG, JPEG, WebP or GIF image of at most 4 MB is required" } }), { status: 400, headers: { "content-type": "application/json" } });
   }
   const id = crypto.randomUUID();
   const key = `att/${sub}/${id}`;
-  await env.CHAT_UPLOADS.put(key, parsed.bytes, { httpMetadata: { contentType: parsed.mime } });
-  await env.DB.prepare("INSERT INTO attachments (id, sub, mime, bytes, r2_key) VALUES (?1,?2,?3,?4,?5)").bind(id, sub, parsed.mime, parsed.bytes.length, key).run();
+  await deps.blobs.put(key, parsed.bytes.buffer, parsed.mime);
+  await deps.store.prepare("INSERT INTO attachments (id, sub, mime, bytes, r2_key) VALUES (?1,?2,?3,?4,?5)").bind(id, sub, parsed.mime, parsed.bytes.length, key).run();
   return { id };
 }
-async function ownedAttachment(env, sub, id) {
-  const row = await env.DB.prepare("SELECT id, sub, mime, bytes, created_at FROM attachments WHERE id = ?1 AND sub = ?2").bind(id, sub).first();
+async function ownedAttachment(deps, sub, id) {
+  const row = await deps.store.prepare("SELECT id, sub, mime, bytes, created_at FROM attachments WHERE id = ?1 AND sub = ?2").bind(id, sub).first();
   return row ?? null;
 }
-async function readAttachment(env, sub, id) {
-  const row = await ownedAttachment(env, sub, id);
+async function readAttachment(deps, sub, id) {
+  const row = await ownedAttachment(deps, sub, id);
   if (!row) return null;
-  const obj = await env.CHAT_UPLOADS.get(`att/${row.sub}/${row.id}`);
+  const obj = await deps.blobs.get(`att/${row.sub}/${row.id}`);
   if (!obj) return null;
   return new Response(obj.body, {
-    headers: { "content-type": row.mime, "cache-control": "private, max-age=86400" }
+    headers: { "content-type": obj.contentType ?? row.mime, "cache-control": "private, max-age=86400" }
   });
 }
-async function deleteAttachment(env, sub, id) {
-  const row = await ownedAttachment(env, sub, id);
+async function deleteAttachment(deps, sub, id) {
+  const row = await ownedAttachment(deps, sub, id);
   if (!row) return false;
-  await env.CHAT_UPLOADS.delete(`att/${sub}/${id}`);
-  await env.DB.prepare("DELETE FROM attachments WHERE id = ?1 AND sub = ?2").bind(id, sub).run();
+  await deps.blobs.delete(`att/${sub}/${id}`);
+  await deps.store.prepare("DELETE FROM attachments WHERE id = ?1 AND sub = ?2").bind(id, sub).run();
   return true;
 }
 
@@ -1057,7 +1058,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-6QPD3QA5.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-QZDQVB57.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-KL7XUELS.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-NTQVSSAE.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1406,8 +1407,9 @@ function opWriteRefused(c, who) {
 async function attachmentsUploadRoute(c) {
   const session = await sessionFrom(c.req, c.env);
   if (!session) return withCors(err(401, "unauthorized", "Sign in to store attachments"), corsHeaders(c.req));
+  const deps = { blobs: cfBlobs(c.env.CHAT_UPLOADS), store: c.env.DB };
   const body = await readJson(c.req);
-  const out = await uploadAttachment(c.env, session.sub, String(body?.data_url ?? ""));
+  const out = await uploadAttachment(deps, session.sub, String(body?.data_url ?? ""));
   if (out instanceof Response) return withCors(out, corsHeaders(c.req));
   return withCors(json({ id: out.id }, 201), corsHeaders(c.req));
 }
@@ -1420,13 +1422,15 @@ async function attachmentsListRoute(c) {
 async function attachmentsGetRoute(c) {
   const session = await sessionFrom(c.req, c.env);
   if (!session) return err(404, "not_found", "No such attachment");
-  const out = await readAttachment(c.env, session.sub, c.params.id);
+  const deps = { blobs: cfBlobs(c.env.CHAT_UPLOADS), store: c.env.DB };
+  const out = await readAttachment(deps, session.sub, c.params.id);
   return out ?? err(404, "not_found", "No such attachment");
 }
 async function attachmentsDeleteRoute(c) {
   const session = await sessionFrom(c.req, c.env);
   if (!session) return withCors(err(401, "unauthorized", "Sign in to manage attachments"), corsHeaders(c.req));
-  const gone = await deleteAttachment(c.env, session.sub, c.params.id);
+  const deps = { blobs: cfBlobs(c.env.CHAT_UPLOADS), store: c.env.DB };
+  const gone = await deleteAttachment(deps, session.sub, c.params.id);
   if (!gone) return withCors(err(404, "not_found", "No such attachment"), corsHeaders(c.req));
   return withCors(json({ ok: true }), corsHeaders(c.req));
 }

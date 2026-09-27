@@ -1,3 +1,9 @@
+import type { Blobs } from "./ports/blobs.ts";
+import type { StoreQuery } from "./ports/store.ts";
+export interface AttachmentDeps {
+    blobs: Blobs;
+    store: StoreQuery;
+}
 export interface AttachmentRow {
     id: string;
     sub: string;
@@ -14,12 +20,12 @@ export declare function parseDataUrl(dataUrl: string): {
     mime: string;
     bytes: Uint8Array;
 } | null;
-export declare function uploadAttachment(env: any, sub: string, dataUrl: string): Promise<{
+export declare function uploadAttachment(deps: AttachmentDeps, sub: string, dataUrl: string): Promise<{
     id: string;
 } | Response>;
 /** The ownership check every access runs first: the row must exist and
  *  belong to the caller. A foreign id is indistinguishable from a
  *  missing one (404 — never a confirmation of someone else's file). */
-export declare function ownedAttachment(env: any, sub: string, id: string): Promise<AttachmentRow | null>;
-export declare function readAttachment(env: any, sub: string, id: string): Promise<Response | null>;
-export declare function deleteAttachment(env: any, sub: string, id: string): Promise<boolean>;
+export declare function ownedAttachment(deps: AttachmentDeps, sub: string, id: string): Promise<AttachmentRow | null>;
+export declare function readAttachment(deps: AttachmentDeps, sub: string, id: string): Promise<Response | null>;
+export declare function deleteAttachment(deps: AttachmentDeps, sub: string, id: string): Promise<boolean>;

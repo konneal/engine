@@ -164,6 +164,9 @@ export function cfBlobs(bucket: unknown): Blobs {
     async put(key, value, contentType) {
       await r2.put(key, value, contentType ? { httpMetadata: { contentType } } : undefined);
     },
+    async delete(key) {
+      await r2.delete(key);
+    },
   };
 }
 

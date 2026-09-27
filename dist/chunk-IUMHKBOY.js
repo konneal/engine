@@ -22214,6 +22214,22 @@ function cfVectorIndex(index) {
     }
   };
 }
+function cfBlobs(bucket) {
+  const r2 = bucket;
+  return {
+    async get(key) {
+      const obj = await r2.get(key);
+      if (!obj) return null;
+      return { body: obj.body, contentType: obj.httpMetadata?.contentType };
+    },
+    async put(key, value2, contentType) {
+      await r2.put(key, value2, contentType ? { httpMetadata: { contentType } } : void 0);
+    },
+    async delete(key) {
+      await r2.delete(key);
+    }
+  };
+}
 function cfStore(db) {
   return db;
 }
@@ -24618,6 +24634,7 @@ export {
   parseAppliedContext,
   contextNote,
   syntheticUnderstanding,
+  cfBlobs,
   portModelRunner,
   portStore,
   promptVars,
