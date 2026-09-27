@@ -368,6 +368,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the member's attachments */
+        get: operations["listAttachments"];
+        put?: never;
+        /**
+         * Upload an image attachment
+         * @description Stores a member-uploaded image (PNG, JPEG, WebP or GIF, at most 4 MB) and returns its identifier. The attachment persists until the member deletes it. The content is verified from its bytes, never from a declared type. The body carries the image as a data URL — the same shape the composer produces.
+         */
+        post: operations["uploadAttachment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attachments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one attachment's image
+         * @description Streams the stored image. The response is 404 for a foreign identifier — ownership is checked on every fetch, and a file belonging to another account is indistinguishable from a missing one.
+         */
+        get: operations["getAttachment"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete an attachment
+         * @description Removes the stored object and its record. Stored until deleted — and this deletes it.
+         */
+        delete: operations["deleteAttachment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/memories": {
         parameters: {
             query?: never;
@@ -1472,6 +1517,110 @@ export interface operations {
         responses: {
             /** @description The shared conversation, without member identity. */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listAttachments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The attachment identifiers, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    uploadAttachment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The image as a data URL. */
+                    data_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The attachment's identifier. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The content is not an allowed image, or exceeds the size cap. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getAttachment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image bytes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such attachment owned by the caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteAttachment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such attachment owned by the caller. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

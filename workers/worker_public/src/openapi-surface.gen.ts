@@ -29,6 +29,10 @@ export type OpenApiOperationId =
   | "appendMessage"
   | "shareConversation"
   | "getShared"
+  | "uploadAttachment"
+  | "listAttachments"
+  | "getAttachment"
+  | "deleteAttachment"
   | "listMemories"
   | "createMemory"
   | "deleteMemory"
@@ -169,6 +173,26 @@ export const OPENAPI_SURFACE: readonly (Omit<OpenApiRoute, "operationId"> & { op
     "method": "GET",
     "pattern": "/api/shared/:slug",
     "operationId": "getShared"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/attachments",
+    "operationId": "uploadAttachment"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/attachments",
+    "operationId": "listAttachments"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/attachments/:id",
+    "operationId": "getAttachment"
+  },
+  {
+    "method": "DELETE",
+    "pattern": "/api/attachments/:id",
+    "operationId": "deleteAttachment"
   },
   {
     "method": "GET",

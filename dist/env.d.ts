@@ -20,6 +20,7 @@ export interface Env {
     ASSETS: Fetcher;
     INDEX_VERSION: string;
     UNIT_ASSETS: R2Bucket;
+    CHAT_UPLOADS: R2Bucket;
     ANON_DAY_ASK: string;
     ANON_DAY_SEARCH: string;
     KEY_DAY_ASK_DEFAULT: string;

@@ -936,6 +936,64 @@ ${recent.map((h, n) => `[${n + 1}] ${h.metadata.docidentifier ?? ""} \xA7${h.met
   return out;
 }
 
+// workers/worker_public/src/attachments.ts
+var MAX_BYTES = 4e6;
+var ALLOWED = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif"
+};
+function sniffImage(head, totalBytes) {
+  if (totalBytes > MAX_BYTES || totalBytes < 12) return null;
+  if (head[0] === 137 && head[1] === 80 && head[2] === 78 && head[3] === 71) return "image/png";
+  if (head[0] === 255 && head[1] === 216) return "image/jpeg";
+  if (head.length >= 12 && head[8] === 87 && head[9] === 69 && head[10] === 66 && head[11] === 80) return "image/webp";
+  if (head[0] === 71 && head[1] === 73 && head[2] === 70) return "image/gif";
+  return null;
+}
+function parseDataUrl(dataUrl) {
+  const m = /^data:(image\/[a-z+]+);base64,([\s\S]+)$/.exec(dataUrl);
+  if (!m) return null;
+  const raw = atob(m[2]);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  const mime = ALLOWED[m[1]] ? m[1] : sniffImage(bytes.subarray(0, 12), bytes.length);
+  if (!mime || bytes.length > MAX_BYTES) return null;
+  return { mime, bytes };
+}
+async function uploadAttachment(env, sub, dataUrl) {
+  const parsed = parseDataUrl(dataUrl);
+  if (!parsed) {
+    return new Response(JSON.stringify({ error: { code: "invalid_input", message: "A PNG, JPEG, WebP or GIF image of at most 4 MB is required" } }), { status: 400, headers: { "content-type": "application/json" } });
+  }
+  const id = crypto.randomUUID();
+  const key = `att/${sub}/${id}`;
+  await env.CHAT_UPLOADS.put(key, parsed.bytes, { httpMetadata: { contentType: parsed.mime } });
+  await env.DB.prepare("INSERT INTO attachments (id, sub, mime, bytes, r2_key) VALUES (?1,?2,?3,?4,?5)").bind(id, sub, parsed.mime, parsed.bytes.length, key).run();
+  return { id };
+}
+async function ownedAttachment(env, sub, id) {
+  const row = await env.DB.prepare("SELECT id, sub, mime, bytes, created_at FROM attachments WHERE id = ?1 AND sub = ?2").bind(id, sub).first();
+  return row ?? null;
+}
+async function readAttachment(env, sub, id) {
+  const row = await ownedAttachment(env, sub, id);
+  if (!row) return null;
+  const obj = await env.CHAT_UPLOADS.get(`att/${row.sub}/${row.id}`);
+  if (!obj) return null;
+  return new Response(obj.body, {
+    headers: { "content-type": row.mime, "cache-control": "private, max-age=86400" }
+  });
+}
+async function deleteAttachment(env, sub, id) {
+  const row = await ownedAttachment(env, sub, id);
+  if (!row) return false;
+  await env.CHAT_UPLOADS.delete(`att/${sub}/${id}`);
+  await env.DB.prepare("DELETE FROM attachments WHERE id = ?1 AND sub = ?2").bind(id, sub).run();
+  return true;
+}
+
 // workers/worker_public/src/mcp-proto.ts
 var PROTOCOL_VERSION = "2025-06-18";
 var TOOLS = [
@@ -1150,6 +1208,26 @@ var OPENAPI_SURFACE = [
     "operationId": "getShared"
   },
   {
+    "method": "POST",
+    "pattern": "/api/attachments",
+    "operationId": "uploadAttachment"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/attachments",
+    "operationId": "listAttachments"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/attachments/:id",
+    "operationId": "getAttachment"
+  },
+  {
+    "method": "DELETE",
+    "pattern": "/api/attachments/:id",
+    "operationId": "deleteAttachment"
+  },
+  {
     "method": "GET",
     "pattern": "/api/memories",
     "operationId": "listMemories"
@@ -1324,6 +1402,33 @@ function opWriteRefused(c, who) {
     return err(403, "forbidden", "This sign-in grants read only \u2014 request a write scope at login.");
   }
   return null;
+}
+async function attachmentsUploadRoute(c) {
+  const session = await sessionFrom(c.req, c.env);
+  if (!session) return withCors(err(401, "unauthorized", "Sign in to store attachments"), corsHeaders(c.req));
+  const body = await readJson(c.req);
+  const out = await uploadAttachment(c.env, session.sub, String(body?.data_url ?? ""));
+  if (out instanceof Response) return withCors(out, corsHeaders(c.req));
+  return withCors(json({ id: out.id }, 201), corsHeaders(c.req));
+}
+async function attachmentsListRoute(c) {
+  const session = await sessionFrom(c.req, c.env);
+  if (!session) return withCors(err(401, "unauthorized", "Sign in to list attachments"), corsHeaders(c.req));
+  const rows = await c.env.DB.prepare("SELECT id, mime, bytes, created_at FROM attachments WHERE sub = ?1 ORDER BY created_at DESC LIMIT 200").bind(session.sub).all();
+  return withCors(json({ attachments: rows.results ?? [] }), corsHeaders(c.req));
+}
+async function attachmentsGetRoute(c) {
+  const session = await sessionFrom(c.req, c.env);
+  if (!session) return err(404, "not_found", "No such attachment");
+  const out = await readAttachment(c.env, session.sub, c.params.id);
+  return out ?? err(404, "not_found", "No such attachment");
+}
+async function attachmentsDeleteRoute(c) {
+  const session = await sessionFrom(c.req, c.env);
+  if (!session) return withCors(err(401, "unauthorized", "Sign in to manage attachments"), corsHeaders(c.req));
+  const gone = await deleteAttachment(c.env, session.sub, c.params.id);
+  if (!gone) return withCors(err(404, "not_found", "No such attachment"), corsHeaders(c.req));
+  return withCors(json({ ok: true }), corsHeaders(c.req));
 }
 async function memoriesRoute(c) {
   const who = await opIdentity(c, "Sign in to use memory files");
@@ -1742,6 +1847,10 @@ var OPENAPI_HANDLERS = {
   appendMessage: appendMessageRoute,
   shareConversation: shareRoute,
   getShared: getSharedRoute,
+  uploadAttachment: attachmentsUploadRoute,
+  listAttachments: attachmentsListRoute,
+  getAttachment: attachmentsGetRoute,
+  deleteAttachment: attachmentsDeleteRoute,
   listMemories: memoriesRoute,
   createMemory: memoriesRoute,
   deleteMemory: memoriesRoute,

@@ -545,6 +545,75 @@ paths:
       responses:
         '200':
           description: The shared conversation, without member identity.
+  /api/attachments:
+    post:
+      tags: [Attachments]
+      summary: Upload an image attachment
+      description: >-
+        Stores a member-uploaded image (PNG, JPEG, WebP or GIF, at most
+        4 MB) and returns its identifier. The attachment persists until
+        the member deletes it. The content is verified from its bytes,
+        never from a declared type. The body carries the image as a data
+        URL — the same shape the composer produces.
+      operationId: uploadAttachment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data_url]
+              properties:
+                data_url:
+                  type: string
+                  description: The image as a data URL.
+      responses:
+        '201':
+          description: The attachment's identifier.
+        '400':
+          description: The content is not an allowed image, or exceeds the size cap.
+    get:
+      tags: [Attachments]
+      summary: List the member's attachments
+      operationId: listAttachments
+      responses:
+        '200':
+          description: The attachment identifiers, newest first.
+  /api/attachments/{id}:
+    get:
+      tags: [Attachments]
+      summary: Read one attachment's image
+      description: >-
+        Streams the stored image. The response is 404 for a foreign
+        identifier — ownership is checked on every fetch, and a file
+        belonging to another account is indistinguishable from a missing
+        one.
+      operationId: getAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The image bytes.
+        '404':
+          description: No such attachment owned by the caller.
+    delete:
+      tags: [Attachments]
+      summary: Delete an attachment
+      description: Removes the stored object and its record. Stored until deleted — and this deletes it.
+      operationId: deleteAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Deleted.
+        '404':
+          description: No such attachment owned by the caller.
   /api/memories:
     get:
       tags: [Memory]

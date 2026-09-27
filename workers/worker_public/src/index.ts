@@ -24,6 +24,7 @@ import { json, err, corsHeaders, withCors, readJson, authenticate, type ApiKey }
 import { handleSearch } from "./search";
 import { handleEnrich, handleSectionUnit, handleCaption, handleVectors, handleJudge, handleCreateKey, handleListKeys, handleRevokeKey, handleKeyUsage } from "./admin";
 import { handleResearch } from "./research";
+import { uploadAttachment, readAttachment, deleteAttachment } from "./attachments";
 import { handleAsk } from "./ask";
 import { handleMcp } from "./mcp";
 
@@ -78,6 +79,39 @@ function opWriteRefused(c: RouteContext, who: { write: boolean } | Response): Re
     return err(403, "forbidden", "This sign-in grants read only — request a write scope at login.");
   }
   return null;
+}
+
+async function attachmentsUploadRoute(c: RouteContext): Promise<Response> {
+  const session = await sessionFrom(c.req, c.env as any);
+  if (!session) return withCors(err(401, "unauthorized", "Sign in to store attachments"), corsHeaders(c.req));
+  const body = await readJson(c.req);
+  const out = await uploadAttachment(c.env, session.sub, String(body?.data_url ?? ""));
+  if (out instanceof Response) return withCors(out, corsHeaders(c.req));
+  return withCors(json({ id: out.id }, 201), corsHeaders(c.req));
+}
+
+async function attachmentsListRoute(c: RouteContext): Promise<Response> {
+  const session = await sessionFrom(c.req, c.env as any);
+  if (!session) return withCors(err(401, "unauthorized", "Sign in to list attachments"), corsHeaders(c.req));
+  const rows = await c.env.DB.prepare("SELECT id, mime, bytes, created_at FROM attachments WHERE sub = ?1 ORDER BY created_at DESC LIMIT 200")
+    .bind(session.sub)
+    .all();
+  return withCors(json({ attachments: rows.results ?? [] }), corsHeaders(c.req));
+}
+
+async function attachmentsGetRoute(c: RouteContext): Promise<Response> {
+  const session = await sessionFrom(c.req, c.env as any);
+  if (!session) return err(404, "not_found", "No such attachment");
+  const out = await readAttachment(c.env, session.sub, c.params.id!);
+  return out ?? err(404, "not_found", "No such attachment");
+}
+
+async function attachmentsDeleteRoute(c: RouteContext): Promise<Response> {
+  const session = await sessionFrom(c.req, c.env as any);
+  if (!session) return withCors(err(401, "unauthorized", "Sign in to manage attachments"), corsHeaders(c.req));
+  const gone = await deleteAttachment(c.env, session.sub, c.params.id!);
+  if (!gone) return withCors(err(404, "not_found", "No such attachment"), corsHeaders(c.req));
+  return withCors(json({ ok: true }), corsHeaders(c.req));
 }
 
 async function memoriesRoute(c: RouteContext): Promise<Response> {
@@ -583,6 +617,10 @@ const OPENAPI_HANDLERS: Record<OpenApiOperationId, RouteHandler> = {
   appendMessage: appendMessageRoute,
   shareConversation: shareRoute,
   getShared: getSharedRoute,
+  uploadAttachment: attachmentsUploadRoute,
+  listAttachments: attachmentsListRoute,
+  getAttachment: attachmentsGetRoute,
+  deleteAttachment: attachmentsDeleteRoute,
   listMemories: memoriesRoute,
   createMemory: memoriesRoute,
   deleteMemory: memoriesRoute,

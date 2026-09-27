@@ -248,3 +248,13 @@ CREATE TABLE IF NOT EXISTS model_plane_meta (
   node_count  INTEGER NOT NULL,
   indexed_at  TEXT NOT NULL          -- when the index landed (operational truth)
 );
+
+CREATE TABLE IF NOT EXISTS attachments (
+    id TEXT PRIMARY KEY,
+    sub TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    r2_key TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_sub ON attachments (sub);
