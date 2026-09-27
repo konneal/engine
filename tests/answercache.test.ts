@@ -3,7 +3,7 @@
 // stripping, no build step): node --test tests/answercache.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CORPUS_GEN_KEY, cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested, semanticCacheKey } from "../workers/worker_public/src/answercache.ts";
+import { CORPUS_GEN_KEY, cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested } from "../workers/worker_public/src/answercache.ts";
 
 const fakeKv = (stored: Record<string, string>, throws = false) =>
   ({
@@ -52,12 +52,6 @@ test("key material: query normalization and lang/lang-less split survive", () =>
   assert.notEqual(cacheKeyMaterial("what is r 60?"), cacheKeyMaterial("what is r 60?", "en"));
 });
 
-test("semantic key: same corpus-generation namespacing", () => {
-  const s1 = semanticCacheKey("v2.81", "0", "0.12,0.34");
-  const s2 = semanticCacheKey("v2.81", "20260904T120000Z", "0.12,0.34");
-  assert.equal(s1, "sc:v2.81:g0:0.12,0.34");
-  assert.notEqual(s1, s2);
-});
 
 test("corpus generation: stored stamp, unset default, fail-open", async () => {
   assert.equal(await corpusGen(fakeKv({ [CORPUS_GEN_KEY]: "20260904T120000Z" })), "20260904T120000Z");

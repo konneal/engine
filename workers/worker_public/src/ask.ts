@@ -20,7 +20,7 @@ import { contractV2, tableRetyped } from "./refs";
 import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { liveDataConfig, liveTokenFor, opCfg, opTokenMember, resolveLiveAccount, type LiveRecord } from "./livedata";
-import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, licensedEntryForPackage, modelCitation, modelEcho, modelGroundingBlock, modelNodeRefIn, standardForDocNumber } from "./modelplane";
+import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, licensedEntryForPackage, modelCitation, modelEcho, modelGroundingBlock, standardForDocNumber } from "./modelplane";
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./conditions";
 import { evaluateAggregation, type AggregationVerdict } from "./aggregation";
@@ -31,7 +31,7 @@ import { detectApiCallIntent, prepareApiCall } from "./apicalls";
 import { memoryNote } from "./memories";
 import { entitlementScope, resolveRequestScope, requestSalt, standardKeysFrom } from "./requestScope";
 import { rawSessionToken, type SessionClaims } from "./session";
-import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested, semanticCacheKey } from "./answercache";
+import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested } from "./answercache";
 import type { Env } from "./env";
 export type { Env };
 import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
@@ -435,26 +435,6 @@ async function handleAsk(
   // fresh already bypassed the exact cache above and bypasses this one.
   let understanding: any = null;
   // a query naming a model node (/req/…, /term/…) is node-SCOPED: its
-  // embedding sits near every other node-scoped ask about the same
-  // standard, and the single-entry semantic bucket then serves one
-  // node's answer for another (observed run-to-run across the golden
-  // model legs). Node-scoped queries use the exact cache only.
-  const nodeScoped = !!modelNodeRefIn(q.query) || !!modelNodeRefIn(declaredCtx?.label);
-  if (!cached && !nodeScoped && !contextual && !declaredCtx && !draftAct && !apiCallIntent && !q.lang && !userImage && !fresh) {
-    const wv0 = (await warmEmbed) ?? null;
-    if (wv0) {
-      const sc0 = await semanticCacheGet(env, gen, wv0, salt);
-      if (sc0) {
-        console.log("semantic cache hit (pre-understanding)");
-        telemetry(env, ctx, tier, "ask", null, true, sc0.answer.length, sc0.query_hash, q.lang, "semantic", telemetryMeta());
-        const cctx0 = sc0.context_applied ?? NO_CONTEXT;
-        if (wantsStream) {
-          return sseResponse([{ type: "citations", citations: sc0.citations ?? [], context_applied: cctx0 }, { type: "token", v: sc0.answer }, { type: "done", model: sc0.model, query_hash: sc0.query_hash, similar: true, served_from: "similar", context_applied: cctx0 }], corsHeaders(req));
-        }
-        return json({ ...sc0, similar: true, context_applied: cctx0, quota, });
-      }
-    }
-  }
   // ── Option C: optimistic parallel retrieval ──
   // The dense lane (folded-query embed + unfiltered Vectorize query) runs
   // CONCURRENTLY with understanding instead of after it — the serial
@@ -585,32 +565,6 @@ async function handleAsk(
   const register = await searchRegister(env.DB, q.query);
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
   const regNote = register ? registerNote(register.rows) : undefined;
-
-  // semantic cache: near-duplicate of a recently answered question —
-  // serves the stored answer with a `similar: true` marker (checked only
-  // for standalone knowledge questions; contextual turns, declared-context
-  // asks and image asks always run live; fresh regenerates, bypassing
-  // this cache too)
-  if (understanding?.intent !== "conversational" && !nodeScoped && !contextual && !declaredCtx && !draftAct && !apiCallIntent && !userImage && !fresh) {
-    const warmVec = (await warmEmbed) ?? null;
-    if (warmVec) {
-      const sc = await semanticCacheGet(env, gen, warmVec, salt);
-      if (sc) {
-        console.log("semantic cache hit");
-        telemetry(env, ctx, tier, "ask", null, true, sc.answer.length, sc.query_hash, q.lang, "semantic", telemetryMeta());
-        const cctx = sc.context_applied ?? NO_CONTEXT;
-        if (wantsStream) {
-          return sseResponse([
-            ...(readAs() ? [{ type: "read", read: readAs() }] : []),
-            { type: "citations", citations: sc.citations ?? [], context_applied: cctx },
-            { type: "token", v: sc.answer },
-            { type: "done", model: sc.model, query_hash: sc.query_hash, similar: true, served_from: "similar", context_applied: cctx, read: readAs() },
-          ], corsHeaders(req));
-        }
-        return json({ ...sc, similar: true, context_applied: cctx, read: readAs(), quota, });
-      }
-    }
-  }
 
   // Conversational route, decided by query UNDERSTANDING (any language, any
   // phrasing) — not string matching. No retrieval: nothing in the corpus
@@ -1193,8 +1147,6 @@ async function handleAsk(
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified — not caching");
           }
           if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(refusalAnswer())) {
-            const wv = (await warmEmbed) ?? null;
-            if (wv) semanticCachePut(env, ctx, gen, wv, salt, { answer: canonical, citations: cites, model, query_hash: queryHash });
             ctx.waitUntil(
               env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
@@ -1360,10 +1312,6 @@ async function handleAsk(
   const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: qualityNote(jsonQuality), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
   const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
-    const warmVec = (await warmEmbed) ?? null;
-    if (warmVec) semanticCachePut(env, ctx, gen, warmVec, salt, out);
-  }
-  if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }
@@ -1404,44 +1352,6 @@ function sseResponse(events: unknown[], cors: Record<string, string>): Response 
 
 
 // ── Semantic answer cache (G6) ──
-// Near-duplicate queries re-pay the whole pipeline. Bucket KV by a
-// leading-dimension signature of the query embedding; confirm with full
-// cosine >= 0.97 before serving. Same INDEX_VERSION + corpus-generation
-// namespace as the answer cache (deploys and corpus surgery invalidate
-// both). Single entry per bucket (v1): collisions overwrite, never mix.
-function cosine(a: number[], b: number[]): number {
-  let dot = 0;
-  let na = 0;
-  let nb = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    na += a[i] * a[i];
-    nb += b[i] * b[i];
-  }
-  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
-}
-
-function scSignature(v: number[], salt?: string | null): string {
-  return v.slice(0, 16).map((x) => x.toFixed(2)).join(",") + (salt ? `|s:${salt.length}:${salt.slice(0, 64)}` : "");
-}
-
-async function semanticCacheGet(env: Env, gen: string, vec: number[], salt?: string | null): Promise<{ answer: string; citations: unknown[]; model: string; query_hash: string; context_applied?: unknown } | null> {
-  try {
-    const raw = await env.CACHE.get(semanticCacheKey(env.INDEX_VERSION, gen, scSignature(vec, salt)), "json") as any;
-    if (!raw?.v || !Array.isArray(raw.v) || raw.v.length !== vec.length) return null;
-    if (cosine(raw.v, vec) < 0.97) return null;
-    return raw;
-  } catch {
-    return null;
-  }
-}
-
-function semanticCachePut(env: Env, ctx: ExecutionContext, gen: string, vec: number[], salt: string | null | undefined, payload: { answer: string; citations: unknown[]; model: string; query_hash: string }): void {
-  const v = vec.map((x) => Number(x.toFixed(3)));
-  ctx.waitUntil(
-    env.CACHE.put(semanticCacheKey(env.INDEX_VERSION, gen, scSignature(vec, salt)), JSON.stringify({ v, ...payload }), { expirationTtl: LIMITS.cacheTtlSec }),
-  );
-}
 
 // ── the route table (TODO.impl/03) ───────────────────────────────────────
 
