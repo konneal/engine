@@ -14,6 +14,7 @@
 // Storage rides the Blobs port and the row rides the StoreQuery port —
 // the module never names a provider binding (the ports purity lint).
 
+import { LIMITS } from "./config";
 import type { Blobs } from "./ports/blobs.ts";
 import type { StoreQuery } from "./ports/store.ts";
 
@@ -66,6 +67,18 @@ export async function uploadAttachment(deps: AttachmentDeps, sub: string, dataUr
   const parsed = parseDataUrl(dataUrl);
   if (!parsed) {
     return new Response(JSON.stringify({ error: { code: "invalid_input", message: "A PNG, JPEG, WebP or GIF image of at most 4 MB is required" } }), { status: 400, headers: { "content-type": "application/json" } });
+  }
+  // the per-member ceilings: count first, then total bytes — both
+  // checked against the member's own rows before anything writes
+  const usage = await deps.store
+    .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(bytes), 0) AS total FROM attachments WHERE sub = ?1")
+    .bind(sub)
+    .first<{ n: number; total: number }>();
+  if ((usage?.n ?? 0) >= LIMITS.attachMaxCount) {
+    return new Response(JSON.stringify({ error: { code: "attachment_count_cap", message: `Attachment limit reached (${LIMITS.attachMaxCount} files). Delete one to upload another.` } }), { status: 409, headers: { "content-type": "application/json" } });
+  }
+  if ((usage?.total ?? 0) + parsed.bytes.length > LIMITS.attachMaxTotalBytes) {
+    return new Response(JSON.stringify({ error: { code: "attachment_bytes_cap", message: `Attachment storage limit reached (${Math.round(LIMITS.attachMaxTotalBytes / 1048576)} MB). Delete an image to upload another.` } }), { status: 409, headers: { "content-type": "application/json" } });
   }
   const id = crypto.randomUUID();
   // the key embeds the owner — the storage partition IS the isolation

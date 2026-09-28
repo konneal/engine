@@ -12,6 +12,11 @@ export declare const MODELS: {
     readonly research: "@cf/zai-org/glm-5.3-flash";
 };
 export declare const LIMITS: {
+    /** Attachment quotas (TODO.new-era/8): per-member ceilings so a member's
+     *  uploads cannot grow without bound — count AND total bytes, checked
+     *  before every upload writes. */
+    readonly attachMaxCount: 50;
+    readonly attachMaxTotalBytes: number;
     readonly maxInputChars: 8000;
     readonly maxOutputTokens: 3072;
     readonly retrieveK: 50;

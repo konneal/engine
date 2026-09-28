@@ -1,6 +1,6 @@
 import {
   handleSearch
-} from "../../chunk-DMIOBGQU.js";
+} from "../../chunk-FLNX4O7C.js";
 import {
   bindModelNode,
   checkQuoteAnchors,
@@ -10,7 +10,7 @@ import {
   scoreFaithfulness,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-HT2MDJ5S.js";
+} from "../../chunk-SU4FO7TN.js";
 import {
   buildMessages,
   cfBlobs,
@@ -37,7 +37,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-VVLNUHW2.js";
+} from "../../chunk-TPV5GPY2.js";
 import {
   authenticate,
   corsHeaders,
@@ -46,14 +46,14 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-JWTIPQ4L.js";
+} from "../../chunk-SPKPH54J.js";
 import {
   canonicalRefusal
 } from "../../chunk-A3QHHUN5.js";
 import {
   entitlementScope,
   standardKeysFrom
-} from "../../chunk-O6VZIDPW.js";
+} from "../../chunk-LVZTWUVJ.js";
 import {
   LIMITS,
   MODELS,
@@ -64,7 +64,7 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-Z24IAKB6.js";
+} from "../../chunk-2PCUAJJO.js";
 import {
   P,
   setProfile
@@ -857,6 +857,13 @@ async function uploadAttachment(deps, sub, dataUrl) {
   if (!parsed) {
     return new Response(JSON.stringify({ error: { code: "invalid_input", message: "A PNG, JPEG, WebP or GIF image of at most 4 MB is required" } }), { status: 400, headers: { "content-type": "application/json" } });
   }
+  const usage = await deps.store.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(bytes), 0) AS total FROM attachments WHERE sub = ?1").bind(sub).first();
+  if ((usage?.n ?? 0) >= LIMITS.attachMaxCount) {
+    return new Response(JSON.stringify({ error: { code: "attachment_count_cap", message: `Attachment limit reached (${LIMITS.attachMaxCount} files). Delete one to upload another.` } }), { status: 409, headers: { "content-type": "application/json" } });
+  }
+  if ((usage?.total ?? 0) + parsed.bytes.length > LIMITS.attachMaxTotalBytes) {
+    return new Response(JSON.stringify({ error: { code: "attachment_bytes_cap", message: `Attachment storage limit reached (${Math.round(LIMITS.attachMaxTotalBytes / 1048576)} MB). Delete an image to upload another.` } }), { status: 409, headers: { "content-type": "application/json" } });
+  }
   const id = crypto.randomUUID();
   const key = `att/${sub}/${id}`;
   await deps.blobs.put(key, parsed.bytes.buffer, parsed.mime);
@@ -947,7 +954,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-FZA3ZFVB.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-KNB2S2PS.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-27TMC7PV.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-PBOODCMQ.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });

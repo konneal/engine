@@ -27,6 +27,12 @@ export const MODELS = {
 } as const;
 
 export const LIMITS = {
+  /** Attachment quotas (TODO.new-era/8): per-member ceilings so a member's
+   *  uploads cannot grow without bound — count AND total bytes, checked
+   *  before every upload writes. */
+  attachMaxCount: 50,
+  attachMaxTotalBytes: 50 * 1024 * 1024,
+
   // input sizes: generous — real questions can be long (pasted scenarios,
   // multi-part asks). The context BUDGET is the real governor of what the
   // model sees; these caps only bound abuse.
