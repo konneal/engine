@@ -34,7 +34,7 @@ export function parseToolCall(text: string): ToolCall | null {
 
 export const TOOL_DECLARATION = `You may use one tool before answering, by writing a single line:
 TOOL register_search {"query": "manufacturer and model to look up"}
-The worker runs it against the OIML-CS certificate register (a snapshot) and returns the matching rows, or the exact no-match statement for the string you asked. Use it when the question turns on certification standing and the holder is known — including from a photograph. Then answer, phrasing the tool's result as what it returned (the searched string stays visible in your answer). If you do not need the tool, answer directly without the line.`;
+The worker runs it against the certificate register (a snapshot) and returns the matching rows, or the exact no-match statement for the string you asked. Use it when the question turns on certification standing and the holder is known — including from a photograph. Then answer, phrasing the tool's result as what it returned (the searched string stays visible in your answer). If you do not need the tool, answer directly without the line.`;
 
 export async function runTool(db: any, call: ToolCall): Promise<ToolResult | null> {
   if (call.name !== "register_search") return null;
