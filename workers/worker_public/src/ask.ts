@@ -625,7 +625,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // question WITH a photograph carries its manufacturer in the pixels —
   // one vision call extracts it, and those tokens re-query the register
   // so the answer cites the actual certificate rows
-  if (withImage && !register?.rows?.length && /certificate|certified|certification|oiml[- ]?cs/i.test(q.query)) {
+  if (withImage && !register?.rows?.length && /certificate|certified|certification/i.test(q.query)) {
     const np = await extractNameplate((env as any).AI, MODELS.member, withImage);
     if (np?.manufacturer) {
       const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query));
