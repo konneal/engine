@@ -23,3 +23,8 @@ test("the declaration demands the visible string and the attributed phrasing", (
   assert.match(TOOL_DECLARATION, /TOOL register_search/);
   assert.match(TOOL_DECLARATION, /searched string stays visible/);
 });
+
+test("the family normalizes to the column's digits-only form", () => {
+  const { queryFamily } = await import("../workers/worker_public/src/certificates.ts");
+  assert.equal(queryFamily("does this manufacturer have the R 60 certificate?"), "R60");
+});

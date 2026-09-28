@@ -96,8 +96,10 @@ export async function searchRegister(db: any, query: string): Promise<{ rows: Re
   let { sql, params } = built;
   const family = queryFamily(query);
   if (family) {
+    // the register's family column is the DIGITS ONLY ("60", "105") —
+    // the letter+padding form ("R60") never matched a single row
     sql = sql.replace(" WHERE ", " WHERE family = ?0 AND ");
-    params.unshift(family);
+    params.unshift(family.replace(/^[A-Za-z]+/, ""));
   }
   try {
     const res = await db.prepare(sql).bind(...params).all();
