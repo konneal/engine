@@ -624,9 +624,11 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   let register = await searchRegister(env.DB, q.query);
   // the nameplate bridge (TODO.new-era/6's image lane): a certificate
   // question WITH a photograph carries its manufacturer in the pixels —
-  // one vision call extracts it, and those tokens re-query the register
-  // so the answer cites the actual certificate rows
-  if (withImage && !register?.rows?.length && /certificate|certified|certification/i.test(q.query)) {
+  // one vision call extracts it, and those tokens re-query the register.
+  // Fires whenever a photo is present: the text lane's tokens are the
+  // question's stopwords ("this", "have") and can match an unrelated
+  // holder, and the photograph's own reading is authoritative over them.
+  if (withImage && /certificate|certified|certification/i.test(q.query)) {
     const np = await extractNameplate((env as any).AI, MODELS.member, withImage);
     if (np?.manufacturer) {
       const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query));
