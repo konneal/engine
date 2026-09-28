@@ -11,6 +11,7 @@ export type OpenApiOperationId =
   | "askKeyed"
   | "search"
   | "searchKeyed"
+  | "verify"
   | "verifyKeyed"
   | "research"
   | "researchKeyed"
@@ -80,6 +81,11 @@ export const OPENAPI_SURFACE: readonly (Omit<OpenApiRoute, "operationId"> & { op
     "method": "POST",
     "pattern": "/v1/search",
     "operationId": "searchKeyed"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/verify",
+    "operationId": "verify"
   },
   {
     "method": "POST",
