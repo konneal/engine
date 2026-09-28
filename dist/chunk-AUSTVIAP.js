@@ -97,7 +97,7 @@ async function searchRegister(db, query) {
   const family = queryFamily(query);
   if (family) {
     sql = sql.replace(" WHERE ", " WHERE family = ?0 AND ");
-    params.unshift(family);
+    params.unshift(family.replace(/^[A-Za-z]+/, ""));
   }
   try {
     const res = await db.prepare(sql).bind(...params).all();
