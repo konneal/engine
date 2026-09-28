@@ -1902,6 +1902,26 @@ function toolNote(r) {
 ${r.output}`;
 }
 
+// workers/worker_public/src/operations.ts
+function isOperationIntent(query) {
+  return /\b(operations?|endpoints?)\b/i.test(query);
+}
+function catalogNote(anchors) {
+  if (!anchors.length) return "";
+  return `The platform's indexed operations (the COMPLETE surface \u2014 every operation the system exposes; the answer must name the operation from this list when one matches the question):
+${anchors.map((a) => `- ${a}`).join("\n")}`;
+}
+async function operationsCatalogNote(db, query) {
+  if (!isOperationIntent(query)) return void 0;
+  try {
+    const rows = (await db.prepare("SELECT clause_anchor FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
+    const note = catalogNote(rows.map((r) => r.clause_anchor).filter(Boolean));
+    return note || void 0;
+  } catch {
+    return void 0;
+  }
+}
+
 // workers/worker_public/prompts/nameplate.md
 var nameplate_default = `You read instrument nameplates. From the photograph, extract the
 manufacturer's name exactly as printed and the model designation exactly
@@ -2319,6 +2339,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
   const regNote = register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : void 0;
+  const opsCatalog = await operationsCatalogNote(env.DB, q.query);
   if (understanding?.intent === "conversational") {
     const queryHash2 = await sha256Hex(q.query);
     const messages2 = [
@@ -2665,7 +2686,7 @@ Answer account questions from these records ONLY: name the record when you use i
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
+    [processNote, eNote, regNote, opsCatalog, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
     summary,
     budget
   );
