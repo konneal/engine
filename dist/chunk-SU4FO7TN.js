@@ -35,14 +35,14 @@ import {
   syntheticUnderstanding,
   telemetry,
   understandQuery
-} from "./chunk-VVLNUHW2.js";
+} from "./chunk-TPV5GPY2.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-JWTIPQ4L.js";
+} from "./chunk-SPKPH54J.js";
 import {
   canonicalRefusal,
   refusalAnswer
@@ -52,7 +52,7 @@ import {
   requestSalt,
   resolveRequestScope,
   standardKeysFrom
-} from "./chunk-O6VZIDPW.js";
+} from "./chunk-LVZTWUVJ.js";
 import {
   LIMITS,
   MODELS,
@@ -63,7 +63,7 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-Z24IAKB6.js";
+} from "./chunk-2PCUAJJO.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
