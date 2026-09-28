@@ -1,0 +1,1 @@
+Summarize this conversation so a Q&A assistant can continue it with full continuity. Capture: documents and editions discussed, questions asked, answers given (key values and definitions), terminology established, unresolved threads. Under 150 words, plain text, no preamble. The conversation may be any length and in any language — summarize it in English.

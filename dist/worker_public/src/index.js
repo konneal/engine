@@ -1020,16 +1020,6 @@ var OPENAPI_SURFACE = [
   },
   {
     "method": "POST",
-    "pattern": "/api/absence",
-    "operationId": "absence"
-  },
-  {
-    "method": "POST",
-    "pattern": "/v1/absence",
-    "operationId": "absenceKeyed"
-  },
-  {
-    "method": "POST",
     "pattern": "/api/verify",
     "operationId": "verify"
   },
