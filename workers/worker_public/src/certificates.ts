@@ -84,7 +84,7 @@ export function buildRegisterQuery(tokens: string[]): { sql: string; params: str
     return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
   });
   return {
-    sql: `SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE ${clauses.join(" OR ")} LIMIT 6`,
+    sql: `SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE family = ?FAMILY AND (${clauses.join(" OR ")}) LIMIT 6`,
     params,
   };
 }
@@ -104,7 +104,7 @@ export async function searchRegister(db: any, query: string, force = false): Pro
     // the prepend shifts every token placeholder by one: renumber them,
     // or each token binds the family string and nothing matches
     sql = sql.replace(/\?(\d+)/g, (_, n) => `?${Number(n) + 1}`);
-    sql = sql.replace(" WHERE ", " WHERE family = ?1 AND ");
+    sql = sql.replace("?FAMILY", "?1");
     params.unshift(family.replace(/^[A-Za-z]+/, ""));
   }
   try {
