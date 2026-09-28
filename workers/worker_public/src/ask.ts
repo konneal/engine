@@ -632,7 +632,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   if (bridgeImage && /certificate|certified|certification/i.test(q.query)) {
     const np = await extractNameplate((env as any).AI, MODELS.member, bridgeImage);
     if (np?.manufacturer) {
-      const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query));
+      const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query), true);
       if (bridged?.rows?.length) {
         register = bridged;
         console.log("nameplate-bridge:", np.manufacturer, np.model ?? "", "→", bridged.rows.length, "register rows");

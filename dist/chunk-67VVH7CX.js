@@ -2310,7 +2310,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   if (bridgeImage && /certificate|certified|certification/i.test(q.query)) {
     const np = await extractNameplate(env.AI, MODELS.member, bridgeImage);
     if (np?.manufacturer) {
-      const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query));
+      const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query), true);
       if (bridged?.rows?.length) {
         register = bridged;
         console.log("nameplate-bridge:", np.manufacturer, np.model ?? "", "\u2192", bridged.rows.length, "register rows");
