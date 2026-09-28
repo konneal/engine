@@ -14,7 +14,7 @@
 // Storage rides the Blobs port and the row rides the StoreQuery port —
 // the module never names a provider binding (the ports purity lint).
 
-import { LIMITS } from "./config";
+import { LIMITS } from "./config.ts";
 import type { Blobs } from "./ports/blobs.ts";
 import type { StoreQuery } from "./ports/store.ts";
 
