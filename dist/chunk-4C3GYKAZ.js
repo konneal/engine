@@ -68,7 +68,7 @@ import {
   certificateLinks,
   registerNote,
   searchRegister
-} from "./chunk-PCP4AQQQ.js";
+} from "./chunk-WNGEWG3J.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -1892,8 +1892,8 @@ async function runTool(db, call) {
   if (call.name !== "register_search") return null;
   const query = String(call.args?.query ?? "").trim().slice(0, 160);
   if (!query) return null;
-  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-7HZZBOPW.js");
-  const reg = await searchRegister2(db, query);
+  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-VTQDOZX5.js");
+  const reg = await searchRegister2(db, query, true);
   const output = reg?.rows?.length ? registerNote2(reg.rows) : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
   return { name: call.name, query, output };
 }

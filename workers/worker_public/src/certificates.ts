@@ -89,8 +89,10 @@ export function buildRegisterQuery(tokens: string[]): { sql: string; params: str
   };
 }
 
-export async function searchRegister(db: any, query: string): Promise<{ rows: RegisterRow[]; tokens: string[] } | null> {
-  if (!isRegisterShaped(query)) return null;
+export async function searchRegister(db: any, query: string, force = false): Promise<{ rows: RegisterRow[]; tokens: string[] } | null> {
+  // the shaping gate exists for ASK questions (is this a register
+  // question?); a TOOL invocation already decided — skip the gate
+  if (!force && !isRegisterShaped(query)) return null;
   const tokens = registerTokens(query);
   if (!tokens.length) return null;
   const built = buildRegisterQuery(tokens);
