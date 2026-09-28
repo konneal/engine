@@ -84,7 +84,7 @@ function buildRegisterQuery(tokens) {
     return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
   });
   return {
-    sql: `SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE ${clauses.join(" OR ")} LIMIT 6`,
+    sql: `SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE family = ?FAMILY AND (${clauses.join(" OR ")}) LIMIT 6`,
     params
   };
 }
@@ -97,7 +97,7 @@ async function searchRegister(db, query, force = false) {
   const family = queryFamily(query);
   if (family) {
     sql = sql.replace(/\?(\d+)/g, (_, n) => `?${Number(n) + 1}`);
-    sql = sql.replace(" WHERE ", " WHERE family = ?1 AND ");
+    sql = sql.replace("?FAMILY", "?1");
     params.unshift(family.replace(/^[A-Za-z]+/, ""));
   }
   try {
