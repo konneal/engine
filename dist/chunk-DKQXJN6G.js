@@ -2222,20 +2222,22 @@ async function handleAsk(env, ctx, req, tier, key) {
   const warmQuery = retrievalQuery(q.query, prev);
   const warmEmbed = embedWarm(env, warmQuery);
   const conversationId = typeof body?.conversation_id === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(body.conversation_id) ? body.conversation_id : null;
-  if (!effectiveImage && !attachIds.length && conversationId && env.DB && member) {
-    const prior = await env.DB.prepare(
-      "SELECT m.attachment_id AS aid, a.mime, a.r2_key FROM messages m JOIN attachments a ON a.id = m.attachment_id WHERE m.conversation_id = ?1 AND m.role = 'user' AND m.attachment_id IS NOT NULL ORDER BY m.created_at DESC LIMIT 1"
-    ).bind(conversationId, member.sub).first();
-    if (prior) {
-      try {
+  try {
+    if (!effectiveImage && !attachIds.length && conversationId && env.DB && member) {
+      const prior = await env.DB.prepare(
+        "SELECT m.attachment_id AS aid, a.mime, a.r2_key FROM messages m JOIN attachments a ON a.id = m.attachment_id JOIN conversations c ON c.id = m.conversation_id AND c.sub = ?2 WHERE m.conversation_id = ?1 AND m.role = 'user' AND m.attachment_id IS NOT NULL ORDER BY m.created_at DESC LIMIT 1"
+      ).bind(conversationId, member.sub).first();
+      if (prior) {
         const obj = await env.CHAT_UPLOADS.get(prior.r2_key);
         if (obj) {
-          const b64 = btoa(String.fromCharCode(...new Uint8Array(await obj.arrayBuffer())));
-          storedImage = `data:${prior.mime};base64,${b64}`;
+          const bytes = new Uint8Array(await obj.arrayBuffer());
+          let bin = "";
+          for (let i = 0; i < bytes.length; i += 32768) bin += String.fromCharCode(...bytes.subarray(i, i + 32768));
+          storedImage = `data:${prior.mime};base64,${btoa(bin)}`;
         }
-      } catch {
       }
     }
+  } catch {
   }
   let convEntities = [];
   if (conversationId) {
