@@ -11,7 +11,7 @@ test("operation intent: the noun triggers, ordinary questions do not", () => {
 
 test("the catalog note is a complete, attributed name index", () => {
   const note = catalogNote(["putEntityRecord", "getEntityRecord", "deleteBlob"]);
-  assert.match(note, /COMPLETE surface/);
+  assert.match(note, /COMPLETE name index/);
   assert.match(note, /- putEntityRecord/);
   assert.match(note, /- getEntityRecord/);
   assert.equal(catalogNote([]), "");

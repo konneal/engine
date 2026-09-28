@@ -1906,17 +1906,59 @@ ${r.output}`;
 function isOperationIntent(query) {
   return /\b(operations?|endpoints?)\b/i.test(query);
 }
+var ACTION_STEMS = [
+  "updat",
+  "upsert",
+  "writ",
+  "put",
+  "delet",
+  "remov",
+  "read",
+  "fetch",
+  "get",
+  "creat",
+  "declar",
+  "confirm",
+  "approv",
+  "declin",
+  "decide",
+  "revok",
+  "grant",
+  "notify",
+  "advanc",
+  "announc",
+  "download"
+];
+function matchOperations(query, rows) {
+  const q = query.toLowerCase();
+  const stems = ACTION_STEMS.filter((s) => q.includes(s));
+  if (!stems.length) return [];
+  const scored = [];
+  for (const r of rows) {
+    const hay = `${r.anchor} ${r.text}`.toLowerCase();
+    const score = stems.filter((s) => hay.includes(s)).length;
+    if (score > 0) scored.push({ ...r, score });
+  }
+  return scored.sort((a, b) => b.score - a.score).slice(0, 4);
+}
 function catalogNote(anchors) {
   if (!anchors.length) return "";
-  return `The platform's indexed operations (the COMPLETE surface \u2014 every operation the system exposes; the answer must name the operation from this list when one matches the question):
+  return `The COMPLETE name index of the platform's operations:
 ${anchors.map((a) => `- ${a}`).join("\n")}`;
 }
 async function operationsCatalogNote(db, query) {
   if (!isOperationIntent(query)) return void 0;
   try {
-    const rows = (await db.prepare("SELECT clause_anchor FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
-    const note = catalogNote(rows.map((r) => r.clause_anchor).filter(Boolean));
-    return note || void 0;
+    const rows = (await db.prepare("SELECT clause_anchor AS anchor, substr(text, 1, 220) AS text FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
+    const opRows = rows.map((r) => ({ anchor: String(r.anchor ?? ""), text: String(r.text ?? "") })).filter((r) => r.anchor);
+    const matched = matchOperations(query, opRows);
+    const parts = [];
+    if (matched.length) {
+      parts.push(`Operations whose description matches the question's action (AUTHORITATIVE \u2014 if one matches, the answer MUST name it and cite its line; never answer that the information is missing):
+${matched.map((m) => `- ${m.text}`).join("\n")}`);
+    }
+    parts.push(catalogNote(opRows.map((r) => r.anchor)));
+    return parts.filter(Boolean).join("\n\n") || void 0;
   } catch {
     return void 0;
   }
