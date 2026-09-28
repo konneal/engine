@@ -407,7 +407,11 @@ async function handleAsk(
     const cctx = cached.value.context_applied ?? NO_CONTEXT;
     if (wantsStream) {
       // a cache hit must still speak SSE — the chat client parses a stream
-      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, served_from: "cache", context_applied: cctx }], corsHeaders(req));
+      return sseResponse([
+        { type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx, ...(cached.value.source_quality ? { source_quality: cached.value.source_quality, confidence_note: cached.value.confidence_note ?? null, ...(cached.value.experimental_sources ? { experimental_sources: cached.value.experimental_sources } : {}), ...(cached.value.entailment ? { entailment: cached.value.entailment } : {}) } : {}) },
+        { type: "token", v: cached.value.answer ?? "" },
+        { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, served_from: "cache", context_applied: cctx },
+      ], corsHeaders(req));
     }
     return json({ ...cached.value, cached: true, quota, context_applied: cctx });
   }
@@ -1140,6 +1144,27 @@ async function handleAsk(
             passages: usedHits.slice(0, 8).map((h: Hit) => ({ d: h.metadata.docidentifier ?? "", a: h.metadata.clause_anchor ?? "", t: (h.text ?? "").slice(0, (h.metadata as any).block === "table" ? 1400 : 600), b: (h.metadata as any).block === "table" || undefined, ...((h.metadata as any).table_selection ? { s: (h.metadata as any).table_selection } : {}) })) });
           telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang, undefined, telemetryMeta());
           const canonical = c2.text;
+
+          // the entailment gate, streaming shape (TODO.new-era/10): the
+          // measurement runs AFTER done — the chips, follow-ups and evidence
+          // never wait on the grader; a final confidence event refreshes the
+          // note when the measurement lands. Budgeted and fail-open like the
+          // JSON path's gate.
+          let streamedEntailment: { support: string; score: number; ungrounded?: string[] } | null = null;
+          let streamedNote = "";
+          if (THRESHOLDS.entailmentGate && sourceQuality && usedHits.length && !canonical.includes(refusalAnswer())) {
+            const raced = await Promise.race([
+              scoreFaithfulness(env.AI, roleModel(env, "grader"), canonical, usedHits.map((h: Hit) => h.text)),
+              new Promise<null>((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs)),
+            ]);
+            if (raced) {
+              const v = entailmentVerdict(raced.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
+              streamedEntailment = { support: v.support, score: Math.round(raced.score * 100) / 100, ...(raced.ungrounded_claims?.length ? { ungrounded: raced.ungrounded_claims.slice(0, 3) } : {}) };
+              streamedNote = v.note;
+              if (v.support !== "supported") console.log("entailment(stream):", v.support, raced.score);
+              send({ type: "confidence", source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality), ...(streamedEntailment ? { entailment: streamedEntailment } : {}) });
+            }
+          }
           // streamed answers can't be regenerated mid-flight; enforcement
           // is that an unverified answer is never served from cache again
           const streamedAnchors = checkQuoteAnchors(canonical, usedHits.map((h: Hit) => h.text));
@@ -1150,7 +1175,7 @@ async function handleAsk(
           }
           if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(refusalAnswer())) {
             ctx.waitUntil(
-              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec }),
+              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...(sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}), ...(streamedEntailment ? { entailment: streamedEntailment } : {}) }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
           }
           controller.close();

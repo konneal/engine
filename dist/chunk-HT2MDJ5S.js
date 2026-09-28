@@ -2193,7 +2193,11 @@ async function handleAsk(env, ctx, req, tier, key) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact", telemetryMeta());
     const cctx = cached.value.context_applied ?? NO_CONTEXT;
     if (wantsStream) {
-      return sseResponse([{ type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx }, { type: "token", v: cached.value.answer ?? "" }, { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, served_from: "cache", context_applied: cctx }], corsHeaders(req));
+      return sseResponse([
+        { type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx, ...cached.value.source_quality ? { source_quality: cached.value.source_quality, confidence_note: cached.value.confidence_note ?? null, ...cached.value.experimental_sources ? { experimental_sources: cached.value.experimental_sources } : {}, ...cached.value.entailment ? { entailment: cached.value.entailment } : {} } : {} },
+        { type: "token", v: cached.value.answer ?? "" },
+        { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, served_from: "cache", context_applied: cctx }
+      ], corsHeaders(req));
     }
     return json({ ...cached.value, cached: true, quota, context_applied: cctx });
   }
@@ -2702,6 +2706,21 @@ Answer account questions from these records ONLY: name the record when you use i
           });
           telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang, void 0, telemetryMeta());
           const canonical = c2.text;
+          let streamedEntailment = null;
+          let streamedNote = "";
+          if (THRESHOLDS.entailmentGate && sourceQuality && usedHits.length && !canonical.includes(refusalAnswer())) {
+            const raced = await Promise.race([
+              scoreFaithfulness(env.AI, roleModel(env, "grader"), canonical, usedHits.map((h) => h.text)),
+              new Promise((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs))
+            ]);
+            if (raced) {
+              const v = entailmentVerdict(raced.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
+              streamedEntailment = { support: v.support, score: Math.round(raced.score * 100) / 100, ...raced.ungrounded_claims?.length ? { ungrounded: raced.ungrounded_claims.slice(0, 3) } : {} };
+              streamedNote = v.note;
+              if (v.support !== "supported") console.log("entailment(stream):", v.support, raced.score);
+              send({ type: "confidence", source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality), ...streamedEntailment ? { entailment: streamedEntailment } : {} });
+            }
+          }
           const streamedAnchors = checkQuoteAnchors(canonical, usedHits.map((h) => h.text));
           const streamedRetyped = tableRetyped(canonical, usedHits.some((h) => h.metadata.unit_id && h.metadata.block === "table"));
           const streamed = { total: streamedAnchors.total, violations: streamedRetyped ? ["table-retyped"] : streamedAnchors.violations };
@@ -2710,7 +2729,7 @@ Answer account questions from these records ONLY: name the record when you use i
           }
           if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(refusalAnswer())) {
             ctx.waitUntil(
-              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash }), { expirationTtl: LIMITS.cacheTtlSec })
+              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}, ...streamedEntailment ? { entailment: streamedEntailment } : {} }), { expirationTtl: LIMITS.cacheTtlSec })
             );
           }
           controller.close();
