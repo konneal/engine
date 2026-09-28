@@ -9,6 +9,7 @@ import {
   THRESHOLDS,
   answerEffort,
   effortBudget,
+  num,
   processExpansion,
   sha256Hex,
   today
@@ -817,8 +818,8 @@ var BaseUrnGenerator = class {
     const ed = this.maybe("edition");
     if (ed === void 0 || ed === null)
       return void 0;
-    const num = typeof ed === "object" && "number" in ed ? ed.number : ed;
-    return num === void 0 || num === null || num === "" ? void 0 : `ed.${String(num)}`;
+    const num2 = typeof ed === "object" && "number" in ed ? ed.number : ed;
+    return num2 === void 0 || num2 === null || num2 === "" ? void 0 : `ed.${String(num2)}`;
   }
   urnLanguage() {
     const langs = this.maybe("languages");
@@ -7139,9 +7140,9 @@ var IsoIdentifier = class _IsoIdentifier extends BaseIdentifier {
         }
       }
     }
-    const num = this.numberPortion(true);
-    if (num !== "")
-      result += result === "" ? num : ` ${num}`;
+    const num2 = this.numberPortion(true);
+    if (num2 !== "")
+      result += result === "" ? num2 : ` ${num2}`;
     result += this.languagePortion(this.languageSingle());
     if (this.all_parts === true)
       result += " (all parts)";
@@ -7306,9 +7307,9 @@ var IsoSingleIdentifier = class extends IsoIdentifier {
         result += `${sep}${stage}`;
       }
     }
-    const num = this.numberPortion(true);
-    if (num !== "")
-      result += result === "" ? num : ` ${num}`;
+    const num2 = this.numberPortion(true);
+    if (num2 !== "")
+      result += result === "" ? num2 : ` ${num2}`;
     result += this.languagePortion(this.languageSingle());
     if (this.all_parts === true)
       result += " (all parts)";
@@ -7611,11 +7612,11 @@ var IsoSupplementIdentifier = class extends IsoSingleIdentifier {
     const ts = this.typedStageState;
     const stage = ts === void 0 ? "" : stageAbbr(ts.entry, long, ts.originalAbbr);
     let result = `${baseStr}/${stage}`;
-    const num = this.numberPortion(true);
-    if (num !== "") {
-      if (!num.startsWith(":") && !stage.endsWith("."))
+    const num2 = this.numberPortion(true);
+    if (num2 !== "") {
+      if (!num2.startsWith(":") && !stage.endsWith("."))
         result += " ";
-      result += num;
+      result += num2;
     }
     result += this.languagePortion(this.languageSingle());
     return result;
@@ -7670,20 +7671,20 @@ var IsoDirectives = class extends IsoSingleIdentifier {
     const abbr = this.typedStageState === void 0 ? "" : stageAbbr(this.typedStageState.entry, false);
     if (abbr !== "")
       head += ` ${abbr}`;
-    let num = this.number ?? "";
+    let num2 = this.number ?? "";
     if (this.part !== void 0)
-      num += ` ${this.part}`;
+      num2 += ` ${this.part}`;
     if (this.subpart !== void 0)
-      num += `-${this.subpart}`;
+      num2 += `-${this.subpart}`;
     if (this.stage_iteration !== void 0)
-      num += `.${this.stage_iteration.render() ?? ""}`;
+      num2 += `.${this.stage_iteration.render() ?? ""}`;
     if (this.date !== void 0 && this.date.present())
-      num += `:${this.date.render()}`;
-    if (num === "")
+      num2 += `:${this.date.render()}`;
+    if (num2 === "")
       return head;
-    if (num.startsWith(":"))
-      return head + num;
-    return `${head} ${num}`;
+    if (num2.startsWith(":"))
+      return head + num2;
+    return `${head} ${num2}`;
   }
 };
 registerType(IsoDirectives);
@@ -8606,9 +8607,9 @@ function preprocessNist(input) {
   cleaned = cleaned.replace(/(?<!e)(\d)(rev\d{4})/g, "$1 $2");
   cleaned = cleaned.replace(/(\d+e\d+)\.([A-Za-z]{3,9}\d{4})/g, "$1rev$2");
   if (/\bIR\b/.test(cleaned) && !cleaned.includes("CIRC")) {
-    cleaned = cleaned.replace(/(\d)r(\d{1,2})\/(\d{2,4})/g, (_m, num, mon, yr) => {
+    cleaned = cleaned.replace(/(\d)r(\d{1,2})\/(\d{2,4})/g, (_m, num2, mon, yr) => {
       const yyyy = yr.length === 2 ? `19${yr}` : yr;
-      return `${num}/Upd1-${yyyy}${mon.padStart(2, "0")}`;
+      return `${num2}/Upd1-${yyyy}${mon.padStart(2, "0")}`;
     });
   }
   if (!cleaned.includes("LCIRC") && !cleaned.includes("CIRC")) {
@@ -11321,17 +11322,17 @@ function normalizeJointStageSpellings(input) {
   let cleaned = input;
   const pubs = "((?:ISO/IEC/IEEE|IEEE/ISO/IEC|IEEE/IEC/ISO|ISO/IEEE|IEC/IEEE|IEEE/IEC|ISO/IEC)(?:/ ?| ))";
   const stage = "(FDIS|FCD|CDV|DIS\\d?|CD\\d?|WD|PWI|NP)";
-  const num = "(P?\\d+(?:[.-]\\d+)?)";
+  const num2 = "(P?\\d+(?:[.-]\\d+)?)";
   const tail = "(,? (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]* \\d{4}|$|-\\d{4}(?:-\\d\\d)?)";
   cleaned = cleaned.replace(/(\d)_D(\d)/g, "$1/D$2");
   cleaned = cleaned.replace(/,(?=[A-Za-z])/, ", ");
-  cleaned = cleaned.replace(new RegExp(`^${pubs}${num}/(D[\\d.]+)/ ?${stage}\\b`), "$1$4 $2/$3");
-  cleaned = cleaned.replace(new RegExp(`^${pubs}${num}/ ${stage}${tail}`), "$1$3 $2$4");
-  cleaned = cleaned.replace(new RegExp(`^${pubs}${num}/${stage} (\\d{4})\\b`), "$1$3 $2-$4");
-  cleaned = cleaned.replace(new RegExp(`^${pubs}${num} ${stage}${tail}`), "$1$3 $2$4");
-  cleaned = cleaned.replace(new RegExp(`^${pubs}${num} ${stage} (D\\d+)\\b`), "$1$3 $2/$4");
-  cleaned = cleaned.replace(new RegExp(`^${pubs}${num}/ ?${stage}(-(?:19|20)\\d\\d(?:-\\d\\d)?)`), "$1$3 $2$4");
-  cleaned = cleaned.replace(new RegExp(`^${pubs}${stage} ${num}/? ?(D\\d+)\\b`), "$1$2 $3/$4");
+  cleaned = cleaned.replace(new RegExp(`^${pubs}${num2}/(D[\\d.]+)/ ?${stage}\\b`), "$1$4 $2/$3");
+  cleaned = cleaned.replace(new RegExp(`^${pubs}${num2}/ ${stage}${tail}`), "$1$3 $2$4");
+  cleaned = cleaned.replace(new RegExp(`^${pubs}${num2}/${stage} (\\d{4})\\b`), "$1$3 $2-$4");
+  cleaned = cleaned.replace(new RegExp(`^${pubs}${num2} ${stage}${tail}`), "$1$3 $2$4");
+  cleaned = cleaned.replace(new RegExp(`^${pubs}${num2} ${stage} (D\\d+)\\b`), "$1$3 $2/$4");
+  cleaned = cleaned.replace(new RegExp(`^${pubs}${num2}/ ?${stage}(-(?:19|20)\\d\\d(?:-\\d\\d)?)`), "$1$3 $2$4");
+  cleaned = cleaned.replace(new RegExp(`^${pubs}${stage} ${num2}/? ?(D\\d+)\\b`), "$1$2 $3/$4");
   return cleaned;
 }
 function preprocessIeee(input) {
@@ -14556,8 +14557,8 @@ var CenBuilder = class {
     const numStr = (str3(d["number"]) ?? "").trim();
     if (!/^\d{1,6}$/.test(numStr))
       return void 0;
-    const num = Number.parseInt(numStr, 10);
-    if (!(num >= 6e4 && num <= 79999))
+    const num2 = Number.parseInt(numStr, 10);
+    if (!(num2 >= 6e4 && num2 <= 79999))
       return void 0;
     const impl = grammarImplementation("iec");
     if (impl === void 0)
@@ -19006,9 +19007,9 @@ var CsaAdoptedClass = (() => {
           baseStr = baseStr.replace(`:${year}`, `:${year.slice(2)}`);
         }
       }
-      baseStr = baseStr.replace(/\/Amd\s+(\d+)([:/-])(\d{2,4})\b/g, (_m, num, sep, year) => {
+      baseStr = baseStr.replace(/\/Amd\s+(\d+)([:/-])(\d{2,4})\b/g, (_m, num2, sep, year) => {
         const short = year.length === 4 && (year.startsWith("20") || year.startsWith("19")) ? year.slice(2) : year;
-        return `/A${num}${sep}${short}`;
+        return `/A${num2}${sep}${short}`;
       });
       let result;
       if (this.publisher_prefix !== void 0 && this.publisher_prefix.endsWith("-")) {
@@ -19635,9 +19636,9 @@ function parseCsa(input) {
       const full = Number(two) < 50 ? `20${two}` : `19${two}`;
       wrapped = wrapped.replace(new RegExp(`:${two}\\b`), `:${full}`);
     }
-    wrapped = wrapped.replace(/\/A(\d+)([:/-])(\d{2,4})\b/g, (_m, num, sep, year) => {
+    wrapped = wrapped.replace(/\/A(\d+)([:/-])(\d{2,4})\b/g, (_m, num2, sep, year) => {
       const full = year.length === 2 ? Number(year) < 50 ? `20${year}` : `19${year}` : year;
-      return `/Amd ${num}${sep}${full}`;
+      return `/Amd ${num2}${sep}${full}`;
     });
     const base = parseExternalStandard(wrapped);
     if (base === void 0) {
@@ -21908,13 +21909,13 @@ function parseOimlSpine(display) {
     const kind = String(h._type ?? "").split(":").pop() ?? "";
     const letter = TYPE_LETTER[kind] ?? "";
     if (!letter) return null;
-    const num = String(Number(h.number));
+    const num2 = String(Number(h.number));
     const part = h.part !== void 0 ? String(h.part) : void 0;
     const ed = h.year !== void 0 ? String(h.year) : h.edition !== void 0 ? String(h.edition) : void 0;
     return {
-      doc_number: num,
+      doc_number: num2,
       ...ed ? { edition: ed } : {},
-      label: `OIML ${letter} ${num}${part ? `-${part}` : ""}${ed ? `:${ed}` : ""}`
+      label: `OIML ${letter} ${num2}${part ? `-${part}` : ""}${ed ? `:${ed}` : ""}`
     };
   } catch {
     return null;
@@ -21949,9 +21950,9 @@ var oimlPubid = {
     for (const m of query.matchAll(re)) {
       const [, oimlPrefix, letter, gap, digits, edition] = m;
       if (digits.length === 1 && !oimlPrefix && !gap) continue;
-      const num = String(Number(digits));
+      const num2 = String(Number(digits));
       const type = letter.toUpperCase();
-      return { doc_number: num, ...edition ? { edition } : {}, label: `OIML ${type} ${num}${edition ? `:${edition}` : ""}` };
+      return { doc_number: num2, ...edition ? { edition } : {}, label: `OIML ${type} ${num2}${edition ? `:${edition}` : ""}` };
     }
     return null;
   },
@@ -24578,6 +24579,32 @@ function telemetry(env, ctx, tier, route, model, ok, answerChars, queryHash, lan
     ])
   );
 }
+function estimateTokens(chars) {
+  return Math.ceil(chars / 4);
+}
+function tokenTier(bucketId) {
+  return bucketId.startsWith("key:") ? "key" : bucketId.startsWith("sub:") ? "member" : "anon";
+}
+function tokenLimit(env, bucketId) {
+  const tier = tokenTier(bucketId);
+  return tier === "key" ? num(env, "KEY_DAY_TOKENS", 4e6) : tier === "member" ? num(env, "MEMBER_DAY_TOKENS", 15e5) : num(env, "ANON_DAY_TOKENS", 3e5);
+}
+async function tokenBudget(env, bucketId) {
+  const used = Number(await env.CACHE.get(`t:${today()}:ask:${await sha256Hex(bucketId)}`) ?? "0");
+  return { used, limit: tokenLimit(env, bucketId) };
+}
+async function chargeTokens(env, bucketId, tokens) {
+  if (!(tokens > 0)) return;
+  await kvIncr(env.CACHE, `t:${today()}:ask:${await sha256Hex(bucketId)}`, tokens);
+}
+function usageTotal(usage) {
+  if (!usage || typeof usage !== "object") return null;
+  const u = usage;
+  const p = Number(u.prompt_tokens ?? 0);
+  const c = Number(u.completion_tokens ?? 0);
+  const total = p + c;
+  return Number.isFinite(total) && total > 0 ? total : null;
+}
 
 // workers/worker_public/src/graph.ts
 function docNumberOf(nodeId) {
@@ -24662,6 +24689,10 @@ export {
   clientIp,
   checkQuota,
   telemetry,
+  estimateTokens,
+  tokenBudget,
+  chargeTokens,
+  usageTotal,
   graphExpand,
   editionNote
 };
