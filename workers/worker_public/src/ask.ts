@@ -41,6 +41,7 @@ import { clientIp, checkQuota, telemetry } from "./quota";
 import { graphExpand, editionNote } from "./graph";
 import { registerNote, searchRegister, certificateLinks } from "./certificates";
 import { TOOL_DECLARATION, parseToolCall, runTool, toolNote } from "./tools";
+import { operationsCatalogNote } from "./operations.ts";
 import { extractNameplate, nameplateRegisterQuery } from "./nameplate.ts";
 import { P } from "./profile.ts";
 
@@ -641,6 +642,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
   const regNote = register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : undefined;
+  const opsCatalog = await operationsCatalogNote(env.DB, q.query);
 
   // Conversational route, decided by query UNDERSTANDING (any language, any
   // phrasing) — not string matching. No retrieval: nothing in the corpus
@@ -1146,7 +1148,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
+    [processNote, eNote, regNote, opsCatalog, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );
