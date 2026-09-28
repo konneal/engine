@@ -84,7 +84,7 @@ function buildRegisterQuery(tokens) {
     return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
   });
   return {
-    sql: `SELECT num, family, holder, model, year, status FROM certificates WHERE ${clauses.join(" OR ")} LIMIT 6`,
+    sql: `SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE ${clauses.join(" OR ")} LIMIT 6`,
     params
   };
 }
@@ -116,6 +116,11 @@ function registerNote(rows) {
     ...lines
   ].join("\n");
 }
+function certificateLinks(rows) {
+  const links = rows.filter((r) => r.pdf_key).map((r) => `- ${r.num}: https://www.oimlsmart.org/cert-pdf/${r.pdf_key}`);
+  return links.length ? `The certificates' documents:
+${links.join("\n")}` : "";
+}
 
 export {
   isRegisterShaped,
@@ -123,5 +128,6 @@ export {
   registerTokens,
   buildRegisterQuery,
   searchRegister,
-  registerNote
+  registerNote,
+  certificateLinks
 };

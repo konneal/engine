@@ -65,9 +65,10 @@ import {
   sha256Hex
 } from "./chunk-2PCUAJJO.js";
 import {
+  certificateLinks,
   registerNote,
   searchRegister
-} from "./chunk-AUSTVIAP.js";
+} from "./chunk-FHOOFPJW.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -1891,7 +1892,7 @@ async function runTool(db, call) {
   if (call.name !== "register_search") return null;
   const query = String(call.args?.query ?? "").trim().slice(0, 160);
   if (!query) return null;
-  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-GFII7CVQ.js");
+  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-CUGV2FIW.js");
   const reg = await searchRegister2(db, query);
   const output = reg?.rows?.length ? registerNote2(reg.rows) : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
   return { name: call.name, query, output };
@@ -2313,7 +2314,7 @@ async function handleAsk(env, ctx, req, tier, key) {
     }
   }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
-  const regNote = register ? registerNote(register.rows) : void 0;
+  const regNote = register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : void 0;
   if (understanding?.intent === "conversational") {
     const queryHash2 = await sha256Hex(q.query);
     const messages2 = [
