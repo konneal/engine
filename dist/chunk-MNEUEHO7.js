@@ -1886,7 +1886,7 @@ function parseToolCall(text) {
 }
 var TOOL_DECLARATION = `You may use one tool before answering, by writing a single line:
 TOOL register_search {"query": "manufacturer and model to look up"}
-The worker runs it against the OIML-CS certificate register (a snapshot) and returns the matching rows, or the exact no-match statement for the string you asked. Use it when the question turns on certification standing and the holder is known \u2014 including from a photograph. Then answer, phrasing the tool's result as what it returned (the searched string stays visible in your answer). If you do not need the tool, answer directly without the line.`;
+The worker runs it against the certificate register (a snapshot) and returns the matching rows, or the exact no-match statement for the string you asked. Use it when the question turns on certification standing and the holder is known \u2014 including from a photograph. Then answer, phrasing the tool's result as what it returned (the searched string stays visible in your answer). If you do not need the tool, answer directly without the line.`;
 async function runTool(db, call) {
   if (call.name !== "register_search") return null;
   const query = String(call.args?.query ?? "").trim().slice(0, 160);
