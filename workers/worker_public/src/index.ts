@@ -261,40 +261,6 @@ async function adminStatsRoute(c: RouteContext): Promise<Response> {
   }, 200, corsHeaders(req));
 }
 
-// ── Provable absence (TODO.era3/02): deterministic enumeration proof ──
-async function absenceRoute(c: RouteContext): Promise<Response> {
-  const { env, req } = c;
-  const t = await tierFor(c);
-  if (t instanceof Response) return t;
-  const body = await readJson(req);
-  const namedStd = namedDocumentIn(String(body?.standard ?? ""));
-  const standard = standardForDocNumber(namedStd?.doc_number ?? String(body?.standard ?? "").trim());
-  const topic = String(body?.topic ?? "").trim().toLowerCase();
-  if (!standard || !topic) return err(400, "invalid_input", "standard and topic are required");
-  try {
-    const nodes = (await env.DB.prepare("SELECT node_id, kind, name, content FROM model_nodes WHERE standard = ?1").bind(standard).all()).results ?? [];
-    const tokens = topic.split(/\s+/).filter((t: string) => t.length > 2);
-    const matches: unknown[] = [];
-    for (const n of nodes as any[]) {
-      const hay = `${n.name ?? ""} ${n.content ?? ""}`.toLowerCase();
-      if (tokens.some((tok: string) => hay.includes(tok))) {
-        matches.push({ node_id: n.node_id, kind: n.kind });
-      }
-    }
-    const chunks = (await env.DB.prepare("SELECT COUNT(*) AS n FROM chunks WHERE corpus = 'smart-model' AND (docidentifier LIKE ?1 OR doc_id LIKE ?2)").bind(`%${body?.standard}%`, `%${body?.standard}%`).first()) as any;
-    return json({
-      standard,
-      topic,
-      enumerated: { model_nodes: nodes.length, smart_model_chunks: chunks?.n ?? 0 },
-      matches: matches.slice(0, 20),
-      verdict: matches.length === 0 ? "absent" : "present",
-      scope: `the machine-readable model of ${standard} (all model nodes) — the enumeration is exhaustive over that scope; prose outside the modeled families is not claimed`,
-    });
-  } catch (e) {
-    return err(502, "absence_failed", String(e).slice(0, 200));
-  }
-}
-
 // ── Self-verification (TODO.era3/03): the deterministic battery, exposed ──
 async function verifyRoute(c: RouteContext): Promise<Response> {
   const { env, req } = c;
@@ -595,8 +561,6 @@ const OPENAPI_HANDLERS: Record<OpenApiOperationId, RouteHandler> = {
   askKeyed: askRoute,
   search: searchRoute,
   searchKeyed: searchRoute,
-  absence: absenceRoute,
-  absenceKeyed: absenceRoute,
   verify: verifyRoute,
   verifyKeyed: verifyRoute,
   research: researchRoute,
