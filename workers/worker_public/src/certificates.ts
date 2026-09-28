@@ -99,7 +99,10 @@ export async function searchRegister(db: any, query: string): Promise<{ rows: Re
   if (family) {
     // the register's family column is the DIGITS ONLY ("60", "105") —
     // the letter+padding form ("R60") never matched a single row
-    sql = sql.replace(" WHERE ", " WHERE family = ?0 AND ");
+    // the prepend shifts every token placeholder by one: renumber them,
+    // or each token binds the family string and nothing matches
+    sql = sql.replace(/\?(\d+)/g, (_, n) => `?${Number(n) + 1}`);
+    sql = sql.replace(" WHERE ", " WHERE family = ?1 AND ");
     params.unshift(family.replace(/^[A-Za-z]+/, ""));
   }
   try {
