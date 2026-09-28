@@ -258,3 +258,6 @@ CREATE TABLE IF NOT EXISTS attachments (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_attachments_sub ON attachments (sub);
+
+-- Tier-2 image reuse: the user message's stored attachment
+ALTER TABLE messages ADD COLUMN attachment_id TEXT;
