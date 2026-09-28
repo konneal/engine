@@ -1,7 +1,4 @@
 import {
-  handleSearch
-} from "../../chunk-FLNX4O7C.js";
-import {
   bindModelNode,
   checkQuoteAnchors,
   handleAsk,
@@ -9,7 +6,10 @@ import {
   modelGroundingBlock,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-ZVMQHCNL.js";
+} from "../../chunk-Q7IVEZ52.js";
+import {
+  handleSearch
+} from "../../chunk-FLNX4O7C.js";
 import {
   buildMessages,
   cfBlobs,
@@ -63,6 +63,7 @@ import {
   sha256Hex,
   today
 } from "../../chunk-2PCUAJJO.js";
+import "../../chunk-Z6JAGZAM.js";
 import {
   P,
   setProfile
@@ -958,7 +959,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-5XMD22SJ.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-PBOODCMQ.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-DON2JQPM.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-PBOODCMQ.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
