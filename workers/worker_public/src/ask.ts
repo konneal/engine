@@ -40,6 +40,7 @@ import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./
 import { clientIp, checkQuota, telemetry } from "./quota";
 import { graphExpand, editionNote } from "./graph";
 import { registerNote, searchRegister } from "./certificates";
+import { TOOL_DECLARATION, parseToolCall, runTool, toolNote } from "./tools";
 import { extractNameplate, nameplateRegisterQuery } from "./nameplate.ts";
 import { P } from "./profile.ts";
 
@@ -1147,6 +1148,31 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     budget,
   );
   await attachFigureImages(env, messages, usedHits, q.query);
+  // the agent loop (the owner's 2026-09-28 direction): ONE bounded tool
+  // round, armed only where a tool can help. The model may call
+  // register_search through the strict line protocol; the worker
+  // executes it deterministically and the ATTRIBUTED result joins the
+  // messages — what the tool returned, for the string it asked.
+  if (/certificate|certified|certification/i.test(q.query) && env.DB) {
+    try {
+      const probe = await (env as any).AI.run(model, {
+        messages: [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}\n\n${q.query}` }],
+        max_tokens: 300,
+        reasoning_effort: "low",
+      });
+      const probeText = typeof probe?.response === "string" ? probe.response : probe?.choices?.[0]?.message?.content ?? "";
+      const call = parseToolCall(probeText);
+      if (call) {
+        const result = await runTool(env.DB, call);
+        if (result) {
+          messages.push({ role: "system", content: toolNote(result) });
+          console.log("agent-tool:", result.name, JSON.stringify(result.query), "->", result.output.slice(0, 80));
+        }
+      }
+    } catch {
+      /* the loop is optional — the answer proceeds without the tool */
+    }
+  }
   if (withImage) {
     // the user's own image rides on the question message — retrieval stays
     // text-driven; the answer model reads the image as question context.
