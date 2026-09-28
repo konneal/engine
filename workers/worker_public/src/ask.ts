@@ -37,7 +37,7 @@ import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested } from "./an
 import type { Env } from "./env";
 export type { Env };
 import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
-import { clientIp, checkQuota, telemetry } from "./quota";
+import { chargeTokens, checkQuota, clientIp, estimateTokens, telemetry, tokenBudget, usageTotal } from "./quota";
 import { graphExpand, editionNote } from "./graph";
 import { registerNote, searchRegister, certificateLinks } from "./certificates";
 import { TOOL_DECLARATION, parseToolCall, runTool, toolNote } from "./tools";
@@ -206,7 +206,28 @@ async function summarizeHistory(
   }
 }
 
-async function* sseTokens(stream: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+/** The prompt's character weight — text parts only, image data URLs
+ *  excluded (a photo must not read as half a million characters). */
+function messageChars(messages: any[]): number {
+  let n = 0;
+  for (const m of messages) {
+    if (typeof m.content === "string") n += m.content.length;
+    else if (Array.isArray(m.content)) for (const part of m.content) if (part?.type === "text" && typeof part.text === "string") n += part.text.length;
+  }
+  return n;
+}
+
+/** Post-generation true-up: the model's own usage when the stream
+ *  reported it, the character estimate otherwise — charged, then the
+ *  budget's fresh state returned for the quota payload. */
+async function chargeAnswerTokens(env: Env, bucketId: string, stats: { usage?: unknown } | undefined, promptChars: number, answerChars: number): Promise<{ tokens_used: number; token_limit: number }> {
+  const total = usageTotal(stats?.usage) ?? estimateTokens(promptChars + answerChars);
+  await chargeTokens(env, bucketId, total);
+  const budget = await tokenBudget(env, bucketId);
+  return { tokens_used: budget.used, token_limit: budget.limit };
+}
+
+async function* sseTokens(stream: ReadableStream<Uint8Array>, stats?: { usage?: unknown }): AsyncGenerator<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -227,6 +248,7 @@ async function* sseTokens(stream: ReadableStream<Uint8Array>): AsyncGenerator<st
           typeof evt?.response === "string"
             ? evt.response
             : evt?.choices?.[0]?.delta?.content;
+        if (evt.usage && stats && stats.usage === undefined) stats.usage = evt.usage;
         if (tok) yield tok;
       } catch {
         // partial JSON in line splitting — ignore
@@ -320,6 +342,14 @@ async function handleAsk(
   if (!quota.ok) {
     return err(429, "quota_exceeded", `Daily question limit reached (${quota.limit}). Try again tomorrow.`);
   }
+  // the real allowance is the day's TOKENS (the 2026-09-29 shift): the
+  // request cap above is the anti-abuse backstop, this is the budget
+  const tokBudget = await tokenBudget(env, bucketId);
+  if (tokBudget.used >= tokBudget.limit) {
+    return err(429, "quota_exceeded", `Daily token budget reached (${tokBudget.limit} tokens). Try again tomorrow.`);
+  }
+  (quota as any).tokens_used = tokBudget.used;
+  (quota as any).token_limit = tokBudget.limit;
 
   const hardCap = num(env as any, "ANON_DAY_HARD_CAP", 5000);
   if (tier === "anon" && quota.used > hardCap) {
@@ -668,15 +698,18 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
             // the reading arrives first — a conversational turn is still a reading
             if (readAs()) send({ type: "read", read: readAs() });
             send({ type: "citations", citations: [], context_applied: NO_CONTEXT, quota, });
+            const stats: { usage?: unknown } = {};
             let full = "";
             try {
-              for await (const tok of sseTokens(stream)) {
+              for await (const tok of sseTokens(stream, stats)) {
                 full += tok;
                 send({ type: "token", v: tok });
               }
             } catch {
               // stream ended prematurely — deliver what we have
             }
+            const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length);
+            send({ type: "quota", quota: { ...quota, ...tq } });
             send({ type: "done", model, query_hash: queryHash, context_applied: NO_CONTEXT, read: readAs() });
             telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang, undefined, telemetryMeta());
             controller.close();
@@ -748,7 +781,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         corsHeaders(req),
       );
     }
-    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), quota, });
+    const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer.length);
+    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), quota: { ...quota, ...tq } });
   }
 
   // ── The api_call draft (TODO.ai-platform/09) — the operations
@@ -785,7 +819,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         corsHeaders(req),
       );
     }
-    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), quota, });
+    const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer.length);
+    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), quota: { ...quota, ...tq } });
   }
 
   // (declared before the retrieval try: the account block, the refusal
@@ -1227,15 +1262,18 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           send({ type: "read", read: readAs() });
           const sourceQuality = answerQuality(cites.map((c: any) => c.quality));
           send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(sourceQuality ? { source_quality: sourceQuality, confidence_note: qualityNote(sourceQuality), ...(sourceQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(cites) } : {}) } : {}), ...(liveRecords ? { records: liveRecords } : {}), quota, });
+          const stats: { usage?: unknown } = {};
           let full = "";
           try {
-            for await (const tok of sseTokens(stream)) {
+            for await (const tok of sseTokens(stream, stats)) {
               full += tok;
               send({ type: "token", v: tok });
             }
           } catch {
             // stream ended prematurely — deliver what we have
           }
+          const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length);
+          send({ type: "quota", quota: { ...quota, ...tq } });
           const canonical0 = canonicalRefusal(full);
           // answer contract v2: validate [[u:]] refs, resolve typed blocks
           const c2 = canonical0.includes(refusalAnswer())
@@ -1475,7 +1513,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     text: h.text.slice(0, 1200),
     ...((h.metadata as any).table_selection ? { sel: (h.metadata as any).table_selection } : {}),
   }));
-  return json({ ...out, context: contextOut, read: readAs(), quota }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
+  const tq = await chargeAnswerTokens(env, bucketId, undefined, messageChars(messages), answer.length);
+  return json({ ...out, context: contextOut, read: readAs(), quota: { ...quota, ...tq } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
 }
 
 function sseResponse(events: unknown[], cors: Record<string, string>): Response {

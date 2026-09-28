@@ -3,12 +3,14 @@ import {
   answerQuality,
   appliedContext,
   buildMessages,
+  chargeTokens,
   checkQuota,
   citations,
   clientIp,
   contextNote,
   editionNote,
   embed,
+  estimateTokens,
   experimentalSourceLabels,
   generateOnce,
   graphExpand,
@@ -34,8 +36,10 @@ import {
   splitHistory,
   syntheticUnderstanding,
   telemetry,
-  understandQuery
-} from "./chunk-TPV5GPY2.js";
+  tokenBudget,
+  understandQuery,
+  usageTotal
+} from "./chunk-LL3LWBZH.js";
 import {
   corsHeaders,
   err,
@@ -2166,7 +2170,23 @@ async function summarizeHistory(env, model, turns) {
     return null;
   }
 }
-async function* sseTokens(stream) {
+function messageChars(messages) {
+  let n = 0;
+  for (const m of messages) {
+    if (typeof m.content === "string") n += m.content.length;
+    else if (Array.isArray(m.content)) {
+      for (const part of m.content) if (part?.type === "text" && typeof part.text === "string") n += part.text.length;
+    }
+  }
+  return n;
+}
+async function chargeAnswerTokens(env, bucketId, stats, promptChars, answerChars) {
+  const total = usageTotal(stats?.usage) ?? estimateTokens(promptChars + answerChars);
+  await chargeTokens(env, bucketId, total);
+  const budget = await tokenBudget(env, bucketId);
+  return { tokens_used: budget.used, token_limit: budget.limit };
+}
+async function* sseTokens(stream, stats) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -2184,6 +2204,7 @@ async function* sseTokens(stream) {
       try {
         const evt = JSON.parse(payload);
         const tok = typeof evt?.response === "string" ? evt.response : evt?.choices?.[0]?.delta?.content;
+        if (evt.usage && stats && stats.usage === void 0) stats.usage = evt.usage;
         if (tok) yield tok;
       } catch {
       }
@@ -2227,6 +2248,12 @@ async function handleAsk(env, ctx, req, tier, key) {
   if (!quota.ok) {
     return err(429, "quota_exceeded", `Daily question limit reached (${quota.limit}). Try again tomorrow.`);
   }
+  const tokBudget = await tokenBudget(env, bucketId);
+  if (tokBudget.used >= tokBudget.limit) {
+    return err(429, "quota_exceeded", `Daily token budget reached (${tokBudget.limit} tokens). Try again tomorrow.`);
+  }
+  quota.tokens_used = tokBudget.used;
+  quota.token_limit = tokBudget.limit;
   const hardCap = num(env, "ANON_DAY_HARD_CAP", 5e3);
   if (tier === "anon" && quota.used > hardCap) {
     return err(503, "generation_disabled", "Generation is temporarily paused; search remains available.");
@@ -2444,14 +2471,17 @@ ${summary}` }] : [],
 `));
             if (readAs()) send({ type: "read", read: readAs() });
             send({ type: "citations", citations: [], context_applied: NO_CONTEXT, quota });
+            const stats = {};
             let full = "";
             try {
-              for await (const tok of sseTokens(stream)) {
+              for await (const tok of sseTokens(stream, stats)) {
                 full += tok;
                 send({ type: "token", v: tok });
               }
             } catch {
             }
+            const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages2), full.length);
+            send({ type: "quota", quota: { ...quota, ...tq2 } });
             send({ type: "done", model, query_hash: queryHash2, context_applied: NO_CONTEXT, read: readAs() });
             telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash2, q.lang, void 0, telemetryMeta());
             controller.close();
@@ -2507,7 +2537,8 @@ ${summary}` }] : [],
         corsHeaders(req)
       );
     }
-    return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, quota });
+    const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q.query.length, verdict.answer.length);
+    return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, quota: { ...quota, ...tq2 } });
   }
   if (apiCallIntent) {
     const callCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
@@ -2534,7 +2565,8 @@ ${summary}` }] : [],
         corsHeaders(req)
       );
     }
-    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, quota });
+    const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q.query.length, verdict.answer.length);
+    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, quota: { ...quota, ...tq2 } });
   }
   let liveRecords;
   let accountNote;
@@ -2834,14 +2866,17 @@ ${q.query}` }],
           send({ type: "read", read: readAs() });
           const sourceQuality = answerQuality(cites.map((c) => c.quality));
           send({ type: "citations", citations: cites, context_applied: ctxApplied, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: qualityNote(sourceQuality), ...sourceQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(cites) } : {} } : {}, ...liveRecords ? { records: liveRecords } : {}, quota });
+          const stats = {};
           let full = "";
           try {
-            for await (const tok of sseTokens(stream)) {
+            for await (const tok of sseTokens(stream, stats)) {
               full += tok;
               send({ type: "token", v: tok });
             }
           } catch {
           }
+          const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length);
+          send({ type: "quota", quota: { ...quota, ...tq2 } });
           const canonical0 = canonicalRefusal(full);
           const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
           send({
@@ -3007,7 +3042,8 @@ ${q.query}` }],
     text: h.text.slice(0, 1200),
     ...h.metadata.table_selection ? { sel: h.metadata.table_selection } : {}
   }));
-  return json({ ...out, context: contextOut, read: readAs(), quota }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
+  const tq = await chargeAnswerTokens(env, bucketId, void 0, messageChars(messages), answer.length);
+  return json({ ...out, context: contextOut, read: readAs(), quota: { ...quota, ...tq } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
 }
 function sseResponse(events, cors) {
   const encoder = new TextEncoder();

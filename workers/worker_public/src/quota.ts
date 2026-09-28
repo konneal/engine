@@ -1,6 +1,6 @@
 // Quota + telemetry: per-bucket daily counters (KV) and the D1
 // queries/spend ledger writes (TODO.impl/23).
-import { sha256Hex, today } from "./config";
+import { num, sha256Hex, today } from "./config.ts";
 import type { Env } from "./env";
 import type { Background } from "./ports/runtime.ts";
 
@@ -53,4 +53,45 @@ export function telemetry(
       ).bind(day, tier, model ?? "none"),
     ]),
   );
+}
+
+// ── the token budget (2026-09-29): the daily allowance is TOKENS, not
+// questions — an elevated-effort answer over a wide retrieval context
+// costs orders of magnitude more than a cached refusal, and one number
+// should say so. Charged after generation from the model's own usage
+// when the stream reports it, estimated by characters otherwise.
+export function estimateTokens(chars: number): number {
+  return Math.ceil(chars / 4);
+}
+
+function tokenTier(bucketId: string): "anon" | "member" | "key" {
+  return bucketId.startsWith("key:") ? "key" : bucketId.startsWith("sub:") ? "member" : "anon";
+}
+
+export function tokenLimit(env: Env, bucketId: string): number {
+  const tier = tokenTier(bucketId);
+  return tier === "key"
+    ? num(env as any, "KEY_DAY_TOKENS", 4_000_000)
+    : tier === "member"
+      ? num(env as any, "MEMBER_DAY_TOKENS", 1_500_000)
+      : num(env as any, "ANON_DAY_TOKENS", 300_000);
+}
+
+export async function tokenBudget(env: Env, bucketId: string): Promise<{ used: number; limit: number }> {
+  const used = Number((await env.CACHE.get(`t:${today()}:ask:${await sha256Hex(bucketId)}`)) ?? "0");
+  return { used, limit: tokenLimit(env, bucketId) };
+}
+
+export async function chargeTokens(env: Env, bucketId: string, tokens: number): Promise<void> {
+  if (!(tokens > 0)) return;
+  await kvIncr(env.CACHE, `t:${today()}:ask:${await sha256Hex(bucketId)}`, tokens);
+}
+
+export function usageTotal(usage: unknown): number | null {
+  if (!usage || typeof usage !== "object") return null;
+  const u = usage as any;
+  const p = Number(u.prompt_tokens ?? 0);
+  const c = Number(u.completion_tokens ?? 0);
+  const total = p + c;
+  return Number.isFinite(total) && total > 0 ? total : null;
 }

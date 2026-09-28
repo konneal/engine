@@ -15,3 +15,11 @@ export declare function telemetry(env: Env, ctx: Background, tier: string, route
     keyId?: string | null;
     retries?: number;
 }): void;
+export declare function estimateTokens(chars: number): number;
+export declare function tokenLimit(env: Env, bucketId: string): number;
+export declare function tokenBudget(env: Env, bucketId: string): Promise<{
+    used: number;
+    limit: number;
+}>;
+export declare function chargeTokens(env: Env, bucketId: string, tokens: number): Promise<void>;
+export declare function usageTotal(usage: unknown): number | null;

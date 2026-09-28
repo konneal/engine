@@ -6,10 +6,10 @@ import {
   modelGroundingBlock,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-UW5M2AXR.js";
+} from "../../chunk-V7PEVNNO.js";
 import {
   handleSearch
-} from "../../chunk-FLNX4O7C.js";
+} from "../../chunk-OXTRNMTZ.js";
 import {
   buildMessages,
   cfBlobs,
@@ -35,7 +35,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-TPV5GPY2.js";
+} from "../../chunk-LL3LWBZH.js";
 import {
   authenticate,
   corsHeaders,
@@ -959,7 +959,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-UOTYZ5DC.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-PBOODCMQ.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-MFFOHVQ2.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-LN5Q7OSZ.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
