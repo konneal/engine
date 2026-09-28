@@ -5,6 +5,7 @@ export interface RegisterRow {
     model: string;
     year: string;
     status: string;
+    pdf_key?: string | null;
 }
 /** A question is register-shaped when it asks about certification
  *  standing of an identifiable model or holder — the deterministic
@@ -37,3 +38,7 @@ export declare function searchRegister(db: any, query: string): Promise<{
     tokens: string[];
 } | null>;
 export declare function registerNote(rows: RegisterRow[]): string;
+/** Each certificate's location rides the note as a link when its PDF
+ *  is in the R2 plane (TODO 7) — the user gets the document, not just
+ *  the fact. */
+export declare function certificateLinks(rows: RegisterRow[]): string;

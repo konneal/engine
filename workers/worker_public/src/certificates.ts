@@ -15,6 +15,7 @@ export interface RegisterRow {
   model: string;
   year: string;
   status: string;
+  pdf_key?: string | null;
 }
 
 /** A question is register-shaped when it asks about certification
@@ -83,7 +84,7 @@ export function buildRegisterQuery(tokens: string[]): { sql: string; params: str
     return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
   });
   return {
-    sql: `SELECT num, family, holder, model, year, status FROM certificates WHERE ${clauses.join(" OR ")} LIMIT 6`,
+    sql: `SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE ${clauses.join(" OR ")} LIMIT 6`,
     params,
   };
 }
@@ -120,3 +121,11 @@ export function registerNote(rows: RegisterRow[]): string {
     ...lines,
   ].join("\n");
 }
+/** Each certificate's location rides the note as a link when its PDF
+ *  is in the R2 plane (TODO 7) — the user gets the document, not just
+ *  the fact. */
+export function certificateLinks(rows: RegisterRow[]): string {
+  const links = rows.filter((r) => r.pdf_key).map((r) => `- ${r.num}: https://www.oimlsmart.org/cert-pdf/${r.pdf_key}`);
+  return links.length ? `The certificates' documents:\n${links.join("\n")}` : "";
+}
+
