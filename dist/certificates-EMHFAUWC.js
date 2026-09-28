@@ -6,7 +6,7 @@ import {
   registerNote,
   registerTokens,
   searchRegister
-} from "./chunk-VGVTIPFW.js";
+} from "./chunk-3IRX4B7Q.js";
 import "./chunk-3FYJM7LH.js";
 export {
   buildRegisterQuery,
