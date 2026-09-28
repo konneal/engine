@@ -66,13 +66,13 @@ export async function handleConversations(
     let msgs: any;
     try {
       msgs = await env.DB.prepare(
-        "SELECT id, role, content, citations, model, context_applied, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
+        "SELECT id, role, content, citations, model, context_applied, attachment_id, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
       )
         .bind(id)
         .all();
     } catch {
       msgs = await env.DB.prepare(
-        "SELECT id, role, content, citations, model, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
+        "SELECT id, role, content, citations, model, attachment_id, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
       )
         .bind(id)
         .all();
@@ -124,6 +124,14 @@ export async function handleAppendMessage(env: any, sub: string, req: Request, c
   if ((role !== "user" && role !== "assistant") || !content.trim() || content.length > LIMITS.maxOutputTokens * 4) {
     return err(400, "invalid_input", "role (user|assistant) and content are required");
   }
+  // Tier-2 image reuse: the message may carry a stored attachment id —
+  // the member's own, validated against the attachments table
+  let attachmentId: string | null = null;
+  if (typeof body?.attachment_id === "string" && body.attachment_id) {
+    const owned = await env.DB.prepare("SELECT id FROM attachments WHERE id = ?1 AND sub = ?2").bind(body.attachment_id, sub).first();
+    if (!owned) return err(404, "not_found", "No such attachment");
+    attachmentId = body.attachment_id;
+  }
   let citations: string | null = null;
   if (body?.citations != null) {
     if (!Array.isArray(body.citations) || body.citations.length > 16) {
@@ -142,8 +150,8 @@ export async function handleAppendMessage(env: any, sub: string, req: Request, c
   try {
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO messages (id, conversation_id, role, content, citations, model, context_applied, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-      ).bind(mid, convId, role, content, citations, typeof body?.model === "string" ? body.model.slice(0, 80) : null, applied ? JSON.stringify(applied) : null, now),
+        "INSERT INTO messages (id, conversation_id, role, content, citations, model, context_applied, attachment_id, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+      ).bind(mid, convId, role, content, citations, typeof body?.model === "string" ? body.model.slice(0, 80) : null, applied ? JSON.stringify(applied) : null, attachmentId, now),
       env.DB.prepare("UPDATE conversations SET updated_at = ?1 WHERE id = ?2 AND sub = ?3").bind(now, convId, sub),
     ]);
   } catch (e) {

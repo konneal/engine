@@ -10,7 +10,7 @@ import {
   scoreFaithfulness,
   scoreJudge,
   standardForDocNumber
-} from "../../chunk-SU4FO7TN.js";
+} from "../../chunk-PH7W6HMN.js";
 import {
   buildMessages,
   cfBlobs,
@@ -103,11 +103,11 @@ async function handleConversations(env, sub, req, route) {
     let msgs;
     try {
       msgs = await env.DB.prepare(
-        "SELECT id, role, content, citations, model, context_applied, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC"
+        "SELECT id, role, content, citations, model, context_applied, attachment_id, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC"
       ).bind(id).all();
     } catch {
       msgs = await env.DB.prepare(
-        "SELECT id, role, content, citations, model, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC"
+        "SELECT id, role, content, citations, model, attachment_id, created_at FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC"
       ).bind(id).all();
     }
     return json({
@@ -151,6 +151,12 @@ async function handleAppendMessage(env, sub, req, convId) {
   if (role !== "user" && role !== "assistant" || !content.trim() || content.length > LIMITS.maxOutputTokens * 4) {
     return err(400, "invalid_input", "role (user|assistant) and content are required");
   }
+  let attachmentId = null;
+  if (typeof body?.attachment_id === "string" && body.attachment_id) {
+    const owned = await env.DB.prepare("SELECT id FROM attachments WHERE id = ?1 AND sub = ?2").bind(body.attachment_id, sub).first();
+    if (!owned) return err(404, "not_found", "No such attachment");
+    attachmentId = body.attachment_id;
+  }
   let citations2 = null;
   if (body?.citations != null) {
     if (!Array.isArray(body.citations) || body.citations.length > 16) {
@@ -166,8 +172,8 @@ async function handleAppendMessage(env, sub, req, convId) {
   try {
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO messages (id, conversation_id, role, content, citations, model, context_applied, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)"
-      ).bind(mid, convId, role, content, citations2, typeof body?.model === "string" ? body.model.slice(0, 80) : null, applied ? JSON.stringify(applied) : null, now),
+        "INSERT INTO messages (id, conversation_id, role, content, citations, model, context_applied, attachment_id, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
+      ).bind(mid, convId, role, content, citations2, typeof body?.model === "string" ? body.model.slice(0, 80) : null, applied ? JSON.stringify(applied) : null, attachmentId, now),
       env.DB.prepare("UPDATE conversations SET updated_at = ?1 WHERE id = ?2 AND sub = ?3").bind(now, convId, sub)
     ]);
   } catch (e) {
@@ -954,7 +960,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-27TMC7PV.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-PBOODCMQ.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-5KXW7WIA.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-PBOODCMQ.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });

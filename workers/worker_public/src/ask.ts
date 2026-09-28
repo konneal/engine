@@ -379,6 +379,31 @@ async function handleAsk(
   if (body?.image != null && !userImage) {
     return err(400, "invalid_image", "image must be a data URL (data:image/png|jpeg|webp|gif;base64,…) up to 6 MB");
   }
+  // Tier-2 image reuse (TODO.new-era/8): stored attachments materialize
+  // as the question's image. Explicit attachment_ids win (member-gated,
+  // ownership-checked, at most one — the multimodal shape rule); with
+  // none given, the conversation's most recent image re-attaches itself,
+  // so "identify this" works turns after the upload.
+  let storedImage: string | null = null;
+  const attachIds: string[] = Array.isArray(body?.attachment_ids)
+    ? body.attachment_ids.filter((x: unknown) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)).slice(0, 2)
+    : [];
+  if (attachIds.length && env.DB && member) {
+    for (const aid of attachIds) {
+      const row = await env.DB.prepare("SELECT mime, r2_key FROM attachments WHERE id = ?1 AND sub = ?2").bind(aid, member.sub).first<{ mime: string; r2_key: string }>();
+      if (!row) continue;
+      try {
+        const obj = await (env as any).CHAT_UPLOADS.get(row.r2_key);
+        if (!obj) continue;
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(await obj.arrayBuffer())));
+        storedImage = `data:${row.mime};base64,${b64}`;
+        break; // the multimodal shape rule: one image per question
+      } catch {
+        /* the object's gone — ask without it */
+      }
+    }
+  }
+  const effectiveImage = userImage ?? storedImage;
   // history compaction: turns beyond the budget slice are summarized into a
   // continuity block (below) instead of silently dropped
   const budget = num(env as any, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
@@ -395,7 +420,8 @@ async function handleAsk(
   // answer caches; corpus surgery bumps it (scripts/invalidate_answer_
   // cache.py) and old-generation entries miss (oimlsmart/rag#72)
   const gen = await corpusGen(env.CACHE);
-  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
+  const withImage = effectiveImage || storedImage;
+  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
@@ -424,6 +450,25 @@ async function handleAsk(
   // (present when the client passes conversation_id) make pronoun
   // follow-ups O(1) — "it / the 2017 one" resolve against the map
   const conversationId = typeof body?.conversation_id === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(body.conversation_id) ? body.conversation_id : null;
+
+  // Tier-2 continuation: no new image, but the conversation carries one —
+  // its most recent stored image re-attaches to this question
+  if (!effectiveImage && !attachIds.length && conversationId && env.DB && member) {
+    const prior = await env.DB.prepare(
+      "SELECT m.attachment_id AS aid, a.mime, a.r2_key FROM messages m JOIN attachments a ON a.id = m.attachment_id WHERE m.conversation_id = ?1 AND m.role = 'user' AND m.attachment_id IS NOT NULL ORDER BY m.created_at DESC LIMIT 1",
+    ).bind(conversationId, member.sub).first<{ aid: string; mime: string; r2_key: string }>();
+    if (prior) {
+      try {
+        const obj = await (env as any).CHAT_UPLOADS.get(prior.r2_key);
+        if (obj) {
+          const b64 = btoa(String.fromCharCode(...new Uint8Array(await obj.arrayBuffer())));
+          storedImage = `data:${prior.mime};base64,${b64}`;
+        }
+      } catch {
+        /* the object's gone */
+      }
+    }
+  }
   let convEntities: Array<{ entity: string; kind: string }> = [];
   if (conversationId) {
     try {
@@ -1081,7 +1126,7 @@ async function handleAsk(
     budget,
   );
   await attachFigureImages(env, messages, usedHits, q.query);
-  if (userImage) {
+  if (withImage) {
     // the user's own image rides on the question message — retrieval stays
     // text-driven; the answer model reads the image as question context.
     // A markings/nameplate/certificate photo gets a TRANSCRIPTION note:
@@ -1096,11 +1141,11 @@ async function handleAsk(
     if (Array.isArray(last.content)) {
       const textPart = last.content.find((p: any) => p.type === "text");
       if (textPart) textPart.text += note;
-      last.content = [...last.content, { type: "image_url", image_url: { url: userImage } }] as unknown as string;
+      last.content = [...last.content, { type: "image_url", image_url: { url: withImage } }] as unknown as string;
     } else {
       last.content = [
         { type: "text", text: last.content + note },
-        { type: "image_url", image_url: { url: userImage } },
+        { type: "image_url", image_url: { url: withImage } },
       ] as unknown as string;
     }
     console.log("user image attached to generation");

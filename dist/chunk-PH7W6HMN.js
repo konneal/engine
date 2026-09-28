@@ -2181,13 +2181,31 @@ async function handleAsk(env, ctx, req, tier, key) {
   if (body?.image != null && !userImage) {
     return err(400, "invalid_image", "image must be a data URL (data:image/png|jpeg|webp|gif;base64,\u2026) up to 6 MB");
   }
+  let storedImage = null;
+  const attachIds = Array.isArray(body?.attachment_ids) ? body.attachment_ids.filter((x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)).slice(0, 2) : [];
+  if (attachIds.length && env.DB && member) {
+    for (const aid of attachIds) {
+      const row = await env.DB.prepare("SELECT mime, r2_key FROM attachments WHERE id = ?1 AND sub = ?2").bind(aid, member.sub).first();
+      if (!row) continue;
+      try {
+        const obj = await env.CHAT_UPLOADS.get(row.r2_key);
+        if (!obj) continue;
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(await obj.arrayBuffer())));
+        storedImage = `data:${row.mime};base64,${b64}`;
+        break;
+      } catch {
+      }
+    }
+  }
+  const effectiveImage = userImage ?? storedImage;
   const budget = num(env, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
   const { kept: keptHistory, overflow } = splitHistory(history, budget);
   const summary = overflow.length >= 2 ? await summarizeHistory(env, MODELS.understand, overflow) ?? void 0 : void 0;
   let retrieved;
   const fresh = freshRequested(body);
   const gen = await corpusGen(env.CACHE);
-  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || userImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
+  const withImage = effectiveImage || storedImage;
+  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   const wantsStream = body?.stream === true || tier === "anon" && body?.stream !== false;
   if (cached) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact", telemetryMeta());
@@ -2204,6 +2222,21 @@ async function handleAsk(env, ctx, req, tier, key) {
   const warmQuery = retrievalQuery(q.query, prev);
   const warmEmbed = embedWarm(env, warmQuery);
   const conversationId = typeof body?.conversation_id === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(body.conversation_id) ? body.conversation_id : null;
+  if (!effectiveImage && !attachIds.length && conversationId && env.DB && member) {
+    const prior = await env.DB.prepare(
+      "SELECT m.attachment_id AS aid, a.mime, a.r2_key FROM messages m JOIN attachments a ON a.id = m.attachment_id WHERE m.conversation_id = ?1 AND m.role = 'user' AND m.attachment_id IS NOT NULL ORDER BY m.created_at DESC LIMIT 1"
+    ).bind(conversationId, member.sub).first();
+    if (prior) {
+      try {
+        const obj = await env.CHAT_UPLOADS.get(prior.r2_key);
+        if (obj) {
+          const b64 = btoa(String.fromCharCode(...new Uint8Array(await obj.arrayBuffer())));
+          storedImage = `data:${prior.mime};base64,${b64}`;
+        }
+      } catch {
+      }
+    }
+  }
   let convEntities = [];
   if (conversationId) {
     try {
@@ -2651,18 +2684,18 @@ Answer account questions from these records ONLY: name the record when you use i
     budget
   );
   await attachFigureImages(env, messages, usedHits, q.query);
-  if (userImage) {
+  if (withImage) {
     const wantsMarkings = /\b(mark(ing|ings)?|nameplate|label|inscription|engrav|sticker|plate)\b|certificat/i.test(q.query);
     const last = messages[messages.length - 1];
     const note = wantsMarkings ? "\n\n(The user attached a photo with this question. First transcribe every inscription you can actually read in the image \u2014 names, model references, accuracy classes, numeric values with their units, certificate or approval numbers \u2014 quoting them verbatim. Then answer the question from the numbered passages, citing the requirement each interpretation rests on. If an inscription is unreadable, say so; never invent a marking.)" : "\n\n(The user attached an image with this question; interpret it directly when answering.)";
     if (Array.isArray(last.content)) {
       const textPart = last.content.find((p) => p.type === "text");
       if (textPart) textPart.text += note;
-      last.content = [...last.content, { type: "image_url", image_url: { url: userImage } }];
+      last.content = [...last.content, { type: "image_url", image_url: { url: withImage } }];
     } else {
       last.content = [
         { type: "text", text: last.content + note },
-        { type: "image_url", image_url: { url: userImage } }
+        { type: "image_url", image_url: { url: withImage } }
       ];
     }
     console.log("user image attached to generation");
