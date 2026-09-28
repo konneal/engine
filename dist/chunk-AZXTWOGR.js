@@ -1866,7 +1866,7 @@ function exactCacheKey(indexVersion, gen, ns, queryHash) {
 
 // workers/worker_public/src/certificates.ts
 function isRegisterShaped(query) {
-  return /\bcertif(ied|icates?|ication)s?\b/i.test(query) && /\b(is|are|still|currently|valid|status|suspended|revoked|was|were)\b/i.test(query);
+  return /\bcertif(ied|icates?|ication)s?\b/i.test(query) && /\b(is|are|still|currently|valid|status|suspended|revoked|was|were|have|has|hold|holds|possess|carry|got)\b/i.test(query);
 }
 function queryFamily(query) {
   const m = /\b([RDMB])\s?-?(\d{2,3})\b/i.exec(query);
@@ -1977,6 +1977,53 @@ function registerNote(rows) {
     "Certificate register \u2014 the following certificates matched the asked holder or model. Quote the certificate number, the holder and the status verbatim; the register is a snapshot, so qualify any statement about current certification accordingly.",
     ...lines
   ].join("\n");
+}
+
+// workers/worker_public/prompts/nameplate.md
+var nameplate_default = `You read instrument nameplates. From the photograph, extract the
+manufacturer's name exactly as printed and the model designation exactly
+as printed. Answer with ONLY a JSON object on one line:
+
+{"manufacturer": "\u2026", "model": "\u2026"}
+
+If the photograph shows no manufacturer or no model, use null for the
+missing value. Never guess beyond what is printed.
+`;
+
+// workers/worker_public/src/nameplate-parse.ts
+function parseNameplate(text) {
+  const m = /\{[^{}]*\}/.exec(String(text ?? ""));
+  if (!m) return null;
+  try {
+    const j = JSON.parse(m[0]);
+    const clean = (v) => typeof v === "string" && v.trim() ? v.trim().slice(0, 80) : null;
+    const out = { manufacturer: clean(j.manufacturer), model: clean(j.model) };
+    return out.manufacturer || out.model ? out : null;
+  } catch {
+    return null;
+  }
+}
+function nameplateRegisterQuery(np, question) {
+  const fam = /\b([RDMB])\s?-?(\d{2,3})\b/i.exec(question);
+  return [np.manufacturer, np.model, fam ? `${fam[1]} ${fam[2]}` : null].filter(Boolean).join(" ");
+}
+
+// workers/worker_public/src/nameplate.ts
+async function extractNameplate(ai, model, image) {
+  try {
+    const res = await ai.run(model, {
+      messages: [
+        { role: "system", content: nameplate_default.trimEnd() },
+        { role: "user", content: [{ type: "image_url", image_url: { url: image } }] }
+      ],
+      max_tokens: 512,
+      reasoning_effort: "low"
+    });
+    const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+    return parseNameplate(text ?? "");
+  } catch {
+    return null;
+  }
 }
 
 // workers/worker_public/src/ask.ts
@@ -2332,7 +2379,17 @@ async function handleAsk(env, ctx, req, tier, key) {
   console.log("understand:", understanding?.intent ?? "null", understanding?.doc_number ? `doc#${understanding.doc_number}${understanding.edition ? "@" + understanding.edition : ""}` : "nodoc", "|", q.query.slice(0, 50));
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);
-  const register = await searchRegister(env.DB, q.query);
+  let register = await searchRegister(env.DB, q.query);
+  if (withImage && !register?.rows?.length && /certificate|certified|certification|oiml[- ]?cs/i.test(q.query)) {
+    const np = await extractNameplate(env.AI, MODELS.member, withImage);
+    if (np?.manufacturer) {
+      const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query));
+      if (bridged?.rows?.length) {
+        register = bridged;
+        console.log("nameplate-bridge:", np.manufacturer, np.model ?? "", "\u2192", bridged.rows.length, "register rows");
+      }
+    }
+  }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
   const regNote = register ? registerNote(register.rows) : void 0;
   if (understanding?.intent === "conversational") {

@@ -22,7 +22,7 @@ export interface RegisterRow {
  *  trigger the citation-graph notes already use (query-shaped notes,
  *  never a router). */
 export function isRegisterShaped(query: string): boolean {
-  return /\bcertif(ied|icates?|ication)s?\b/i.test(query) && /\b(is|are|still|currently|valid|status|suspended|revoked|was|were)\b/i.test(query);
+  return /\bcertif(ied|icates?|ication)s?\b/i.test(query) && /\b(is|are|still|currently|valid|status|suspended|revoked|was|were|have|has|hold|holds|possess|carry|got)\b/i.test(query);
 }
 
 /** Search tokens: words that can identify a holder or a model — words of

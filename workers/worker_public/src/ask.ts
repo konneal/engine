@@ -40,6 +40,7 @@ import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./
 import { clientIp, checkQuota, telemetry } from "./quota";
 import { graphExpand, editionNote } from "./graph";
 import { registerNote, searchRegister } from "./certificates";
+import { extractNameplate, nameplateRegisterQuery } from "./nameplate.ts";
 import { P } from "./profile.ts";
 
 /** User-uploaded image for multimodal questions: a data URL
@@ -619,7 +620,21 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // register-shaped question queries the D1 table directly and the rows
   // join the prompt as an authoritative note — exact matches, never a
   // similarity guess about certification standing
-  const register = await searchRegister(env.DB, q.query);
+  let register = await searchRegister(env.DB, q.query);
+  // the nameplate bridge (TODO.new-era/6's image lane): a certificate
+  // question WITH a photograph carries its manufacturer in the pixels —
+  // one vision call extracts it, and those tokens re-query the register
+  // so the answer cites the actual certificate rows
+  if (withImage && !register?.rows?.length && /certificate|certified|certification|oiml[- ]?cs/i.test(q.query)) {
+    const np = await extractNameplate((env as any).AI, MODELS.member, withImage);
+    if (np?.manufacturer) {
+      const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query));
+      if (bridged?.rows?.length) {
+        register = bridged;
+        console.log("nameplate-bridge:", np.manufacturer, np.model ?? "", "→", bridged.rows.length, "register rows");
+      }
+    }
+  }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
   const regNote = register ? registerNote(register.rows) : undefined;
 
