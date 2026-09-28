@@ -98,6 +98,10 @@ export async function searchRegister(db: any, query: string, force = false): Pro
   const built = buildRegisterQuery(tokens);
   let { sql, params } = built;
   const family = queryFamily(query);
+  if (!family) {
+    // a tool query that names no family must not carry the placeholder
+    sql = sql.replace("family = ?FAMILY AND ", "");
+  }
   if (family) {
     // the register's family column is the DIGITS ONLY ("60", "105") —
     // the letter+padding form ("R60") never matched a single row

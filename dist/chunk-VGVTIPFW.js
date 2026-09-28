@@ -95,6 +95,9 @@ async function searchRegister(db, query, force = false) {
   const built = buildRegisterQuery(tokens);
   let { sql, params } = built;
   const family = queryFamily(query);
+  if (!family) {
+    sql = sql.replace("family = ?FAMILY AND ", "");
+  }
   if (family) {
     sql = sql.replace(/\?(\d+)/g, (_, n) => `?${Number(n) + 1}`);
     sql = sql.replace("?FAMILY", "?1");
