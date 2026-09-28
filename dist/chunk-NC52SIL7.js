@@ -2303,8 +2303,9 @@ async function handleAsk(env, ctx, req, tier, key) {
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);
   let register = await searchRegister(env.DB, q.query);
-  if ((userImage ?? storedImage) && /certificate|certified|certification/i.test(q.query)) {
-    const np = await extractNameplate(env.AI, MODELS.member, withImage);
+  const bridgeImage = userImage ?? storedImage;
+  if (bridgeImage && /certificate|certified|certification/i.test(q.query)) {
+    const np = await extractNameplate(env.AI, MODELS.member, bridgeImage);
     if (np?.manufacturer) {
       const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query));
       if (bridged?.rows?.length) {

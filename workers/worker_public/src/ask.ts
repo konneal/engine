@@ -628,8 +628,9 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // Fires whenever a photo is present: the text lane's tokens are the
   // question's stopwords ("this", "have") and can match an unrelated
   // holder, and the photograph's own reading is authoritative over them.
-  if ((userImage ?? storedImage) && /certificate|certified|certification/i.test(q.query)) {
-    const np = await extractNameplate((env as any).AI, MODELS.member, withImage);
+  const bridgeImage = userImage ?? storedImage;
+  if (bridgeImage && /certificate|certified|certification/i.test(q.query)) {
+    const np = await extractNameplate((env as any).AI, MODELS.member, bridgeImage);
     if (np?.manufacturer) {
       const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query));
       if (bridged?.rows?.length) {
