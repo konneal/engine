@@ -8,9 +8,8 @@ import {
   handleMemories,
   modelGroundingBlock,
   scoreFaithfulness,
-  scoreJudge,
-  standardForDocNumber
-} from "../../chunk-PH7W6HMN.js";
+  scoreJudge
+} from "../../chunk-OPJXHEZU.js";
 import {
   buildMessages,
   cfBlobs,
@@ -25,7 +24,6 @@ import {
   handleLogin,
   handleLogout,
   handleMe,
-  namedDocumentIn,
   opCfg,
   opMemberCanWrite,
   opTokenMember,
@@ -960,7 +958,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-5KXW7WIA.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-PBOODCMQ.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-3TAC56RC.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-PBOODCMQ.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
@@ -1456,38 +1454,6 @@ async function adminStatsRoute(c) {
     pruned: "telemetry >90d"
   }, 200, corsHeaders(req));
 }
-async function absenceRoute(c) {
-  const { env, req } = c;
-  const t = await tierFor(c);
-  if (t instanceof Response) return t;
-  const body = await readJson(req);
-  const namedStd = namedDocumentIn(String(body?.standard ?? ""));
-  const standard = standardForDocNumber(namedStd?.doc_number ?? String(body?.standard ?? "").trim());
-  const topic = String(body?.topic ?? "").trim().toLowerCase();
-  if (!standard || !topic) return err(400, "invalid_input", "standard and topic are required");
-  try {
-    const nodes = (await env.DB.prepare("SELECT node_id, kind, name, content FROM model_nodes WHERE standard = ?1").bind(standard).all()).results ?? [];
-    const tokens = topic.split(/\s+/).filter((t2) => t2.length > 2);
-    const matches = [];
-    for (const n of nodes) {
-      const hay = `${n.name ?? ""} ${n.content ?? ""}`.toLowerCase();
-      if (tokens.some((tok) => hay.includes(tok))) {
-        matches.push({ node_id: n.node_id, kind: n.kind });
-      }
-    }
-    const chunks = await env.DB.prepare("SELECT COUNT(*) AS n FROM chunks WHERE corpus = 'smart-model' AND (docidentifier LIKE ?1 OR doc_id LIKE ?2)").bind(`%${body?.standard}%`, `%${body?.standard}%`).first();
-    return json({
-      standard,
-      topic,
-      enumerated: { model_nodes: nodes.length, smart_model_chunks: chunks?.n ?? 0 },
-      matches: matches.slice(0, 20),
-      verdict: matches.length === 0 ? "absent" : "present",
-      scope: `the machine-readable model of ${standard} (all model nodes) \u2014 the enumeration is exhaustive over that scope; prose outside the modeled families is not claimed`
-    });
-  } catch (e) {
-    return err(502, "absence_failed", String(e).slice(0, 200));
-  }
-}
 async function verifyRoute(c) {
   const { env, req } = c;
   const t = await tierFor(c);
@@ -1727,8 +1693,6 @@ var OPENAPI_HANDLERS = {
   askKeyed: askRoute,
   search: searchRoute,
   searchKeyed: searchRoute,
-  absence: absenceRoute,
-  absenceKeyed: absenceRoute,
   verify: verifyRoute,
   verifyKeyed: verifyRoute,
   research: researchRoute,

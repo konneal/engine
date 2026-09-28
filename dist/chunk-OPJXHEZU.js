@@ -2908,7 +2908,6 @@ export {
   handleMemories,
   scoreFaithfulness,
   checkQuoteAnchors,
-  standardForDocNumber,
   bindModelNode,
   modelGroundingBlock,
   scoreJudge,

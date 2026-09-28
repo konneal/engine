@@ -24,7 +24,7 @@ tags:
   - name: Search
     description: Retrieve ranked clauses without generating an answer.
   - name: Evidence
-    description: Provable absence certificates and answer verification.
+    description: Answer verification.
   - name: Research
     description: Bounded iterative research over the corpus.
   - name: Conversations
@@ -178,38 +178,6 @@ paths:
       responses:
         '200':
           description: The ranked hits.
-  /api/absence:
-    post:
-      tags: [Evidence]
-      summary: Request a provable absence certificate
-      description: >-
-        Enumerates the entire machine-readable model of the named standard and
-        reports how many nodes were examined and whether any matched the
-        topic. A verdict of absent is an enumeration certificate that
-        states its scope, not a statement that a search found nothing.
-      operationId: absence
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [standard, topic]
-              properties:
-                standard:
-                  type: string
-                  description: The publication, for example R 60.
-                topic:
-                  type: string
-                  description: The topic whose absence is to be proven.
-            examples:
-              packaging:
-                value:
-                  standard: R 60
-                  topic: packaging
-      responses:
-        '200':
-          description: The enumeration certificate.
   /v1/absence:
     post:
       tags: [Evidence]
