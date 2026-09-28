@@ -88,8 +88,8 @@ function buildRegisterQuery(tokens) {
     params
   };
 }
-async function searchRegister(db, query) {
-  if (!isRegisterShaped(query)) return null;
+async function searchRegister(db, query, force = false) {
+  if (!force && !isRegisterShaped(query)) return null;
   const tokens = registerTokens(query);
   if (!tokens.length) return null;
   const built = buildRegisterQuery(tokens);

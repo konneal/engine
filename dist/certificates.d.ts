@@ -33,7 +33,7 @@ export declare function buildRegisterQuery(tokens: string[]): {
     sql: string;
     params: string[];
 };
-export declare function searchRegister(db: any, query: string): Promise<{
+export declare function searchRegister(db: any, query: string, force?: boolean): Promise<{
     rows: RegisterRow[];
     tokens: string[];
 } | null>;

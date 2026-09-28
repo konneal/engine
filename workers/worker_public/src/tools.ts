@@ -41,7 +41,7 @@ export async function runTool(db: any, call: ToolCall): Promise<ToolResult | nul
   const query = String(call.args?.query ?? "").trim().slice(0, 160);
   if (!query) return null;
   const { searchRegister, registerNote } = await import("./certificates");
-  const reg = await searchRegister(db, query);
+  const reg = await searchRegister(db, query, true); // the tool decided — no shaping gate
   const output = reg?.rows?.length
     ? registerNote(reg.rows)
     : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
