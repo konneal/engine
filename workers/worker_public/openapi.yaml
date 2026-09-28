@@ -14,8 +14,10 @@ info:
     administrator; signed-in members obtain a higher allowance together
     with conversation synchronisation, project memory and research mode.
 servers:
+  - url: https://www.ommisa.org
+    description: Production (the canonical door)
   - url: https://ai.oimlsmart.org
-    description: Production
+    description: The institutional origin — a permanent, method-preserving redirect to the canonical door
 tags:
   - name: Ask
     description: Ask a question and receive a citation-grounded answer.
