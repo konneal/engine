@@ -2670,6 +2670,7 @@ Answer account questions from these records ONLY: name the record when you use i
     budget
   );
   await attachFigureImages(env, messages, usedHits, q.query);
+  const pendingTools = [];
   if (/certificate|certified|certification/i.test(q.query) && env.DB) {
     try {
       const probe = await env.AI.run(model, {
@@ -2685,6 +2686,7 @@ ${q.query}` }],
         const result = await runTool(env.DB, call);
         if (result) {
           messages.push({ role: "system", content: toolNote(result) });
+          pendingTools.push(result);
           console.log("agent-tool:", result.name, JSON.stringify(result.query), "->", result.output.slice(0, 80));
         }
       }
@@ -2718,6 +2720,12 @@ ${q.query}` }],
           const send = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}
 
 `));
+          for (const t of pendingTools) {
+            try {
+              send({ type: "tool", name: t.name, query: t.query });
+            } catch {
+            }
+          }
           send({ type: "read", read: readAs() });
           const sourceQuality = answerQuality(cites.map((c) => c.quality));
           send({ type: "citations", citations: cites, context_applied: ctxApplied, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: qualityNote(sourceQuality), ...sourceQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(cites) } : {} } : {}, ...liveRecords ? { records: liveRecords } : {}, quota });
