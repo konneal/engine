@@ -68,7 +68,7 @@ import {
   certificateLinks,
   registerNote,
   searchRegister
-} from "./chunk-VGVTIPFW.js";
+} from "./chunk-3IRX4B7Q.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -1892,7 +1892,7 @@ async function runTool(db, call) {
   if (call.name !== "register_search") return null;
   const query = String(call.args?.query ?? "").trim().slice(0, 160);
   if (!query) return null;
-  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-DNRUOYRF.js");
+  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-EMHFAUWC.js");
   const reg = await searchRegister2(db, query, true);
   const output = reg?.rows?.length ? registerNote2(reg.rows) : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
   return { name: call.name, query, output };
@@ -1929,17 +1929,59 @@ var ACTION_STEMS = [
   "announc",
   "download"
 ];
+var STOP_WORDS = /* @__PURE__ */ new Set([
+  "which",
+  "what",
+  "where",
+  "when",
+  "how",
+  "why",
+  "who",
+  "does",
+  "did",
+  "can",
+  "the",
+  "and",
+  "for",
+  "with",
+  "that",
+  "this",
+  "are",
+  "was",
+  "were",
+  "has",
+  "have",
+  "had",
+  "not",
+  "but",
+  "all",
+  "any",
+  "platform",
+  "operation",
+  "operations",
+  "endpoint",
+  "endpoints",
+  "api"
+]);
+function anchorWords(anchor) {
+  return anchor.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+var singular = (w) => w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w;
 function matchOperations(query, rows) {
   const q = query.toLowerCase();
   const stems = ACTION_STEMS.filter((s) => q.includes(s));
-  if (!stems.length) return [];
+  const objects = query.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !STOP_WORDS.has(w)).map(singular);
   const scored = [];
   for (const r of rows) {
     const hay = `${r.anchor} ${r.text}`.toLowerCase();
-    const score = stems.filter((s) => hay.includes(s)).length;
-    if (score > 0) scored.push({ ...r, score });
+    const verbScore = stems.filter((s) => hay.includes(s)).length * 3;
+    const words = anchorWords(r.anchor).map(singular);
+    const objectScore = objects.filter((o) => words.includes(o)).length * 10;
+    if (objectScore + verbScore > 0) scored.push({ ...r, score: objectScore + verbScore, objectScore });
   }
-  return scored.sort((a, b) => b.score - a.score).slice(0, 4);
+  const named = scored.filter((s) => s.objectScore > 0);
+  const pool = named.length ? named : scored;
+  return pool.sort((a, b) => b.score - a.score).slice(0, 4);
 }
 function catalogNote(anchors) {
   if (!anchors.length) return "";
@@ -1949,12 +1991,12 @@ ${anchors.map((a) => `- ${a}`).join("\n")}`;
 async function operationsCatalogNote(db, query) {
   if (!isOperationIntent(query)) return void 0;
   try {
-    const rows = (await db.prepare("SELECT clause_anchor AS anchor, substr(text, 1, 220) AS text FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
+    const rows = (await db.prepare("SELECT clause_anchor AS anchor, substr(text, 1, 300) AS text FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
     const opRows = rows.map((r) => ({ anchor: String(r.anchor ?? ""), text: String(r.text ?? "") })).filter((r) => r.anchor);
     const matched = matchOperations(query, opRows);
     const parts = [];
     if (matched.length) {
-      parts.push(`Operations whose description matches the question's action (AUTHORITATIVE \u2014 if one matches, the answer MUST name it and cite its line; never answer that the information is missing):
+      parts.push(`Operations whose name or description matches the question (AUTHORITATIVE \u2014 if one matches, the answer MUST name it and cite its line; never answer that the information is missing):
 ${matched.map((m) => `- ${m.text}`).join("\n")}`);
     }
     parts.push(catalogNote(opRows.map((r) => r.anchor)));
