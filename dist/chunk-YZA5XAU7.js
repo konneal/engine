@@ -1943,8 +1943,11 @@ async function extractNameplate(ai, model, image) {
       reasoning_effort: "low"
     });
     const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
-    return parseNameplate(text ?? "");
-  } catch {
+    const np = parseNameplate(text ?? "");
+    console.log(`nameplate-extract: ${np ? `${np.manufacturer} / ${np.model}` : `no parse (${(text ?? "").slice(0, 120)})`}`);
+    return np;
+  } catch (e) {
+    console.log(`nameplate-extract: FAILED ${String(e).slice(0, 160)}`);
     return null;
   }
 }
