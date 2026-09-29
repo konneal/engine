@@ -232,7 +232,12 @@ async function* sseTokens(stream: ReadableStream<Uint8Array>, stats?: { usage?: 
   const decoder = new TextDecoder();
   let buf = "";
   while (true) {
-    const { done, value } = await reader.read();
+    // bounded read: a stalled stream (no error, no chunk) delivers what
+    // it has instead of hanging the ask at zero tokens
+    const { done, value } = await Promise.race([
+      reader.read(),
+      new Promise<{ done: true; value?: undefined }>((r) => setTimeout(() => r({ done: true }), 120_000)),
+    ]);
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     const lines = buf.split("\n");
