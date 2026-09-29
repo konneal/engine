@@ -70,7 +70,18 @@ export function catalogNote(anchors: string[]): string {
 
 export async function operationsCatalogNote(db: any, query: string): Promise<string | undefined> {
   if (!isOperationIntent(query)) return undefined;
-  try {
+  // one retry, and the failure is LOUD: a silently dropped note answers
+  // an operation question with the OIML refusal (observed live 2026-09-29
+  // — a transient D1 read failed into the catch and the lane vanished)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const note = await operationsCatalogNoteOnce(db, query, attempt > 0);
+    if (note !== undefined) return note;
+  }
+  return undefined;
+}
+
+async function operationsCatalogNoteOnce(db: any, query: string, retried: boolean): Promise<string | undefined> {
+    try {
     const rows = (await db.prepare("SELECT clause_anchor AS anchor, substr(text, 1, 300) AS text FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
     const opRows = (rows as any[]).map((r) => ({ anchor: String(r.anchor ?? ""), text: String(r.text ?? "") })).filter((r) => r.anchor);
     const matched = matchOperations(query, opRows);
@@ -80,7 +91,9 @@ export async function operationsCatalogNote(db: any, query: string): Promise<str
     }
     parts.push(catalogNote(opRows.map((r) => r.anchor)));
     return parts.filter(Boolean).join("\n\n") || undefined;
-  } catch {
-    return undefined; // the lane is optional
+  } catch (e) {
+    // the lane is optional — but never silent (the blind-failure lesson)
+    console.error(`operations-catalog: D1 read failed${retried ? " twice" : ""} — the note is dropped`, String(e).slice(0, 120));
+    return undefined;
   }
 }

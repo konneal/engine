@@ -45,13 +45,16 @@ async function rerank(ai, model, query, texts) {
 async function generateOnce(env, model, messages, effort) {
   for (let attempt2 = 0; attempt2 < 2; attempt2++) {
     try {
-      const res = await env.AI.run(model, {
-        messages,
-        max_tokens: effortBudget(effort ?? answerEffort(env)),
-        reasoning_effort: effort ?? answerEffort(env),
-        temperature: 0.6,
-        top_p: 0.95
-      });
+      const res = await Promise.race([
+        env.AI.run(model, {
+          messages,
+          max_tokens: effortBudget(effort ?? answerEffort(env)),
+          reasoning_effort: effort ?? answerEffort(env),
+          temperature: 0.6,
+          top_p: 0.95
+        }),
+        new Promise((r) => setTimeout(() => r(null), 12e4))
+      ]);
       if (typeof res?.response === "string" && res.response.trim()) return res.response;
       if (typeof res?.choices?.[0]?.message?.content === "string" && res.choices[0].message.content.trim()) return res.choices[0].message.content;
       if (attempt2 === 0) console.error("generate returned empty:", model);

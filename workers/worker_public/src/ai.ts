@@ -54,13 +54,19 @@ export async function generateOnce(env: any, model: string, messages: any[], eff
   // silently blindfolds figure answers)
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res: any = await env.AI.run(model, {
-        messages,
-        max_tokens: effortBudget(effort ?? answerEffort(env)),
-        reasoning_effort: effort ?? answerEffort(env),
-        temperature: 0.6,
-        top_p: 0.95,
-      });
+      // bounded: a STALLED call (no error, no response — observed live
+      // 2026-09-29, asks hanging at zero bytes for minutes) must fall
+      // through to the retry/fallback, never hang the ask forever
+      const res: any = await Promise.race([
+        env.AI.run(model, {
+          messages,
+          max_tokens: effortBudget(effort ?? answerEffort(env)),
+          reasoning_effort: effort ?? answerEffort(env),
+          temperature: 0.6,
+          top_p: 0.95,
+        }),
+        new Promise<null>((r) => setTimeout(() => r(null), 120_000)),
+      ]);
       // an EMPTY string is a failed generation, not an answer: the
       // platform intermittently returns empty bodies with a 200 (observed
       // live 2026-09-20 — answers went blank platform-wide while retrieval

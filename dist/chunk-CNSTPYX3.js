@@ -39,7 +39,7 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-LL3LWBZH.js";
+} from "./chunk-7HWJOFTQ.js";
 import {
   corsHeaders,
   err,
@@ -1994,6 +1994,13 @@ ${anchors.map((a) => `- ${a}`).join("\n")}`;
 }
 async function operationsCatalogNote(db, query) {
   if (!isOperationIntent(query)) return void 0;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const note = await operationsCatalogNoteOnce(db, query, attempt > 0);
+    if (note !== void 0) return note;
+  }
+  return void 0;
+}
+async function operationsCatalogNoteOnce(db, query, retried) {
   try {
     const rows = (await db.prepare("SELECT clause_anchor AS anchor, substr(text, 1, 300) AS text FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
     const opRows = rows.map((r) => ({ anchor: String(r.anchor ?? ""), text: String(r.text ?? "") })).filter((r) => r.anchor);
@@ -2005,7 +2012,8 @@ ${matched.map((m) => `- ${m.text}`).join("\n")}`);
     }
     parts.push(catalogNote(opRows.map((r) => r.anchor)));
     return parts.filter(Boolean).join("\n\n") || void 0;
-  } catch {
+  } catch (e) {
+    console.error(`operations-catalog: D1 read failed${retried ? " twice" : ""} \u2014 the note is dropped`, String(e).slice(0, 120));
     return void 0;
   }
 }
@@ -2191,7 +2199,10 @@ async function* sseTokens(stream, stats) {
   const decoder = new TextDecoder();
   let buf = "";
   while (true) {
-    const { done, value } = await reader.read();
+    const { done, value } = await Promise.race([
+      reader.read(),
+      new Promise((r) => setTimeout(() => r({ done: true }), 12e4))
+    ]);
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     const lines = buf.split("\n");
