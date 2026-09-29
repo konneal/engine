@@ -41,7 +41,7 @@ import { chargeTokens, checkQuota, clientIp, estimateTokens, telemetry, tokenBud
 import { graphExpand, editionNote } from "./graph";
 import { registerNote, searchRegister, certificateLinks } from "./certificates";
 import { TOOL_DECLARATION, parseToolCall, runTool, toolNote } from "./tools";
-import { operationsCatalogNote } from "./operations.ts";
+import { operationsLane } from "./operations.ts";
 import { extractNameplate, nameplateRegisterQuery } from "./nameplate.ts";
 import { P } from "./profile.ts";
 
@@ -677,7 +677,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
   const regNote = register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : undefined;
-  const opsCatalog = await operationsCatalogNote(env.DB, q.query);
+  const ops = await operationsLane(env.DB, q.query);
 
   // Conversational route, decided by query UNDERSTANDING (any language, any
   // phrasing) — not string matching. No retrieval: nothing in the corpus
@@ -1182,13 +1182,34 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       glossaryForNote.map((g) => `- ${g.term} (${g.docidentifier}): ${g.definition}`).join("\n") +
       "\nIf the question describes a symptom or behavior in everyday words, OPEN the answer by naming the matching defined term, quote its definition, and cite its defining publication; keep using that term throughout. Match TIME SCALE carefully: change under a constant load over minutes/hours is creep; change over months/years of use is span stability or durability — do not call long-term drift creep."
     : undefined;
+  // the matched operations ride as CITABLE PASSAGES ahead of the
+  // retrieved hits — the refusal logic and the citation machinery key on
+  // passages, and a side-note cannot outrank the passages' silence
+  const opsHits: Hit[] = ops.matched.map((m) => ({
+    id: `ops:${m.anchor}`,
+    score: 0.999,
+    metadata: {
+      doc_id: "smart-ops:catalog",
+      docidentifier: m.docidentifier ?? "Platform API",
+      doctype: "api-operation",
+      doc_number: "",
+      edition: "",
+      language: "en",
+      clause_anchor: m.anchor,
+      clause_title: `Platform operation ${m.anchor}`,
+      tier: "curated",
+      corpus: "smart-ops",
+      text_ref: "",
+    },
+    text: `${m.anchor} — ${m.text}`,
+  }));
   const { messages, usedHits } = buildMessages(
     q.query,
-    hits,
+    [...opsHits, ...hits],
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [opsCatalog, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
+    [ops.note, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
   );

@@ -134,7 +134,7 @@ export function registerNote(rows: RegisterRow[]): string {
  *  is in the R2 plane (TODO 7) — the user gets the document, not just
  *  the fact. */
 export function certificateLinks(rows: RegisterRow[]): string {
-  const links = rows.filter((r) => r.pdf_key).map((r) => `- ${r.num}: https://www.ommisa.org/cert-pdf/${r.pdf_key}`);
+  const links = rows.filter((r) => r.pdf_key).map((r) => `- ${r.num}: https://www.oimlsmart.org/cert-pdf/${r.pdf_key}`);
   return links.length ? `The certificates' documents:\n${links.join("\n")}` : "";
 }
 
