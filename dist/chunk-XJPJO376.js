@@ -72,7 +72,7 @@ import {
   certificateLinks,
   registerNote,
   searchRegister
-} from "./chunk-3IRX4B7Q.js";
+} from "./chunk-VGVTIPFW.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -1896,7 +1896,7 @@ async function runTool(db, call) {
   if (call.name !== "register_search") return null;
   const query = String(call.args?.query ?? "").trim().slice(0, 160);
   if (!query) return null;
-  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-EMHFAUWC.js");
+  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-DNRUOYRF.js");
   const reg = await searchRegister2(db, query, true);
   const output = reg?.rows?.length ? registerNote2(reg.rows) : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
   return { name: call.name, query, output };
@@ -1992,18 +1992,18 @@ function catalogNote(anchors) {
   return `The COMPLETE name index of the platform's operations:
 ${anchors.map((a) => `- ${a}`).join("\n")}`;
 }
-async function operationsCatalogNote(db, query) {
-  if (!isOperationIntent(query)) return void 0;
+async function operationsLane(db, query) {
+  if (!isOperationIntent(query)) return { matched: [] };
   for (let attempt = 0; attempt < 2; attempt++) {
-    const note = await operationsCatalogNoteOnce(db, query, attempt > 0);
-    if (note !== void 0) return note;
+    const lane = await operationsLaneOnce(db, query, attempt > 0);
+    if (lane !== void 0) return lane;
   }
-  return void 0;
+  return { matched: [] };
 }
-async function operationsCatalogNoteOnce(db, query, retried) {
+async function operationsLaneOnce(db, query, retried) {
   try {
-    const rows = (await db.prepare("SELECT clause_anchor AS anchor, substr(text, 1, 300) AS text FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
-    const opRows = rows.map((r) => ({ anchor: String(r.anchor ?? ""), text: String(r.text ?? "") })).filter((r) => r.anchor);
+    const rows = (await db.prepare("SELECT clause_anchor AS anchor, substr(text, 1, 300) AS text, docidentifier FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
+    const opRows = rows.map((r) => ({ anchor: String(r.anchor ?? ""), text: String(r.text ?? ""), docidentifier: String(r.docidentifier ?? "Platform API") })).filter((r) => r.anchor);
     const matched = matchOperations(query, opRows);
     const parts = [];
     if (matched.length) {
@@ -2011,7 +2011,8 @@ async function operationsCatalogNoteOnce(db, query, retried) {
 ${matched.map((m) => `- ${m.text}`).join("\n")}`);
     }
     parts.push(catalogNote(opRows.map((r) => r.anchor)));
-    return parts.filter(Boolean).join("\n\n") || void 0;
+    const note = parts.filter(Boolean).join("\n\n") || void 0;
+    return { note, matched };
   } catch (e) {
     console.error(`operations-catalog: D1 read failed${retried ? " twice" : ""} \u2014 the note is dropped`, String(e).slice(0, 120));
     return void 0;
@@ -2461,7 +2462,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
   const regNote = register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : void 0;
-  const opsCatalog = await operationsCatalogNote(env.DB, q.query);
+  const ops = await operationsLane(env.DB, q.query);
   if (understanding?.intent === "conversational") {
     const queryHash2 = await sha256Hex(q.query);
     const messages2 = [
@@ -2807,13 +2808,31 @@ Answer account questions from these records ONLY: name the record when you use i
     return matched.length ? matched : g;
   })();
   const vocabNote = glossaryForNote.length ? "Vocabulary binding \u2014 defined terms in the indexed corpus that may name this question's subject:\n" + glossaryForNote.map((g) => `- ${g.term} (${g.docidentifier}): ${g.definition}`).join("\n") + "\nIf the question describes a symptom or behavior in everyday words, OPEN the answer by naming the matching defined term, quote its definition, and cite its defining publication; keep using that term throughout. Match TIME SCALE carefully: change under a constant load over minutes/hours is creep; change over months/years of use is span stability or durability \u2014 do not call long-term drift creep." : void 0;
+  const opsHits = ops.matched.map((m) => ({
+    id: `ops:${m.anchor}`,
+    score: 0.999,
+    metadata: {
+      doc_id: "smart-ops:catalog",
+      docidentifier: m.docidentifier ?? "Platform API",
+      doctype: "api-operation",
+      doc_number: "",
+      edition: "",
+      language: "en",
+      clause_anchor: m.anchor,
+      clause_title: `Platform operation ${m.anchor}`,
+      tier: "curated",
+      corpus: "smart-ops",
+      text_ref: ""
+    },
+    text: `${m.anchor} \u2014 ${m.text}`
+  }));
   const { messages, usedHits } = buildMessages(
     q.query,
-    hits,
+    [...opsHits, ...hits],
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [opsCatalog, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
+    [ops.note, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
     summary,
     budget
   );

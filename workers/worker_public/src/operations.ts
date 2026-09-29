@@ -38,7 +38,7 @@ export function anchorWords(anchor: string): string[] {
 
 const singular = (w: string) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w);
 
-export function matchOperations(query: string, rows: { anchor: string; text: string }[]): { anchor: string; text: string }[] {
+export function matchOperations(query: string, rows: { anchor: string; text: string; docidentifier?: string }[]): { anchor: string; text: string; docidentifier?: string }[] {
   const q = query.toLowerCase();
   const stems = ACTION_STEMS.filter((s) => q.includes(s));
   const objects = query
@@ -68,29 +68,42 @@ export function catalogNote(anchors: string[]): string {
   return `The COMPLETE name index of the platform's operations:\n${anchors.map((a) => `- ${a}`).join("\n")}`;
 }
 
-export async function operationsCatalogNote(db: any, query: string): Promise<string | undefined> {
-  if (!isOperationIntent(query)) return undefined;
+/** The lane's whole result: the authoritative note (matched lines +
+ *  name index) AND the matched rows themselves — the ask path rides the
+ *  matched operations as CITABLE PASSAGES, because the refusal logic
+ *  keys on passages and a side-note cannot outrank the passages'
+ *  silence (observed live 2026-09-29: the note was present and the
+ *  model still refused "the only API operation in the current context
+ *  is the blob download"). */
+export interface OperationsLane {
+  note?: string;
+  matched: { anchor: string; text: string; docidentifier?: string }[];
+}
+
+export async function operationsLane(db: any, query: string): Promise<OperationsLane> {
+  if (!isOperationIntent(query)) return { matched: [] };
   // one retry, and the failure is LOUD: a silently dropped note answers
   // an operation question with the OIML refusal (observed live 2026-09-29
   // — a transient D1 read failed into the catch and the lane vanished)
   for (let attempt = 0; attempt < 2; attempt++) {
-    const note = await operationsCatalogNoteOnce(db, query, attempt > 0);
-    if (note !== undefined) return note;
+    const lane = await operationsLaneOnce(db, query, attempt > 0);
+    if (lane !== undefined) return lane;
   }
-  return undefined;
+  return { matched: [] };
 }
 
-async function operationsCatalogNoteOnce(db: any, query: string, retried: boolean): Promise<string | undefined> {
+async function operationsLaneOnce(db: any, query: string, retried: boolean): Promise<OperationsLane | undefined> {
     try {
-    const rows = (await db.prepare("SELECT clause_anchor AS anchor, substr(text, 1, 300) AS text FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
-    const opRows = (rows as any[]).map((r) => ({ anchor: String(r.anchor ?? ""), text: String(r.text ?? "") })).filter((r) => r.anchor);
+    const rows = (await db.prepare("SELECT clause_anchor AS anchor, substr(text, 1, 300) AS text, docidentifier FROM chunks WHERE corpus = 'smart-ops' AND clause_anchor IS NOT NULL ORDER BY clause_anchor").all()).results ?? [];
+    const opRows = (rows as any[]).map((r) => ({ anchor: String(r.anchor ?? ""), text: String(r.text ?? ""), docidentifier: String(r.docidentifier ?? "Platform API") })).filter((r) => r.anchor);
     const matched = matchOperations(query, opRows);
     const parts: string[] = [];
     if (matched.length) {
       parts.push(`Operations whose name or description matches the question (AUTHORITATIVE — if one matches, the answer MUST name it and cite its line; never answer that the information is missing):\n${matched.map((m) => `- ${m.text}`).join("\n")}`);
     }
     parts.push(catalogNote(opRows.map((r) => r.anchor)));
-    return parts.filter(Boolean).join("\n\n") || undefined;
+    const note = parts.filter(Boolean).join("\n\n") || undefined;
+    return { note, matched };
   } catch (e) {
     // the lane is optional — but never silent (the blind-failure lesson)
     console.error(`operations-catalog: D1 read failed${retried ? " twice" : ""} — the note is dropped`, String(e).slice(0, 120));

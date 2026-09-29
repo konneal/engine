@@ -121,7 +121,7 @@ function registerNote(rows) {
   ].join("\n");
 }
 function certificateLinks(rows) {
-  const links = rows.filter((r) => r.pdf_key).map((r) => `- ${r.num}: https://www.ommisa.org/cert-pdf/${r.pdf_key}`);
+  const links = rows.filter((r) => r.pdf_key).map((r) => `- ${r.num}: https://www.oimlsmart.org/cert-pdf/${r.pdf_key}`);
   return links.length ? `The certificates' documents:
 ${links.join("\n")}` : "";
 }
