@@ -10,6 +10,10 @@ function queryFamily(query) {
   const m = /\b([RDMB])\s?-?(\d{2,3})\b/i.exec(query);
   return m ? `${m[1].toUpperCase()}${m[2].padStart(2, "0")}` : null;
 }
+function printedCertificateNumber(query) {
+  const m = /\b([RDMB]\s?-?\d{2,3}\s?\/\s?\d{4}\s?-\s?[A-Z0-9]+\s?-\s?[^\s,;]+(?:\s?\.\s?\d+)?)/i.exec(query);
+  return m ? m[1].replace(/\s+/g, "").replace(/-\./, ".") : null;
+}
 function registerTokens(query) {
   const stop = /* @__PURE__ */ new Set([
     "the",
@@ -90,6 +94,19 @@ function buildRegisterQuery(tokens) {
 }
 async function searchRegister(db, query, force = false) {
   if (!force && !isRegisterShaped(query)) return null;
+  const printed = printedCertificateNumber(query);
+  if (printed) {
+    try {
+      const seq = printed.replace(/\.\d+$/, "");
+      const res = await db.prepare(`SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE REPLACE(num, ' ', '') = ?1 OR REPLACE(num, ' ', '') LIKE ?2 || '%' ORDER BY num LIMIT 6`).bind(printed, seq).all();
+      if ((res.results ?? []).length) {
+        console.log(`register-search: printed-number hit ${printed} \u2192 ${(res.results ?? []).length} rows`);
+        return { rows: res.results ?? [], tokens: [printed] };
+      }
+      console.log(`register-search: printed number ${printed} missed the register \u2014 falling back to tokens`);
+    } catch {
+    }
+  }
   const tokens = registerTokens(query);
   if (!tokens.length) return null;
   const built = buildRegisterQuery(tokens);
@@ -129,6 +146,7 @@ ${links.join("\n")}` : "";
 export {
   isRegisterShaped,
   queryFamily,
+  printedCertificateNumber,
   registerTokens,
   buildRegisterQuery,
   searchRegister,

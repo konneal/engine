@@ -28,9 +28,13 @@ export async function extractNameplate(ai: any, model: string, image: string): P
         ],
         // the budget rises with the retry's effort — elevated effort under
         // a flat budget starves the answer on this model (measured,
-        // 2026-09-18: 5/38 at medium with the flat budget)
+        // 2026-09-18: 5/38 at medium with the flat budget); the
+        // temperature is a READING temperature — a transcription task at
+        // default sampling hallucinated brands on a low-res plate
+        // (observed live 2026-10-03: "Tektronix" on a CAS label)
         max_tokens: attempt === 0 ? 512 : 1536,
         reasoning_effort: attempt === 0 ? "low" : "medium",
+        temperature: 0.15,
       });
       const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
       const np = parseNameplate(text ?? "");

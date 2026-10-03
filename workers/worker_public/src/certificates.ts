@@ -38,6 +38,14 @@ export function queryFamily(query: string): string | null {
   return m ? `${m[1].toUpperCase()}${m[2].padStart(2, "0")}` : null;
 }
 
+/** A PRINTED certificate number on a nameplate ("R76/2006-A-GB1-18.08")
+ *  names the exact register row — it must not be shredded into word
+ *  tokens that compete with it. */
+export function printedCertificateNumber(query: string): string | null {
+  const m = /\b([RDMB]\s?-?\d{2,3}\s?\/\s?\d{4}\s?-\s?[A-Z0-9]+\s?-\s?[^\s,;]+(?:\s?\.\s?\d+)?)/i.exec(query);
+  return m ? m[1].replace(/\s+/g, "").replace(/-\./, ".") : null;
+}
+
 export function registerTokens(query: string): string[] {
   const stop = new Set([
     "the", "a", "an", "is", "are", "was", "were", "still", "currently", "in", "on", "for", "of", "and", "or",
@@ -93,6 +101,26 @@ export async function searchRegister(db: any, query: string, force = false): Pro
   // the shaping gate exists for ASK questions (is this a register
   // question?); a TOOL invocation already decided — skip the gate
   if (!force && !isRegisterShaped(query)) return null;
+  // a PRINTED certificate number names the row: query it first, and only
+  // fall back to the token arms when it misses (an extraction may drop a
+  // character; the prefix up to the sequence still scopes the family)
+  const printed = printedCertificateNumber(query);
+  if (printed) {
+    try {
+      const seq = printed.replace(/\.\d+$/, "");
+      const res = await db
+        .prepare(`SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE REPLACE(num, ' ', '') = ?1 OR REPLACE(num, ' ', '') LIKE ?2 || '%' ORDER BY num LIMIT 6`)
+        .bind(printed, seq)
+        .all();
+      if ((res.results ?? []).length) {
+        console.log(`register-search: printed-number hit ${printed} → ${(res.results ?? []).length} rows`);
+        return { rows: (res.results ?? []) as RegisterRow[], tokens: [printed] };
+      }
+      console.log(`register-search: printed number ${printed} missed the register — falling back to tokens`);
+    } catch {
+      // fall through to the token arms
+    }
+  }
   const tokens = registerTokens(query);
   if (!tokens.length) return null;
   const built = buildRegisterQuery(tokens);
