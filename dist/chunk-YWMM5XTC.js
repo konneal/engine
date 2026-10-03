@@ -2877,12 +2877,17 @@ Answer account questions from these records ONLY: name the record when you use i
   const pendingTools = [];
   if (/certificate|certified|certification/i.test(q.query) && env.DB) {
     try {
-      const probe = await env.AI.run(model, {
-        messages: [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}
+      const imageTurn = typeof withImage === "string";
+      const probeMessages = [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}
 
-${q.query}` }],
-        max_tokens: 300,
-        reasoning_effort: "low"
+${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read, then emit the TOOL line with those tokens as the query \u2014 never invented." : ""}
+
+${q.query}`.replace("\n\n\n\n", "\n\n") }];
+      if (imageTurn) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
+      const probe = await env.AI.run(model, {
+        messages: probeMessages,
+        max_tokens: 600,
+        reasoning_effort: imageTurn ? "high" : "low"
       });
       const probeText = typeof probe?.response === "string" ? probe.response : probe?.choices?.[0]?.message?.content ?? "";
       const call = parseToolCall(probeText);

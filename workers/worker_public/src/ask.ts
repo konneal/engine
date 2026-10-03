@@ -1222,12 +1222,20 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // invocations record into pendingTools; the stream emits them as its
   // first events (the UI shows what the agent consulted).
   const pendingTools: { name: string; query: string; output: string }[] = [];
+  // On an IMAGE turn the probe CARRIES THE IMAGE (2026-10-03, the owner's
+  // architecture): the model that reads the plate is the model that issues
+  // the tool call — one reader, one tool, no parallel extraction racing a
+  // second vision pass that drifts hour to hour. The old probe dropped the
+  // image-bearing message, which is why the private bridge had to exist.
   if (/certificate|certified|certification/i.test(q.query) && env.DB) {
     try {
+      const imageTurn = typeof withImage === "string";
+      const probeMessages: any[] = [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}\n\n${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read, then emit the TOOL line with those tokens as the query — never invented." : ""}\n\n${q.query}`.replace("\n\n\n\n", "\n\n") }];
+      if (imageTurn) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
       const probe = await (env as any).AI.run(model, {
-        messages: [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}\n\n${q.query}` }],
-        max_tokens: 300,
-        reasoning_effort: "low",
+        messages: probeMessages,
+        max_tokens: 600,
+        reasoning_effort: imageTurn ? "high" : "low",
       });
       const probeText = typeof probe?.response === "string" ? probe.response : probe?.choices?.[0]?.message?.content ?? "";
       const call = parseToolCall(probeText);
@@ -1255,6 +1263,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     const note = wantsMarkings
       ? "\n\n(The user attached a photo with this question. First transcribe every inscription you can actually read in the image — names, model references, accuracy classes, numeric values with their units, certificate or approval numbers — quoting them verbatim. Then answer the question from the numbered passages, citing the requirement each interpretation rests on. If an inscription is unreadable, say so; never invent a marking.)"
       : "\n\n(The user attached an image with this question; interpret it directly when answering.)";
+
     if (Array.isArray(last.content)) {
       const textPart = last.content.find((p: any) => p.type === "text");
       if (textPart) textPart.text += note;
