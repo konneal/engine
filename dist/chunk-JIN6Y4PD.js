@@ -2020,18 +2020,25 @@ ${matched.map((m) => `- ${m.text}`).join("\n")}`);
 }
 
 // workers/worker_public/prompts/nameplate.md
-var nameplate_default = `You read instrument nameplates. From the photograph, extract:
+var nameplate_default = `You read instrument nameplates. Work in two steps.
+
+Step 1 \u2014 transcribe: list every inscription you can actually read on the
+photograph, verbatim: names, model designations, serials, accuracy-class
+markings, capacities with units, and any certificate or approval number
+(it looks like R76/2006-A-GB1-18.08 \u2014 a family, an edition year, an
+authority code, a year and a sequence).
+
+Step 2 \u2014 answer with ONLY a JSON object on one line:
 
 {"manufacturer": "\u2026", "model": "\u2026", "certificate_number": "\u2026"}
 
 - manufacturer: the manufacturer's name exactly as printed, else null.
 - model: the model designation exactly as printed, else null.
-- certificate_number: the OIML certificate number if one is printed
-  (it looks like R76/2006-A-GB1-18.08 \u2014 a family, an edition year, an
-  authority code, a year and a sequence), exactly as printed, else null.
+- certificate_number: the OIML certificate number if one is printed,
+  exactly as printed, else null.
 
-Answer with ONLY the JSON object on one line. Never guess beyond what is
-printed.
+Never guess beyond what is printed; a low-quality photograph yields nulls,
+not inventions.
 `;
 
 // workers/worker_public/src/nameplate-parse.ts
@@ -2063,6 +2070,11 @@ async function extractNameplate(ai, model, image) {
       const res = await ai.run(model, {
         messages: [
           { role: "system", content: nameplate_default.trimEnd() },
+          // the question rides along: the transcription-first framing that
+          // succeeds in the answer path works better WITH its context than
+          // as an isolated extract-a-JSON task (the isolated form returned
+          // nulls on plates the answer model read every time)
+          { role: "user", content: "This photograph accompanies the user's certificate question. Transcribe what you can read, then answer with the JSON object." },
           { role: "user", content: [{ type: "image_url", image_url: { url: image } }] }
         ],
         // the budget rises with the retry's effort — elevated effort under

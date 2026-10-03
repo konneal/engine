@@ -24,6 +24,11 @@ export async function extractNameplate(ai: any, model: string, image: string): P
       const res: any = await ai.run(model, {
         messages: [
           { role: "system", content: nameplatePrompt.trimEnd() },
+          // the question rides along: the transcription-first framing that
+          // succeeds in the answer path works better WITH its context than
+          // as an isolated extract-a-JSON task (the isolated form returned
+          // nulls on plates the answer model read every time)
+          { role: "user", content: "This photograph accompanies the user's certificate question. Transcribe what you can read, then answer with the JSON object." },
           { role: "user", content: [{ type: "image_url", image_url: { url: image } }] },
         ],
         // the budget rises with the retry's effort — elevated effort under
