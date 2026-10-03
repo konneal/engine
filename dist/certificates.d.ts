@@ -20,6 +20,10 @@ export declare function isRegisterShaped(query: string): boolean;
  *  search filters to it, so a question about R 60 never presents R 76
  *  rows. */
 export declare function queryFamily(query: string): string | null;
+/** A PRINTED certificate number on a nameplate ("R76/2006-A-GB1-18.08")
+ *  names the exact register row — it must not be shredded into word
+ *  tokens that compete with it. */
+export declare function printedCertificateNumber(query: string): string | null;
 export declare function registerTokens(query: string): string[];
 /** The register query for a token set. Numeric tokens (a model number
  *  like "190") must match as a STANDALONE value — `LIKE '%190%'` also

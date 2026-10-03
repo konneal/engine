@@ -72,7 +72,7 @@ import {
   certificateLinks,
   registerNote,
   searchRegister
-} from "./chunk-VGVTIPFW.js";
+} from "./chunk-7AQM3GSO.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -1896,7 +1896,7 @@ async function runTool(db, call) {
   if (call.name !== "register_search") return null;
   const query = String(call.args?.query ?? "").trim().slice(0, 160);
   if (!query) return null;
-  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-DNRUOYRF.js");
+  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-YFL4K7O3.js");
   const reg = await searchRegister2(db, query, true);
   const output = reg?.rows?.length ? registerNote2(reg.rows) : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
   return { name: call.name, query, output };
@@ -2020,14 +2020,18 @@ ${matched.map((m) => `- ${m.text}`).join("\n")}`);
 }
 
 // workers/worker_public/prompts/nameplate.md
-var nameplate_default = `You read instrument nameplates. From the photograph, extract the
-manufacturer's name exactly as printed and the model designation exactly
-as printed. Answer with ONLY a JSON object on one line:
+var nameplate_default = `You read instrument nameplates. From the photograph, extract:
 
-{"manufacturer": "\u2026", "model": "\u2026"}
+{"manufacturer": "\u2026", "model": "\u2026", "certificate_number": "\u2026"}
 
-If the photograph shows no manufacturer or no model, use null for the
-missing value. Never guess beyond what is printed.
+- manufacturer: the manufacturer's name exactly as printed, else null.
+- model: the model designation exactly as printed, else null.
+- certificate_number: the OIML certificate number if one is printed
+  (it looks like R76/2006-A-GB1-18.08 \u2014 a family, an edition year, an
+  authority code, a year and a sequence), exactly as printed, else null.
+
+Answer with ONLY the JSON object on one line. Never guess beyond what is
+printed.
 `;
 
 // workers/worker_public/src/nameplate-parse.ts
@@ -2037,15 +2041,19 @@ function parseNameplate(text) {
   try {
     const j = JSON.parse(m[0]);
     const clean = (v) => typeof v === "string" && v.trim() ? v.trim().slice(0, 80) : null;
-    const out = { manufacturer: clean(j.manufacturer), model: clean(j.model) };
-    return out.manufacturer || out.model ? out : null;
+    const out = {
+      manufacturer: clean(j.manufacturer),
+      model: clean(j.model),
+      certificate_number: clean(j.certificate_number)
+    };
+    return out.manufacturer || out.model || out.certificate_number ? out : null;
   } catch {
     return null;
   }
 }
 function nameplateRegisterQuery(np, question) {
   const fam = /\b([RDMB])\s?-?(\d{2,3})\b/i.exec(question);
-  return [np.manufacturer, np.model, fam ? `${fam[1]} ${fam[2]}` : null].filter(Boolean).join(" ");
+  return [np.certificate_number, np.manufacturer, np.model, fam ? `${fam[1]} ${fam[2]}` : null].filter(Boolean).join(" ");
 }
 
 // workers/worker_public/src/nameplate.ts
@@ -2059,9 +2067,13 @@ async function extractNameplate(ai, model, image) {
         ],
         // the budget rises with the retry's effort — elevated effort under
         // a flat budget starves the answer on this model (measured,
-        // 2026-09-18: 5/38 at medium with the flat budget)
+        // 2026-09-18: 5/38 at medium with the flat budget); the
+        // temperature is a READING temperature — a transcription task at
+        // default sampling hallucinated brands on a low-res plate
+        // (observed live 2026-10-03: "Tektronix" on a CAS label)
         max_tokens: attempt === 0 ? 512 : 1536,
-        reasoning_effort: attempt === 0 ? "low" : "medium"
+        reasoning_effort: attempt === 0 ? "low" : "medium",
+        temperature: 0.15
       });
       const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
       const np = parseNameplate(text ?? "");
