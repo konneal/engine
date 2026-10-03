@@ -85,7 +85,7 @@ function embedWarm(env: Env, text: string): Promise<number[] | null> {
  *  AI 8005s that scale with payload size), and only the ONE pinned
  *  figure attaches (the type-intent pin already chose the answering
  *  object; a second base64 blob doubles the flake surface for nothing). */
-async function attachFigureImages(env: Env, messages: { role: string; content: string }[], usedHits: Hit[], query: string): Promise<void> {
+async function attachFigureImages(env: Env, messages: { role: string; content: any }[], usedHits: Hit[], query: string): Promise<void> {
   // Attach only when the question WANTS the drawing (names a figure-ish
   // artifact) or the pinned figure sits in the top prose passage's own
   // clause (it IS the answering object) — a plain definition question
@@ -1264,16 +1264,19 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       ? "\n\n(The user attached a photo with this question. First transcribe every inscription you can actually read in the image — names, model references, accuracy classes, numeric values with their units, certificate or approval numbers — quoting them verbatim. Then answer the question from the numbered passages, citing the requirement each interpretation rests on. If an inscription is unreadable, say so; never invent a marking.)"
       : "\n\n(The user attached an image with this question; interpret it directly when answering.)";
 
-    if (Array.isArray(last.content)) {
+    // the image rides its OWN SHORT TRAILING MESSAGE — never inside the
+    // passage-bearing user message. Long text + image parts in ONE message
+    // is the documented instability shape (2026-09-09); it was reintroduced
+    // here, and the live "blindness" on photo answers (2026-10-03) was this
+    // violation, not the model: the probe and extraction calls, which keep
+    // the image on its own message, read the same plate every time.
+    if (typeof last.content === "string") {
+      last.content = last.content + note;
+    } else {
       const textPart = last.content.find((p: any) => p.type === "text");
       if (textPart) textPart.text += note;
-      last.content = [...last.content, { type: "image_url", image_url: { url: withImage } }] as unknown as string;
-    } else {
-      last.content = [
-        { type: "text", text: last.content + note },
-        { type: "image_url", image_url: { url: withImage } },
-      ] as unknown as string;
     }
+    messages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
     console.log("user image attached to generation");
   }
   const queryHash = await sha256Hex(q.query);
