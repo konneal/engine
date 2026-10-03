@@ -3081,6 +3081,18 @@ ${q.query}` }],
     if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
   }
   completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
+  if (withImage && register?.rows?.length && answer.includes(refusalAnswer())) {
+    console.log("blind-answer: the register note carried rows but the answer refused \u2014 regenerating once");
+    const regen = await generateOnce(env, model, [
+      ...messages.slice(0, -1),
+      { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
+      messages[messages.length - 1]
+    ], effort);
+    if (regen && !regen.includes(refusalAnswer())) {
+      answer = canonicalRefusal(regen);
+      console.log("blind-answer: regeneration grounded");
+    }
+  }
   const jsonQuality = answerQuality(finalCites.map((c) => c.quality));
   let entailment = null;
   let entailmentNote = "";
