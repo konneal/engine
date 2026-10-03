@@ -180,7 +180,10 @@ function clipToTokens(s: string, maxTok: number): string {
 }
 
 export interface BuiltMessages {
-  messages: { role: string; content: string }[];
+  // content is string OR an OpenAI-style parts array — the image parts
+  // ride their OWN trailing user message (never inside a passage-bearing
+  // one), so the type admits both shapes
+  messages: { role: string; content: string | any[] }[];
   usedHits: Hit[]; // passages actually included (citations must match these)
 }
 

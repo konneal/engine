@@ -31,7 +31,7 @@ export interface HistoryTurn {
 export interface BuiltMessages {
     messages: {
         role: string;
-        content: string;
+        content: string | any[];
     }[];
     usedHits: Hit[];
 }

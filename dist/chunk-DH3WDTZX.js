@@ -2906,16 +2906,13 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
     const wantsMarkings = /\b(mark(ing|ings)?|nameplate|label|inscription|engrav|sticker|plate)\b|certificat/i.test(q.query);
     const last = messages[messages.length - 1];
     const note = wantsMarkings ? "\n\n(The user attached a photo with this question. First transcribe every inscription you can actually read in the image \u2014 names, model references, accuracy classes, numeric values with their units, certificate or approval numbers \u2014 quoting them verbatim. Then answer the question from the numbered passages, citing the requirement each interpretation rests on. If an inscription is unreadable, say so; never invent a marking.)" : "\n\n(The user attached an image with this question; interpret it directly when answering.)";
-    if (Array.isArray(last.content)) {
+    if (typeof last.content === "string") {
+      last.content = last.content + note;
+    } else {
       const textPart = last.content.find((p) => p.type === "text");
       if (textPart) textPart.text += note;
-      last.content = [...last.content, { type: "image_url", image_url: { url: withImage } }];
-    } else {
-      last.content = [
-        { type: "text", text: last.content + note },
-        { type: "image_url", image_url: { url: withImage } }
-      ];
     }
+    messages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
     console.log("user image attached to generation");
   }
   const queryHash = await sha256Hex(q.query);
