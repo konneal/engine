@@ -1503,6 +1503,24 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // figure completion (#172) — see ./completion for the rationale
   completionBlocks.push(...(await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used)));
 
+  // the blind-answer regeneration (2026-10-03, live on the photo case):
+  // the multimodal call can answer AROUND an attached image — a 200 whose
+  // text claims nothing was provided — while the bridge succeeded and the
+  // register note carries actual rows. One bounded regeneration, decided on
+  // that exact signature; the retry carries a sterner ground instruction.
+  if (withImage && register?.rows?.length && answer.includes(refusalAnswer())) {
+    console.log("blind-answer: the register note carried rows but the answer refused — regenerating once");
+    const regen = await generateOnce(env, model, [
+      ...messages.slice(0, -1),
+      { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows — number, holder, model, status, and every document link — as the answer. Do not claim that nothing was provided." },
+      messages[messages.length - 1],
+    ], effort);
+    if (regen && !regen.includes(refusalAnswer())) {
+      answer = canonicalRefusal(regen);
+      console.log("blind-answer: regeneration grounded");
+    }
+  }
+
   const jsonQuality = answerQuality(finalCites.map((c: any) => c.quality));
   // the entailment gate (TODO.new-era/10): the eval battery's faithfulness
   // scorer, promoted onto the serving path — the confidence line states a
