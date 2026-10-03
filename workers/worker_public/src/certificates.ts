@@ -163,6 +163,13 @@ export function registerNote(rows: RegisterRow[]): string {
  *  the fact. */
 export function certificateLinks(rows: RegisterRow[]): string {
   const links = rows.filter((r) => r.pdf_key).map((r) => `- ${r.num}: https://www.oimlsmart.org/cert-pdf/${r.pdf_key}`);
-  return links.length ? `The certificates' documents:\n${links.join("\n")}` : "";
+  // absence is stated per row: an unmarked gap invited the model to
+  // generalize the URL pattern to a document-less row (a fabricated 404
+  // link, observed live 2026-10-04)
+  const absent = rows.filter((r) => !r.pdf_key && r.num).slice(0, 6).map((r) => `- ${r.num}: no document on file in this snapshot`);
+  const parts: string[] = [];
+  if (links.length) parts.push(`Documents on file:\n${links.join("\n")}`);
+  if (absent.length) parts.push(`No document on file (do NOT construct a link for these):\n${absent.join("\n")}`);
+  return parts.join("\n");
 }
 
