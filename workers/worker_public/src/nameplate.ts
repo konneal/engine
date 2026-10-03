@@ -37,8 +37,13 @@ export async function extractNameplate(ai: any, model: string, image: string): P
         // temperature is a READING temperature — a transcription task at
         // default sampling hallucinated brands on a low-res plate
         // (observed live 2026-10-03: "Tektronix" on a CAS label)
-        max_tokens: attempt === 0 ? 512 : 1536,
-        reasoning_effort: attempt === 0 ? "low" : "medium",
+        // attempt 1 is cheap; the retry is the QUALITY leg — high effort
+        // with the full budget, the escalation that measured 58% vs 25%
+        // on hard extraction (the 2026-09-18 enrichment A/B), because a
+        // hard plate is exactly that class of task. The flat 512 also
+        // starved the JSON behind the transcribe-first prose.
+        max_tokens: attempt === 0 ? 1536 : 3072,
+        reasoning_effort: attempt === 0 ? "low" : "high",
         temperature: 0.15,
       });
       const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
