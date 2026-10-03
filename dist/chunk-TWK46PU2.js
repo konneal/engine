@@ -72,7 +72,7 @@ import {
   certificateLinks,
   registerNote,
   searchRegister
-} from "./chunk-7AQM3GSO.js";
+} from "./chunk-JZFXSTYX.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -1896,7 +1896,7 @@ async function runTool(db, call) {
   if (call.name !== "register_search") return null;
   const query = String(call.args?.query ?? "").trim().slice(0, 160);
   if (!query) return null;
-  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-YFL4K7O3.js");
+  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-CO7KX2S2.js");
   const reg = await searchRegister2(db, query, true);
   const output = reg?.rows?.length ? registerNote2(reg.rows) : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
   return { name: call.name, query, output };
@@ -2880,7 +2880,7 @@ Answer account questions from these records ONLY: name the record when you use i
       const imageTurn = typeof withImage === "string";
       const probeMessages = [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}
 
-${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read, then emit the TOOL line with those tokens as the query \u2014 never invented." : ""}
+${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query \u2014 never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : ""}
 
 ${q.query}`.replace("\n\n\n\n", "\n\n") }];
       if (imageTurn) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });

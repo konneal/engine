@@ -139,8 +139,13 @@ function registerNote(rows) {
 }
 function certificateLinks(rows) {
   const links = rows.filter((r) => r.pdf_key).map((r) => `- ${r.num}: https://www.oimlsmart.org/cert-pdf/${r.pdf_key}`);
-  return links.length ? `The certificates' documents:
-${links.join("\n")}` : "";
+  const absent = rows.filter((r) => !r.pdf_key && r.num).slice(0, 6).map((r) => `- ${r.num}: no document on file in this snapshot`);
+  const parts = [];
+  if (links.length) parts.push(`Documents on file:
+${links.join("\n")}`);
+  if (absent.length) parts.push(`No document on file (do NOT construct a link for these):
+${absent.join("\n")}`);
+  return parts.join("\n");
 }
 
 export {
