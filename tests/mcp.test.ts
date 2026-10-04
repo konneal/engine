@@ -15,11 +15,11 @@ test("initialize reports the protocol version and tools capability", async () =>
   assert.ok(b.result.serverInfo.name);
 });
 
-test("tools/list exposes ask and retrieve with schemas", async () => {
+test("tools/list exposes ask, retrieve and the registry's MCP tools with schemas", async () => {
   const b = (await call({ jsonrpc: "2.0", id: 2, method: "tools/list" })) as any;
   assert.deepEqual(
     (b.result.tools as typeof TOOLS).map((t) => t.name),
-    ["ask", "retrieve"],
+    ["ask", "retrieve", "certificates.search"],
   );
   for (const t of TOOLS) {
     assert.equal(t.inputSchema.type, "object");

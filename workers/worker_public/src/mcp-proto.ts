@@ -1,6 +1,7 @@
 // The MCP protocol surface (JSON-RPC 2.0, streamable HTTP 2025-06-18),
 // dependency-free so plain node can load it for unit tests — the
 // route adapter (mcp.ts) owns the handler wiring.
+import { TOOLS_REGISTRY } from "./tools.ts";
 export const PROTOCOL_VERSION = "2025-06-18";
 
 export interface McpTool {
@@ -9,6 +10,8 @@ export interface McpTool {
   inputSchema: { type: "object"; properties: Record<string, unknown>; required: string[] };
 }
 
+// the registry's MCP-audience tools are GENERATED here (OCP: adding a
+// tool registers it; this list is never hand-extended for them)
 export const TOOLS: McpTool[] = [
   {
     name: "ask",
@@ -34,6 +37,17 @@ export const TOOLS: McpTool[] = [
       required: ["query"],
     },
   },
+  ...TOOLS_REGISTRY
+    .filter((t) => t.audiences.includes("mcp"))
+    .map((t): McpTool => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: {
+        type: "object",
+        properties: Object.fromEntries(t.params.map((p) => [p.key, { type: "string", description: p.description }])),
+        required: t.params.filter((p) => p.required).map((p) => p.key),
+      },
+    })),
 ];
 
 export type McpResult =

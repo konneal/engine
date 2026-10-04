@@ -1875,7 +1875,7 @@ function exactCacheKey(indexVersion, gen, ns, queryHash) {
 
 // workers/worker_public/src/tools.ts
 function parseToolCall(text) {
-  const m = /^TOOL\s+([a-z_]+)\s*(\{[^\n}]*\})?/m.exec(String(text ?? ""));
+  const m = /^TOOL\s+([a-z_.]+)\s*(\{[^\n}]*\})?/m.exec(String(text ?? ""));
   if (!m) return null;
   let args = {};
   if (m[2]) {
@@ -1884,22 +1884,38 @@ function parseToolCall(text) {
     } catch {
       return null;
     }
-  } else if (/^TOOL\s+[a-z_]+\s*\{/m.test(String(text ?? ""))) {
+  } else if (/^TOOL\s+[a-z_.]+\s*\{/m.test(String(text ?? ""))) {
     return null;
   }
   return { name: m[1].toLowerCase(), args };
 }
-var TOOL_DECLARATION = `You may use one tool before answering, by writing a single line:
-TOOL register_search {"query": "manufacturer and model to look up"}
-The worker runs it against the certificate register (a snapshot) and returns the matching rows, or the exact no-match statement for the string you asked. Use it when the question turns on certification standing and the holder is known \u2014 including from a photograph. Then answer, phrasing the tool's result as what it returned (the searched string stays visible in your answer). If you do not need the tool, answer directly without the line.`;
+var certificatesSearch = {
+  name: "certificates.search",
+  description: "Search the certificate register (a snapshot) by holder name, model designation, or a printed certificate number. Returns the matching rows \u2014 number, holder, model, issue year, status, and document links where on file \u2014 or the exact no-match statement for the string asked.",
+  params: [{ key: "query", required: true, description: "the holder, model, or printed certificate number to look up" }],
+  audiences: ["agent", "mcp"],
+  handler: async (db, args) => {
+    const query = String(args?.query ?? "").trim().slice(0, 160);
+    if (!query) return null;
+    const { searchRegister: searchRegister2, registerNote: registerNote2, certificateLinks: certificateLinks2 } = await import("./certificates-CO7KX2S2.js");
+    const reg = await searchRegister2(db, query, true);
+    const output = reg?.rows?.length ? [registerNote2(reg.rows), certificateLinks2(reg.rows)].filter(Boolean).join("\n") : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
+    return { name: "certificates.search", query, output };
+  }
+};
+var TOOLS_REGISTRY = [certificatesSearch];
+var TOOL_DECLARATION = [
+  "You may use one tool before answering, by writing a single line:",
+  ...TOOLS_REGISTRY.filter((t) => t.audiences.includes("agent")).map((t) => {
+    const shape = `{${t.params.map((p) => `"${p.key}": "<${p.description}>"`).join(", ")}}`;
+    return `TOOL ${t.name} ${shape}`;
+  }),
+  "The worker runs it and returns the result attributed \u2014 phrase the tool's result as what it returned, with the searched string visible in your answer. Use a tool when the question turns on what it answers (including from a photograph). If you do not need it, answer directly without the line."
+].join("\n");
 async function runTool(db, call) {
-  if (call.name !== "register_search") return null;
-  const query = String(call.args?.query ?? "").trim().slice(0, 160);
-  if (!query) return null;
-  const { searchRegister: searchRegister2, registerNote: registerNote2 } = await import("./certificates-CO7KX2S2.js");
-  const reg = await searchRegister2(db, query, true);
-  const output = reg?.rows?.length ? registerNote2(reg.rows) : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
-  return { name: call.name, query, output };
+  const spec = TOOLS_REGISTRY.find((t) => t.name === call.name && t.audiences.includes("agent"));
+  if (!spec) return null;
+  return spec.handler(db, call.args ?? {});
 }
 function toolNote(r) {
   return `The ${r.name} tool returned, for the query "${r.query}":
@@ -3163,5 +3179,6 @@ export {
   bindModelNode,
   modelGroundingBlock,
   scoreJudge,
+  TOOLS_REGISTRY,
   handleAsk
 };

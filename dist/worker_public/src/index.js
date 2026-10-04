@@ -1,4 +1,5 @@
 import {
+  TOOLS_REGISTRY,
   bindModelNode,
   checkQuoteAnchors,
   handleAsk,
@@ -6,7 +7,7 @@ import {
   modelGroundingBlock,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-D24PQPDK.js";
+} from "../../chunk-R3KA6S3E.js";
 import {
   handleSearch
 } from "../../chunk-KO6DRI7C.js";
@@ -922,7 +923,16 @@ var TOOLS = [
       },
       required: ["query"]
     }
-  }
+  },
+  ...TOOLS_REGISTRY.filter((t) => t.audiences.includes("mcp")).map((t) => ({
+    name: t.name,
+    description: t.description,
+    inputSchema: {
+      type: "object",
+      properties: Object.fromEntries(t.params.map((p) => [p.key, { type: "string", description: p.description }])),
+      required: t.params.filter((p) => p.required).map((p) => p.key)
+    }
+  }))
 ];
 function dispatch(method, params, callTool) {
   switch (method) {
@@ -959,7 +969,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const res = name === "ask" ? await (await import("../../ask-GVU5PYC4.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-LVUQLA3C.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-52JUHGUG.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-LVUQLA3C.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
