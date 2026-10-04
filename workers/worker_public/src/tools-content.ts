@@ -21,7 +21,7 @@ export const unitsGet: ToolSpec = {
   name: "units.get",
   description:
     "Fetch typed Recommendation content — a table, formula or figure as structured data (columns, rows, MathML, caption), by its unit id. The machine-consumable form of a Recommendation's content, for computing with rather than reading.",
-  params: [{ key: "unit_id", required: true, description: "the unit id, e.g. u:table-1 or u:form-3 (ids appear in answers' [[u:…]] references)" }],
+  params: [{ key: "unit_id", required: true, description: "the unit id exactly as an answer's [[u:…]] reference spells it" }],
   audiences: ["mcp"],
   handler: async (env, args) => {
     const unit_id = String(args?.unit_id ?? "").trim().replace(/^\[?\[?u:/, "u:").replace(/]?\]?$/, "");
@@ -103,6 +103,34 @@ export const docsSection: ToolSpec = {
         query: `${r.docidentifier} §${r.clause_anchor}`,
         output: JSON.stringify({ docidentifier: r.docidentifier, clause: r.clause_anchor, title: r.clause_title, url, text: (r.text ?? "").slice(0, 4000) }),
       };
+    } catch {
+      return null;
+    }
+  },
+};
+
+export const documentsFamily: ToolSpec = {
+  name: "documents.family",
+  description:
+    "Look up the publication registry for a family: every edition with its derived status (in-force/superseded), which edition is ACTIVE (terminal of the successor chain), and supersession links. Use for current/latest-edition and edition-history questions.",
+  params: [{ key: "family", required: true, description: "the family key, e.g. R-60 (series letter and number)" }],
+  audiences: ["mcp"],
+  handler: async (env, args) => {
+    const family = String(args?.family ?? "").trim().toUpperCase();
+    if (!/^[A-Z]-\d{1,3}$/.test(family)) return null;
+    try {
+      const rows = await env.DB.prepare(
+        "SELECT d.docidentifier, d.derived_status, d.active, s.docidentifier AS succ FROM documents d LEFT JOIN documents s ON d.superseded_by = s.canonical_id WHERE d.family = ?1 ORDER BY d.part, d.edition",
+      )
+        .bind(family)
+        .all();
+      const lines = ((rows.results ?? []) as { docidentifier: string; derived_status: string; active: number; succ: string | null }[]).map(
+        (r) => `${r.docidentifier} — ${r.derived_status}${r.active ? " [ACTIVE]" : ""}${r.succ ? ` → superseded by ${r.succ}` : ""}`,
+      );
+      if (!lines.length) {
+        return { name: "documents.family", query: family, output: `No editions are registered for the family ${family}. State this plainly.` };
+      }
+      return { name: "documents.family", query: family, output: lines.join("\n") };
     } catch {
       return null;
     }
