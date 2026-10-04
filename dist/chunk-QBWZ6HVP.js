@@ -241,6 +241,341 @@ function modelEcho(node) {
   };
 }
 
+// workers/worker_public/src/verdict.ts
+function tokenize(src) {
+  const toks = [];
+  let i = 0;
+  const s = src.replace(/\s+/g, " ");
+  while (i < s.length) {
+    const c = s[i];
+    if (c === " ") {
+      i++;
+      continue;
+    }
+    if (/[0-9.]/.test(c)) {
+      const m = s.slice(i).match(/^[0-9]*\.?[0-9]+/);
+      toks.push({ t: "num", v: Number(m[0]) });
+      i += m[0].length;
+      continue;
+    }
+    if (/[A-Za-z_]/.test(c)) {
+      const m = s.slice(i).match(/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/);
+      toks.push({ t: "id", v: m[0] });
+      i += m[0].length;
+      continue;
+    }
+    const two = s.slice(i, i + 2);
+    if ([">=", "<=", "==", "!="].includes(two)) {
+      toks.push({ t: "op", v: two });
+      i += 2;
+      continue;
+    }
+    if ("+-*/()<>".includes(c)) {
+      toks.push({ t: "op", v: c });
+      i++;
+      continue;
+    }
+    throw new Error(`bad char ${c}`);
+  }
+  return toks;
+}
+function parseAndEval(src, params) {
+  const toks = tokenize(src);
+  let p = 0;
+  const peek = () => toks[p];
+  const eat = (v) => {
+    const t = toks[p++];
+    if (v && (!t || t.t !== "op" || t.v !== v)) throw new Error(`expected ${v}`);
+    return t;
+  };
+  const isKw = (k) => {
+    const t = peek();
+    return t && t.t === "id" && t.v.toLowerCase() === k;
+  };
+  function or() {
+    let l = and();
+    while (isKw("or")) {
+      p++;
+      const r = and();
+      l = truthy(l) || truthy(r);
+    }
+    return l;
+  }
+  function and() {
+    let l = not();
+    while (isKw("and")) {
+      p++;
+      const r = not();
+      l = truthy(l) && truthy(r);
+    }
+    return l;
+  }
+  function not() {
+    if (isKw("not")) {
+      p++;
+      return !truthy(not());
+    }
+    return cmp();
+  }
+  function cmp() {
+    const l = add();
+    const t = peek();
+    if (t && t.t === "op" && [">=", "<=", ">", "<", "==", "!="].includes(t.v)) {
+      p++;
+      const r = add();
+      switch (t.v) {
+        case ">=":
+          return num(l) >= num(r);
+        case "<=":
+          return num(l) <= num(r);
+        case ">":
+          return num(l) > num(r);
+        case "<":
+          return num(l) < num(r);
+        case "==":
+          return num(l) === num(r);
+        default:
+          return num(l) !== num(r);
+      }
+    }
+    return l;
+  }
+  function add() {
+    let l = mul();
+    for (; ; ) {
+      const t = peek();
+      if (t && t.t === "op" && (t.v === "+" || t.v === "-")) {
+        p++;
+        const r = mul();
+        l = t.v === "+" ? num(l) + num(r) : num(l) - num(r);
+      } else return l;
+    }
+  }
+  function mul() {
+    let l = unary();
+    for (; ; ) {
+      const t = peek();
+      if (t && t.t === "op" && (t.v === "*" || t.v === "/")) {
+        p++;
+        const r = unary();
+        l = t.v === "*" ? num(l) * num(r) : num(l) / num(r);
+      } else return l;
+    }
+  }
+  function unary() {
+    const t = peek();
+    if (t && t.t === "op" && t.v === "-") {
+      p++;
+      return -num(unary());
+    }
+    return atom();
+  }
+  function atom() {
+    const t = eat();
+    if (!t) throw new Error("unexpected end");
+    if (t.t === "num") return t.v;
+    if (t.t === "id") {
+      if (params[t.v] !== void 0) return params[t.v];
+      throw new Error(`missing ${t.v}`);
+    }
+    if (t.v === "(") {
+      const v = or();
+      eat(")");
+      return v;
+    }
+    throw new Error(`unexpected ${t.v}`);
+  }
+  const truthy = (v) => typeof v === "boolean" ? v : v !== 0;
+  const num = (v) => typeof v === "boolean" ? v ? 1 : 0 : v;
+  const out = or();
+  if (p !== toks.length) throw new Error("trailing tokens");
+  return out;
+}
+function oclBody(s) {
+  const m = String(s ?? "").match(/ocl\{([\s\S]*?)\}/);
+  return m ? m[1].trim() : null;
+}
+function extractChecks(content) {
+  if (!content || typeof content !== "object") return [];
+  const c = content;
+  const out = [];
+  const push = (e) => {
+    const b = e && oclBody(e);
+    if (b) out.push(b);
+  };
+  push(c.check);
+  push(c.limit?.expression);
+  push(c.acceptance_criteria?.limit && !c.acceptance_criteria.limit.expression?.includes("ocl{") ? null : c.acceptance_criteria?.limit?.expression);
+  const st = c.acceptance_criteria?.limit;
+  if (st?.expression && st.operator && st.threshold_expression) {
+    out.push(`${st.expression} ${st.operator} ${st.threshold_expression}`);
+  }
+  return [...new Set(out)];
+}
+function symbolsIn(checks) {
+  const ids = /* @__PURE__ */ new Set();
+  const KEYWORDS = /* @__PURE__ */ new Set(["and", "or", "not"]);
+  for (const chk of checks) {
+    try {
+      for (const t of tokenize(chk)) if (t.t === "id" && !KEYWORDS.has(t.v.toLowerCase())) ids.add(t.v);
+    } catch {
+    }
+  }
+  return [...ids];
+}
+function parseNumber(raw) {
+  let s = raw.replace(/[ ,]/g, "");
+  s = s.replace(/\.(\d{3})$/, "$1");
+  return Number(s.replace(/,(?=\d{3}\b)/g, ""));
+}
+function extractParams(query, symbols) {
+  const params = {};
+  for (const sym of symbols) {
+    const leaf = sym.split(".").pop() ?? sym;
+    const esc = leaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`\\b${esc}\\b\\D{0,14}?([0-9][0-9 ,.]*[0-9])`, "iu");
+    const m = query.match(re);
+    if (m) {
+      const v = parseNumber(m[1]);
+      if (Number.isFinite(v)) params[sym] = v;
+    }
+  }
+  return params;
+}
+function evaluate(content, query) {
+  const c = content && typeof content === "object" ? content : {};
+  const checks = extractChecks(content);
+  if (!checks.length) return null;
+  const symbols = symbolsIn(checks);
+  const params = extractParams(query, symbols);
+  const missing = symbols.filter((s) => params[s] === void 0);
+  const machine = checks.map((expression) => {
+    const values = {};
+    try {
+      for (const t of tokenize(expression)) if (t.t === "id" && params[t.v] !== void 0) values[t.v] = params[t.v];
+    } catch {
+    }
+    let result = null;
+    if (missing.length === 0) {
+      try {
+        result = !!parseAndEval(expression, params);
+      } catch {
+        result = null;
+      }
+    }
+    return { expression, symbolic: expression, values, result };
+  });
+  if (missing.length) {
+    return { verdict: "void", missing, checks: machine };
+  }
+  const failed = machine.some((m) => m.result === false);
+  const evaluable = machine.some((m) => m.result !== null);
+  if (!evaluable) return null;
+  return {
+    verdict: failed ? "fail" : "pass",
+    on_violation: failed ? String(c.on_violation ?? "invalid") : void 0,
+    violation_meaning: failed ? typeof c.violation_meaning === "string" ? c.violation_meaning : void 0 : void 0,
+    missing: [],
+    checks: machine
+  };
+}
+function verdictNote(v, node) {
+  const lines = [
+    `Machine verdict (deterministic evaluation of node ${node.node_id}${node.clause?.urn ? `, ${node.clause.urn}` : ""}) \u2014 the service EXECUTED the node's machine check against the values stated in the question:`
+  ];
+  for (const c of v.checks) {
+    const vals = Object.entries(c.values).map(([k, n]) => `${k}=${n}`).join(", ");
+    lines.push(`- ${c.expression}${vals ? `  [${vals}]` : ""} \u2192 ${c.result === null ? "not evaluated" : c.result ? "holds" : "VIOLATED"}`);
+  }
+  if (v.verdict === "void") {
+    lines.push(`VERDICT: VOID \u2014 the question does not state: ${v.missing.join(", ")}. Say exactly what is missing; never assume values.`);
+  } else if (v.verdict === "pass") {
+    lines.push(`VERDICT: PASS \u2014 every machine check holds at the stated values. Present this verdict, the arithmetic above, and cite the node's clause.`);
+  } else {
+    lines.push(`VERDICT: ${String(v.on_violation ?? "FAIL").toUpperCase()} \u2014 a machine check is violated. Present this verdict, the arithmetic, the violation meaning verbatim, and cite the node's clause.`);
+  }
+  lines.push("This verdict is computed data \u2014 quote it faithfully; do not recompute, soften, or contradict it.");
+  return lines.join("\n");
+}
+
+// workers/worker_public/src/conditions.ts
+var NUM = String.raw`-?\d+(?:[.,]\d+)?`;
+function quantitiesIn(query) {
+  const out = {};
+  const num = (s) => Number(s.replace(",", "."));
+  const put = (kind, stated, stated_unit, si) => {
+    if (Number.isFinite(si)) out[kind] = { stated, stated_unit, si };
+  };
+  const tempC = query.match(new RegExp(`(${NUM})\\s*(?:\xB0\\s*)?C\\b`));
+  if (tempC) put("temperature", num(tempC[1]), "degC", num(tempC[1]) + 273.15);
+  const tempK = query.match(new RegExp(`(${NUM})\\s*K\\b`));
+  if (tempK && out.temperature === void 0) put("temperature", num(tempK[1]), "K", num(tempK[1]));
+  const rh = query.match(new RegExp(`(${NUM})\\s*%\\s*(?:RH\\b|relative\\s+humidity)?`, "i"));
+  if (rh) put("relative_humidity", num(rh[1]), "%", num(rh[1]) / 100);
+  const hours = query.match(new RegExp(`(${NUM})\\s*h\\b`, "i"));
+  if (hours) put("duration", num(hours[1]), "h", num(hours[1]) * 3600);
+  const days = query.match(new RegExp(`(${NUM})\\s*days?\\b`, "i"));
+  if (days && out.duration === void 0) put("duration", num(days[1]), "d", num(days[1]) * 86400);
+  return out;
+}
+function scoreSet(entries, q) {
+  const checks = [];
+  let distance = 0;
+  let stated = 0;
+  for (const e of entries) {
+    const siEntry = e;
+    const statedQ = q[e.quantity_kind];
+    if (!statedQ || !siEntry?.si) continue;
+    const tol = Number(String(siEntry.tolerance ?? "0").replace(",", "."));
+    const tolSi = (Number.isFinite(tol) ? tol : 0) * (siEntry.si.unit === "K" ? 1 : siEntry.si.unit === "1" ? 0.01 : 1);
+    const in_band = statedQ.si >= siEntry.si.value - tolSi && statedQ.si <= siEntry.si.value + tolSi;
+    const gap = Math.max(0, statedQ.si - (siEntry.si.value + tolSi), siEntry.si.value - tolSi - statedQ.si);
+    distance += gap / Math.max(tolSi, 1);
+    stated += 1;
+    checks.push({
+      quantity_kind: e.quantity_kind,
+      band: `${siEntry.si.value} ${siEntry.si.unit} \xB1${tolSi}`,
+      stated: statedQ.stated,
+      stated_unit: statedQ.stated_unit,
+      in_band
+    });
+  }
+  return stated ? { checks, distance, stated } : null;
+}
+function evaluateConditionSets(nodes, query) {
+  const q = quantitiesIn(query);
+  const kinds = Object.keys(q);
+  if (!kinds.length) return null;
+  const scored = [];
+  for (const n of nodes) {
+    const c = n.content && typeof n.content === "object" ? n.content : {};
+    const payload = c.payload ?? {};
+    const entries = Array.isArray(payload.entries) ? payload.entries : [];
+    if (!entries.length) continue;
+    const s = scoreSet(entries, q);
+    if (s) scored.push({ node_id: n.node_id, checks: s.checks, distance: s.distance });
+  }
+  if (!scored.length) return null;
+  const matched = scored.filter((s) => s.checks.every((c) => c.in_band));
+  scored.sort((a, b) => a.distance - b.distance);
+  if (matched.length) {
+    return {
+      verdict: "pass",
+      matched: matched.map((m) => m.node_id),
+      checks: matched[0].checks,
+      note: `VERDICT: PASS \u2014 the stated combination (${kinds.join(", ")}) matches a severity set (${matched[0].checks.map((c) => c.band).join("; ")}). Present this verdict and cite the set's clause. The machine set identifier rides the verdict block as data \u2014 never write it in your prose.`
+    };
+  }
+  const nearest = scored[0];
+  return {
+    verdict: "fail",
+    matched: [],
+    nearest: { node_id: nearest.node_id, distance: Number(nearest.distance.toFixed(2)), bands: nearest.checks.map((c) => c.band) },
+    checks: nearest.checks,
+    note: `VERDICT: FAIL \u2014 no severity set admits the stated combination. The nearest set (bands: ${nearest.checks.map((c) => c.band).join("; ")}) is the closest match. Say the combination is outside the menu and describe the nearest set's bands; never soften it. The machine set identifier rides the verdict block as data \u2014 never write it in your prose.`
+  };
+}
+
 // workers/worker_public/src/tools-content.ts
 var slug = (docidentifier) => docidentifier.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 var unitsGet = {
@@ -414,6 +749,108 @@ var licensedSection = {
     }
   }
 };
+var verdictEvaluate = {
+  name: "verdict.evaluate",
+  description: "Deterministically evaluate a model-plane node's machine checks (OCL boolean expressions, threshold limits) against the quantities a question states. Returns pass/fail with every check's expression and values, or void with the missing parameter names when the question does not state enough. The machine computes; cite the node's clause.",
+  params: [
+    { key: "node_id", required: true, description: "the model-plane node id, e.g. /req/metrological/repeatability (node ids appear in answers' verdict blocks)" },
+    { key: "question", required: true, description: "the statement carrying the quantities, e.g. 'is mpe 0.02 with n_lc 3000 within the limit?'" }
+  ],
+  audiences: ["mcp"],
+  handler: async (env, args) => {
+    const node_id = String(args?.node_id ?? "").trim();
+    const question = String(args?.question ?? "").trim();
+    if (!node_id.startsWith("/") || question.length < 4) return null;
+    try {
+      const rows = await env.DB.prepare(
+        "SELECT standard, kind, name, content FROM model_nodes WHERE node_id = ?1 LIMIT 2"
+      ).bind(node_id).all();
+      const found = rows.results ?? [];
+      if (found.length !== 1) {
+        return {
+          name: "verdict.evaluate",
+          query: node_id,
+          output: found.length ? `The node id ${node_id} is indexed under several standards \u2014 name the standard to disambiguate. State this plainly.` : `No model-plane node ${node_id} is indexed. State this plainly.`
+        };
+      }
+      const node = found[0];
+      const entry = licensedEntryForPackage(node.standard);
+      if (entry) {
+        return {
+          name: "verdict.evaluate",
+          query: node_id,
+          output: licenseBoundaryRefusal(entry.doc_number, null) ?? "License boundary \u2014 the node belongs to a licensed standard the caller's entitlement set does not cover."
+        };
+      }
+      let content;
+      try {
+        content = JSON.parse(node.content);
+      } catch {
+        content = null;
+      }
+      const v = evaluate(content, question);
+      if (!v) {
+        return {
+          name: "verdict.evaluate",
+          query: node_id,
+          output: `The node ${node_id} (${node.kind}) carries no machine-checkable expressions \u2014 it is not evaluatable by the verdict engine. State this plainly.`
+        };
+      }
+      return {
+        name: "verdict.evaluate",
+        query: node_id,
+        output: JSON.stringify({ standard: node.standard, node_id, kind: node.kind, name: node.name, verdict: v.verdict, on_violation: v.on_violation, missing: v.missing, checks: v.checks })
+      };
+    } catch {
+      return null;
+    }
+  }
+};
+var conditionsCheck = {
+  name: "conditions.check",
+  description: "Check a stated combination of environmental quantities (temperature, humidity, duration, cycles) against the indexed severity/condition sets \u2014 the pass answer names the matched set and every band, the fail names the nearest set and its distance. Machine evaluation over the condition-set nodes; cite the matched set's clause.",
+  params: [
+    { key: "question", required: true, description: "the stated combination, e.g. 'damp heat cyclic test at 55 \xB0C for 2 cycles of 24 h'" },
+    { key: "standard", required: false, description: "optional scope, the package id, e.g. iec-60068-2-30 (defaults to every indexed condition set the caller may see)" },
+    { key: "licensed_standards", required: false, description: "license entitlement keys for licensed condition sets, validated against the deployment's declared licenses" }
+  ],
+  audiences: ["mcp"],
+  handler: async (env, args) => {
+    const question = String(args?.question ?? "").trim();
+    if (question.length < 4) return null;
+    const standard = args?.standard ? String(args.standard).trim() : null;
+    const keys = standardKeysFrom({ licensed_standards: args?.licensed_standards });
+    try {
+      const rows = standard ? await env.DB.prepare("SELECT node_id, standard, content FROM model_nodes WHERE kind = 'condition_set' AND standard = ?1").bind(standard).all() : await env.DB.prepare("SELECT node_id, standard, content FROM model_nodes WHERE kind = 'condition_set'").all();
+      const all = (rows.results ?? []).map((r) => {
+        let content = r.content;
+        try {
+          content = JSON.parse(r.content);
+        } catch {
+        }
+        return { node_id: r.node_id, standard: r.standard, content };
+      });
+      const visible = all.filter((n) => {
+        const entry = licensedEntryForPackage(n.standard);
+        return !entry || keys.has(entry.key);
+      });
+      if (!visible.length) {
+        return { name: "conditions.check", query: question, output: "No condition sets are indexed (or visible to this caller's entitlements). State this plainly." };
+      }
+      const v = evaluateConditionSets(visible, question);
+      if (!v) {
+        return { name: "conditions.check", query: question, output: "No quantities were recognized in the statement \u2014 state the values (temperature, humidity, duration, cycles). The engine checks stated numbers, never guesses." };
+      }
+      return {
+        name: "conditions.check",
+        query: question,
+        output: JSON.stringify({ verdict: v.verdict, matched: v.matched, checks: v.checks })
+      };
+    } catch {
+      return null;
+    }
+  }
+};
 var glossaryLookup = {
   name: "glossary.lookup",
   description: "Look up a defined term in the terminology datasets \u2014 the concept's definition and its defining publication. Bind everyday words to the defined term before interpreting a question.",
@@ -482,7 +919,7 @@ var certificatesSearch = {
     return { name: "certificates.search", query, output };
   }
 };
-var TOOLS_REGISTRY = [certificatesSearch, unitsGet, graphCites, docsSection, glossaryLookup, documentsFamily, licensedSection];
+var TOOLS_REGISTRY = [certificatesSearch, unitsGet, graphCites, docsSection, glossaryLookup, documentsFamily, licensedSection, verdictEvaluate, conditionsCheck];
 var TOOL_DECLARATION = [
   "You may use one tool before answering, by writing a single line:",
   ...TOOLS_REGISTRY.filter((t) => t.audiences.includes("agent")).map((t) => {
@@ -513,6 +950,10 @@ export {
   resolveBlocks,
   contractV2,
   tableRetyped,
+  evaluate,
+  verdictNote,
+  quantitiesIn,
+  evaluateConditionSets,
   parseToolCall,
   TOOLS_REGISTRY,
   TOOL_DECLARATION,
