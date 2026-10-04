@@ -41,6 +41,24 @@ test("verdict.evaluate: an understated question returns void with the missing na
   assert.ok(v.missing.includes("vmin"));
 });
 
+test("verdict.evaluate: the standard param disambiguates", async () => {
+  setProfile(PROFILE);
+  const db = {
+    prepare: (sql: string) => ({
+      bind: (..._a: unknown[]) => ({
+        all: async () => ({ results: sql.includes("AND standard") ? [{ standard: "oiml-r60", kind: "requirement", name: "Repeatability", content: NODE }] : [
+          { standard: "oiml-r60", kind: "requirement", name: "a", content: NODE },
+          { standard: "oiml-r91", kind: "requirement", name: "b", content: NODE },
+        ] }),
+      }),
+    }),
+  };
+  const r = await runTool({ DB: db }, { name: "verdict.evaluate", args: { node_id: "/req/x", question: "E_R is 0.1 and vmin is 0.4", standard: "oiml-r60" } }, "mcp");
+  assert.ok(r);
+  const v = JSON.parse(r.output);
+  assert.equal(v.verdict, "pass", "the scoped query resolves the one node and evaluates");
+});
+
 test("verdict.evaluate: an ambiguous node id resolves to nothing, no silent pick", async () => {
   setProfile(PROFILE);
   const db = nodeDb([

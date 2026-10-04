@@ -754,17 +754,17 @@ var verdictEvaluate = {
   description: "Deterministically evaluate a model-plane node's machine checks (OCL boolean expressions, threshold limits) against the quantities a question states. Returns pass/fail with every check's expression and values, or void with the missing parameter names when the question does not state enough. The machine computes; cite the node's clause.",
   params: [
     { key: "node_id", required: true, description: "the model-plane node id, e.g. /req/metrological/repeatability (node ids appear in answers' verdict blocks)" },
-    { key: "question", required: true, description: "the statement carrying the quantities, e.g. 'is mpe 0.02 with n_lc 3000 within the limit?'" }
+    { key: "question", required: true, description: "the statement carrying the quantities, e.g. 'is mpe 0.02 with n_lc 3000 within the limit?'" },
+    { key: "standard", required: false, description: "the package id when the node id indexes under several standards, e.g. oiml-r60-lml" }
   ],
   audiences: ["mcp"],
   handler: async (env, args) => {
     const node_id = String(args?.node_id ?? "").trim();
     const question = String(args?.question ?? "").trim();
+    const standard = args?.standard ? String(args.standard).trim() : null;
     if (!node_id.startsWith("/") || question.length < 4) return null;
     try {
-      const rows = await env.DB.prepare(
-        "SELECT standard, kind, name, content FROM model_nodes WHERE node_id = ?1 LIMIT 2"
-      ).bind(node_id).all();
+      const rows = standard ? await env.DB.prepare("SELECT standard, kind, name, content FROM model_nodes WHERE node_id = ?1 AND standard = ?2 LIMIT 2").bind(node_id, standard).all() : await env.DB.prepare("SELECT standard, kind, name, content FROM model_nodes WHERE node_id = ?1 LIMIT 2").bind(node_id).all();
       const found = rows.results ?? [];
       if (found.length !== 1) {
         return {
@@ -865,7 +865,17 @@ var bibEntry = {
       const rows = await env.DB.prepare(
         "SELECT id, kind, label FROM graph_nodes WHERE label = ?1 COLLATE NOCASE LIMIT 5"
       ).bind(label).all();
-      const nodes = rows.results ?? [];
+      let nodes = rows.results ?? [];
+      if (!nodes.length) {
+        const d = await env.DB.prepare(
+          "SELECT canonical_id, docidentifier FROM documents WHERE docidentifier = ?1 COLLATE NOCASE LIMIT 5"
+        ).bind(label).all();
+        nodes = (d.results ?? []).map((r) => ({
+          id: r.canonical_id,
+          kind: "doc",
+          label: r.docidentifier
+        }));
+      }
       if (!nodes.length) {
         return { name: "bib.entry", query: label, output: `No registry node carries the label "${label}". State this plainly.` };
       }

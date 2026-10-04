@@ -48,6 +48,27 @@ test("bib.entry resolves a label to document, relations and citations", async ()
   assert.deepEqual(entries[0].cites, ["ISO 8601", "OIML B 18"]);
 });
 
+test("bib.entry resolves the docidentifier form through the documents registry", async () => {
+  const db = {
+    prepare: (sql: string) => ({
+      bind: () => ({
+        all: async () => ({
+          results: sql.includes("FROM graph_nodes")
+            ? []
+            : sql.includes("FROM documents WHERE docidentifier")
+              ? [{ canonical_id: "doc:OIML-R-60-2021", docidentifier: "OIML R 60:2021" }]
+              : [],
+        }),
+      }),
+    }),
+  };
+  const r = await runTool({ DB: db }, { name: "bib.entry", args: { label: "OIML R 60:2021" } }, "mcp");
+  assert.ok(r);
+  const entries = JSON.parse(r.output);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].label, "OIML R 60:2021");
+});
+
 test("bib.entry states an unknown label plainly", async () => {
   const empty = { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }) }) }) };
   const r = await runTool({ DB: empty }, { name: "bib.entry", args: { label: "Nope 123" } }, "mcp");

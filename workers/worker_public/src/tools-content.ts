@@ -236,21 +236,22 @@ export const verdictEvaluate: ToolSpec = {
   params: [
     { key: "node_id", required: true, description: "the model-plane node id, e.g. /req/metrological/repeatability (node ids appear in answers' verdict blocks)" },
     { key: "question", required: true, description: "the statement carrying the quantities, e.g. 'is mpe 0.02 with n_lc 3000 within the limit?'" },
+    { key: "standard", required: false, description: "the package id when the node id indexes under several standards, e.g. oiml-r60-lml" },
   ],
   audiences: ["mcp"],
   handler: async (env, args) => {
     const node_id = String(args?.node_id ?? "").trim();
     const question = String(args?.question ?? "").trim();
+    const standard = args?.standard ? String(args.standard).trim() : null;
     if (!node_id.startsWith("/") || question.length < 4) return null;
     try {
       // the same zero-or-ambiguous rule bindModelNode applies: a node
       // id that indexes under exactly one standard resolves; several
-      // or none resolve to nothing — no silent pick
-      const rows = await env.DB.prepare(
-        "SELECT standard, kind, name, content FROM model_nodes WHERE node_id = ?1 LIMIT 2",
-      )
-        .bind(node_id)
-        .all();
+      // or none resolve to nothing — no silent pick (the standard
+      // param is the caller's disambiguator)
+      const rows = standard
+        ? await env.DB.prepare("SELECT standard, kind, name, content FROM model_nodes WHERE node_id = ?1 AND standard = ?2 LIMIT 2").bind(node_id, standard).all()
+        : await env.DB.prepare("SELECT standard, kind, name, content FROM model_nodes WHERE node_id = ?1 LIMIT 2").bind(node_id).all();
       const found = (rows.results ?? []) as { standard: string; kind: string; name: string | null; content: string }[];
       if (found.length !== 1) {
         return {
@@ -362,7 +363,22 @@ export const bibEntry: ToolSpec = {
       )
         .bind(label)
         .all();
-      const nodes = ((rows.results ?? []) as { id: string; kind: string; label: string }[]);
+      let nodes = ((rows.results ?? []) as { id: string; kind: string; label: string }[]);
+      if (!nodes.length) {
+        // the docidentifier form ("OIML R 60:2017") is a documents-
+        // registry key, not a graph label (labels are titles) — resolve
+        // it through the registry and synthesize the node rows
+        const d = await env.DB.prepare(
+          "SELECT canonical_id, docidentifier FROM documents WHERE docidentifier = ?1 COLLATE NOCASE LIMIT 5",
+        )
+          .bind(label)
+          .all();
+        nodes = ((d.results ?? []) as { canonical_id: string; docidentifier: string }[]).map((r) => ({
+          id: r.canonical_id,
+          kind: "doc",
+          label: r.docidentifier,
+        }));
+      }
       if (!nodes.length) {
         return { name: "bib.entry", query: label, output: `No registry node carries the label "${label}". State this plainly.` };
       }
