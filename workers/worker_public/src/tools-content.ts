@@ -11,7 +11,9 @@ import { portIndex, portModelRunner, hasLane } from "./env.ts";
 import { embed } from "./ai.ts";
 import { THRESHOLDS } from "./config.ts";
 import { standardKeysFrom } from "./requestScope.ts";
-import { licenseBoundaryRefusal, licensedEntryForDocNumber } from "./modelplane.ts";
+import { licenseBoundaryRefusal, licensedEntryForDocNumber, licensedEntryForPackage } from "./modelplane.ts";
+import { evaluate as evaluateVerdict } from "./verdict.ts";
+import { evaluateConditionSets } from "./conditions.ts";
 
 const slug = (docidentifier: string) =>
   docidentifier
@@ -212,6 +214,124 @@ export const licensedSection: ToolSpec = {
             return { node_id: n.node_id, kind: n.kind, name: n.name, clause: n.clause_ref, content };
           }),
         ),
+      };
+    } catch {
+      return null;
+    }
+  },
+};
+
+
+// The deterministic engines as tools (the owner's 2026-10-04
+// direction): computing with the standard, not reading it. Both wrap
+// the engines the ask path already runs — no new evaluation logic
+// lives here; the tool is the door, the engine is the authority.
+// Void-when-parameters-miss is the honest contract: the tool states
+// WHICH parameters the question did not state, never guesses.
+
+export const verdictEvaluate: ToolSpec = {
+  name: "verdict.evaluate",
+  description:
+    "Deterministically evaluate a model-plane node's machine checks (OCL boolean expressions, threshold limits) against the quantities a question states. Returns pass/fail with every check's expression and values, or void with the missing parameter names when the question does not state enough. The machine computes; cite the node's clause.",
+  params: [
+    { key: "node_id", required: true, description: "the model-plane node id, e.g. /req/metrological/repeatability (node ids appear in answers' verdict blocks)" },
+    { key: "question", required: true, description: "the statement carrying the quantities, e.g. 'is mpe 0.02 with n_lc 3000 within the limit?'" },
+  ],
+  audiences: ["mcp"],
+  handler: async (env, args) => {
+    const node_id = String(args?.node_id ?? "").trim();
+    const question = String(args?.question ?? "").trim();
+    if (!node_id.startsWith("/") || question.length < 4) return null;
+    try {
+      // the same zero-or-ambiguous rule bindModelNode applies: a node
+      // id that indexes under exactly one standard resolves; several
+      // or none resolve to nothing — no silent pick
+      const rows = await env.DB.prepare(
+        "SELECT standard, kind, name, content FROM model_nodes WHERE node_id = ?1 LIMIT 2",
+      )
+        .bind(node_id)
+        .all();
+      const found = (rows.results ?? []) as { standard: string; kind: string; name: string | null; content: string }[];
+      if (found.length !== 1) {
+        return {
+          name: "verdict.evaluate",
+          query: node_id,
+          output: found.length
+            ? `The node id ${node_id} is indexed under several standards — name the standard to disambiguate. State this plainly.`
+            : `No model-plane node ${node_id} is indexed. State this plainly.`,
+        };
+      }
+      const node = found[0]!;
+      const entry = licensedEntryForPackage(node.standard);
+      if (entry) {
+        return {
+          name: "verdict.evaluate",
+          query: node_id,
+          output: licenseBoundaryRefusal(entry.doc_number, null) ?? "License boundary — the node belongs to a licensed standard the caller's entitlement set does not cover.",
+        };
+      }
+      let content: unknown;
+      try { content = JSON.parse(node.content); } catch { content = null; }
+      const v = evaluateVerdict(content, question);
+      if (!v) {
+        return {
+          name: "verdict.evaluate",
+          query: node_id,
+          output: `The node ${node_id} (${node.kind}) carries no machine-checkable expressions — it is not evaluatable by the verdict engine. State this plainly.`,
+        };
+      }
+      return {
+        name: "verdict.evaluate",
+        query: node_id,
+        output: JSON.stringify({ standard: node.standard, node_id, kind: node.kind, name: node.name, verdict: v.verdict, on_violation: v.on_violation, missing: v.missing, checks: v.checks }),
+      };
+    } catch {
+      return null;
+    }
+  },
+};
+
+export const conditionsCheck: ToolSpec = {
+  name: "conditions.check",
+  description:
+    "Check a stated combination of environmental quantities (temperature, humidity, duration, cycles) against the indexed severity/condition sets — the pass answer names the matched set and every band, the fail names the nearest set and its distance. Machine evaluation over the condition-set nodes; cite the matched set's clause.",
+  params: [
+    { key: "question", required: true, description: "the stated combination, e.g. 'damp heat cyclic test at 55 °C for 2 cycles of 24 h'" },
+    { key: "standard", required: false, description: "optional scope, the package id, e.g. iec-60068-2-30 (defaults to every indexed condition set the caller may see)" },
+    { key: "licensed_standards", required: false, description: 'license entitlement keys for licensed condition sets, validated against the deployment\'s declared licenses' },
+  ],
+  audiences: ["mcp"],
+  handler: async (env, args) => {
+    const question = String(args?.question ?? "").trim();
+    if (question.length < 4) return null;
+    const standard = args?.standard ? String(args.standard).trim() : null;
+    const keys = standardKeysFrom({ licensed_standards: args?.licensed_standards });
+    try {
+      const rows = standard
+        ? await env.DB.prepare("SELECT node_id, standard, content FROM model_nodes WHERE kind = 'condition_set' AND standard = ?1").bind(standard).all()
+        : await env.DB.prepare("SELECT node_id, standard, content FROM model_nodes WHERE kind = 'condition_set'").all();
+      const all = ((rows.results ?? []) as { node_id: string; standard: string; content: string }[]).map((r) => {
+        let content: unknown = r.content;
+        try { content = JSON.parse(r.content); } catch { /* verbatim */ }
+        return { node_id: r.node_id, standard: r.standard, content };
+      });
+      // the ask path's own gate: licensed condition sets compete only
+      // for entitled callers — the same licensedEntryForPackage filter
+      const visible = all.filter((n) => {
+        const entry = licensedEntryForPackage(n.standard);
+        return !entry || keys.has(entry.key);
+      });
+      if (!visible.length) {
+        return { name: "conditions.check", query: question, output: "No condition sets are indexed (or visible to this caller's entitlements). State this plainly." };
+      }
+      const v = evaluateConditionSets(visible, question);
+      if (!v) {
+        return { name: "conditions.check", query: question, output: "No quantities were recognized in the statement — state the values (temperature, humidity, duration, cycles). The engine checks stated numbers, never guesses." };
+      }
+      return {
+        name: "conditions.check",
+        query: question,
+        output: JSON.stringify({ verdict: v.verdict, matched: v.matched, checks: v.checks }),
       };
     } catch {
       return null;

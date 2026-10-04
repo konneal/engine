@@ -2,6 +2,8 @@ import {
   TOOL_DECLARATION,
   bindModelNode,
   contractV2,
+  evaluate,
+  evaluateConditionSets,
   licenseBoundaryNote,
   licenseBoundaryRefusal,
   licensedEntryForPackage,
@@ -9,12 +11,14 @@ import {
   modelEcho,
   modelGroundingBlock,
   parseToolCall,
+  quantitiesIn,
   resolveBlocks,
   runTool,
   standardForDocNumber,
   tableRetyped,
-  toolNote
-} from "./chunk-JHATKAWW.js";
+  toolNote,
+  verdictNote
+} from "./chunk-QBWZ6HVP.js";
 import {
   NO_CONTEXT,
   answerQuality,
@@ -436,343 +440,8 @@ async function completeFigures(db, answer, alreadyAttached, used = []) {
   return figs;
 }
 
-// workers/worker_public/src/verdict.ts
-function tokenize(src) {
-  const toks = [];
-  let i = 0;
-  const s = src.replace(/\s+/g, " ");
-  while (i < s.length) {
-    const c = s[i];
-    if (c === " ") {
-      i++;
-      continue;
-    }
-    if (/[0-9.]/.test(c)) {
-      const m = s.slice(i).match(/^[0-9]*\.?[0-9]+/);
-      toks.push({ t: "num", v: Number(m[0]) });
-      i += m[0].length;
-      continue;
-    }
-    if (/[A-Za-z_]/.test(c)) {
-      const m = s.slice(i).match(/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/);
-      toks.push({ t: "id", v: m[0] });
-      i += m[0].length;
-      continue;
-    }
-    const two = s.slice(i, i + 2);
-    if ([">=", "<=", "==", "!="].includes(two)) {
-      toks.push({ t: "op", v: two });
-      i += 2;
-      continue;
-    }
-    if ("+-*/()<>".includes(c)) {
-      toks.push({ t: "op", v: c });
-      i++;
-      continue;
-    }
-    throw new Error(`bad char ${c}`);
-  }
-  return toks;
-}
-function parseAndEval(src, params) {
-  const toks = tokenize(src);
-  let p = 0;
-  const peek = () => toks[p];
-  const eat = (v) => {
-    const t = toks[p++];
-    if (v && (!t || t.t !== "op" || t.v !== v)) throw new Error(`expected ${v}`);
-    return t;
-  };
-  const isKw = (k) => {
-    const t = peek();
-    return t && t.t === "id" && t.v.toLowerCase() === k;
-  };
-  function or() {
-    let l = and();
-    while (isKw("or")) {
-      p++;
-      const r = and();
-      l = truthy(l) || truthy(r);
-    }
-    return l;
-  }
-  function and() {
-    let l = not();
-    while (isKw("and")) {
-      p++;
-      const r = not();
-      l = truthy(l) && truthy(r);
-    }
-    return l;
-  }
-  function not() {
-    if (isKw("not")) {
-      p++;
-      return !truthy(not());
-    }
-    return cmp();
-  }
-  function cmp() {
-    const l = add();
-    const t = peek();
-    if (t && t.t === "op" && [">=", "<=", ">", "<", "==", "!="].includes(t.v)) {
-      p++;
-      const r = add();
-      switch (t.v) {
-        case ">=":
-          return num3(l) >= num3(r);
-        case "<=":
-          return num3(l) <= num3(r);
-        case ">":
-          return num3(l) > num3(r);
-        case "<":
-          return num3(l) < num3(r);
-        case "==":
-          return num3(l) === num3(r);
-        default:
-          return num3(l) !== num3(r);
-      }
-    }
-    return l;
-  }
-  function add() {
-    let l = mul();
-    for (; ; ) {
-      const t = peek();
-      if (t && t.t === "op" && (t.v === "+" || t.v === "-")) {
-        p++;
-        const r = mul();
-        l = t.v === "+" ? num3(l) + num3(r) : num3(l) - num3(r);
-      } else return l;
-    }
-  }
-  function mul() {
-    let l = unary();
-    for (; ; ) {
-      const t = peek();
-      if (t && t.t === "op" && (t.v === "*" || t.v === "/")) {
-        p++;
-        const r = unary();
-        l = t.v === "*" ? num3(l) * num3(r) : num3(l) / num3(r);
-      } else return l;
-    }
-  }
-  function unary() {
-    const t = peek();
-    if (t && t.t === "op" && t.v === "-") {
-      p++;
-      return -num3(unary());
-    }
-    return atom();
-  }
-  function atom() {
-    const t = eat();
-    if (!t) throw new Error("unexpected end");
-    if (t.t === "num") return t.v;
-    if (t.t === "id") {
-      if (params[t.v] !== void 0) return params[t.v];
-      throw new Error(`missing ${t.v}`);
-    }
-    if (t.v === "(") {
-      const v = or();
-      eat(")");
-      return v;
-    }
-    throw new Error(`unexpected ${t.v}`);
-  }
-  const truthy = (v) => typeof v === "boolean" ? v : v !== 0;
-  const num3 = (v) => typeof v === "boolean" ? v ? 1 : 0 : v;
-  const out = or();
-  if (p !== toks.length) throw new Error("trailing tokens");
-  return out;
-}
-function oclBody(s) {
-  const m = String(s ?? "").match(/ocl\{([\s\S]*?)\}/);
-  return m ? m[1].trim() : null;
-}
-function extractChecks(content) {
-  if (!content || typeof content !== "object") return [];
-  const c = content;
-  const out = [];
-  const push = (e) => {
-    const b = e && oclBody(e);
-    if (b) out.push(b);
-  };
-  push(c.check);
-  push(c.limit?.expression);
-  push(c.acceptance_criteria?.limit && !c.acceptance_criteria.limit.expression?.includes("ocl{") ? null : c.acceptance_criteria?.limit?.expression);
-  const st = c.acceptance_criteria?.limit;
-  if (st?.expression && st.operator && st.threshold_expression) {
-    out.push(`${st.expression} ${st.operator} ${st.threshold_expression}`);
-  }
-  return [...new Set(out)];
-}
-function symbolsIn(checks) {
-  const ids = /* @__PURE__ */ new Set();
-  const KEYWORDS = /* @__PURE__ */ new Set(["and", "or", "not"]);
-  for (const chk of checks) {
-    try {
-      for (const t of tokenize(chk)) if (t.t === "id" && !KEYWORDS.has(t.v.toLowerCase())) ids.add(t.v);
-    } catch {
-    }
-  }
-  return [...ids];
-}
-function parseNumber(raw) {
-  let s = raw.replace(/[ ,]/g, "");
-  s = s.replace(/\.(\d{3})$/, "$1");
-  return Number(s.replace(/,(?=\d{3}\b)/g, ""));
-}
-function extractParams(query, symbols) {
-  const params = {};
-  for (const sym of symbols) {
-    const leaf = sym.split(".").pop() ?? sym;
-    const esc = leaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`\\b${esc}\\b\\D{0,14}?([0-9][0-9 ,.]*[0-9])`, "iu");
-    const m = query.match(re);
-    if (m) {
-      const v = parseNumber(m[1]);
-      if (Number.isFinite(v)) params[sym] = v;
-    }
-  }
-  return params;
-}
-function evaluate(content, query) {
-  const c = content && typeof content === "object" ? content : {};
-  const checks = extractChecks(content);
-  if (!checks.length) return null;
-  const symbols = symbolsIn(checks);
-  const params = extractParams(query, symbols);
-  const missing = symbols.filter((s) => params[s] === void 0);
-  const machine = checks.map((expression) => {
-    const values = {};
-    try {
-      for (const t of tokenize(expression)) if (t.t === "id" && params[t.v] !== void 0) values[t.v] = params[t.v];
-    } catch {
-    }
-    let result = null;
-    if (missing.length === 0) {
-      try {
-        result = !!parseAndEval(expression, params);
-      } catch {
-        result = null;
-      }
-    }
-    return { expression, symbolic: expression, values, result };
-  });
-  if (missing.length) {
-    return { verdict: "void", missing, checks: machine };
-  }
-  const failed = machine.some((m) => m.result === false);
-  const evaluable = machine.some((m) => m.result !== null);
-  if (!evaluable) return null;
-  return {
-    verdict: failed ? "fail" : "pass",
-    on_violation: failed ? String(c.on_violation ?? "invalid") : void 0,
-    violation_meaning: failed ? typeof c.violation_meaning === "string" ? c.violation_meaning : void 0 : void 0,
-    missing: [],
-    checks: machine
-  };
-}
-function verdictNote(v, node) {
-  const lines = [
-    `Machine verdict (deterministic evaluation of node ${node.node_id}${node.clause?.urn ? `, ${node.clause.urn}` : ""}) \u2014 the service EXECUTED the node's machine check against the values stated in the question:`
-  ];
-  for (const c of v.checks) {
-    const vals = Object.entries(c.values).map(([k, n]) => `${k}=${n}`).join(", ");
-    lines.push(`- ${c.expression}${vals ? `  [${vals}]` : ""} \u2192 ${c.result === null ? "not evaluated" : c.result ? "holds" : "VIOLATED"}`);
-  }
-  if (v.verdict === "void") {
-    lines.push(`VERDICT: VOID \u2014 the question does not state: ${v.missing.join(", ")}. Say exactly what is missing; never assume values.`);
-  } else if (v.verdict === "pass") {
-    lines.push(`VERDICT: PASS \u2014 every machine check holds at the stated values. Present this verdict, the arithmetic above, and cite the node's clause.`);
-  } else {
-    lines.push(`VERDICT: ${String(v.on_violation ?? "FAIL").toUpperCase()} \u2014 a machine check is violated. Present this verdict, the arithmetic, the violation meaning verbatim, and cite the node's clause.`);
-  }
-  lines.push("This verdict is computed data \u2014 quote it faithfully; do not recompute, soften, or contradict it.");
-  return lines.join("\n");
-}
-
-// workers/worker_public/src/conditions.ts
-var NUM = String.raw`-?\d+(?:[.,]\d+)?`;
-function quantitiesIn(query) {
-  const out = {};
-  const num3 = (s) => Number(s.replace(",", "."));
-  const put = (kind, stated, stated_unit, si) => {
-    if (Number.isFinite(si)) out[kind] = { stated, stated_unit, si };
-  };
-  const tempC = query.match(new RegExp(`(${NUM})\\s*(?:\xB0\\s*)?C\\b`));
-  if (tempC) put("temperature", num3(tempC[1]), "degC", num3(tempC[1]) + 273.15);
-  const tempK = query.match(new RegExp(`(${NUM})\\s*K\\b`));
-  if (tempK && out.temperature === void 0) put("temperature", num3(tempK[1]), "K", num3(tempK[1]));
-  const rh = query.match(new RegExp(`(${NUM})\\s*%\\s*(?:RH\\b|relative\\s+humidity)?`, "i"));
-  if (rh) put("relative_humidity", num3(rh[1]), "%", num3(rh[1]) / 100);
-  const hours = query.match(new RegExp(`(${NUM})\\s*h\\b`, "i"));
-  if (hours) put("duration", num3(hours[1]), "h", num3(hours[1]) * 3600);
-  const days = query.match(new RegExp(`(${NUM})\\s*days?\\b`, "i"));
-  if (days && out.duration === void 0) put("duration", num3(days[1]), "d", num3(days[1]) * 86400);
-  return out;
-}
-function scoreSet(entries, q) {
-  const checks = [];
-  let distance = 0;
-  let stated = 0;
-  for (const e of entries) {
-    const siEntry = e;
-    const statedQ = q[e.quantity_kind];
-    if (!statedQ || !siEntry?.si) continue;
-    const tol = Number(String(siEntry.tolerance ?? "0").replace(",", "."));
-    const tolSi = (Number.isFinite(tol) ? tol : 0) * (siEntry.si.unit === "K" ? 1 : siEntry.si.unit === "1" ? 0.01 : 1);
-    const in_band = statedQ.si >= siEntry.si.value - tolSi && statedQ.si <= siEntry.si.value + tolSi;
-    const gap = Math.max(0, statedQ.si - (siEntry.si.value + tolSi), siEntry.si.value - tolSi - statedQ.si);
-    distance += gap / Math.max(tolSi, 1);
-    stated += 1;
-    checks.push({
-      quantity_kind: e.quantity_kind,
-      band: `${siEntry.si.value} ${siEntry.si.unit} \xB1${tolSi}`,
-      stated: statedQ.stated,
-      stated_unit: statedQ.stated_unit,
-      in_band
-    });
-  }
-  return stated ? { checks, distance, stated } : null;
-}
-function evaluateConditionSets(nodes, query) {
-  const q = quantitiesIn(query);
-  const kinds = Object.keys(q);
-  if (!kinds.length) return null;
-  const scored = [];
-  for (const n of nodes) {
-    const c = n.content && typeof n.content === "object" ? n.content : {};
-    const payload = c.payload ?? {};
-    const entries = Array.isArray(payload.entries) ? payload.entries : [];
-    if (!entries.length) continue;
-    const s = scoreSet(entries, q);
-    if (s) scored.push({ node_id: n.node_id, checks: s.checks, distance: s.distance });
-  }
-  if (!scored.length) return null;
-  const matched = scored.filter((s) => s.checks.every((c) => c.in_band));
-  scored.sort((a, b) => a.distance - b.distance);
-  if (matched.length) {
-    return {
-      verdict: "pass",
-      matched: matched.map((m) => m.node_id),
-      checks: matched[0].checks,
-      note: `VERDICT: PASS \u2014 the stated combination (${kinds.join(", ")}) matches a severity set (${matched[0].checks.map((c) => c.band).join("; ")}). Present this verdict and cite the set's clause. The machine set identifier rides the verdict block as data \u2014 never write it in your prose.`
-    };
-  }
-  const nearest = scored[0];
-  return {
-    verdict: "fail",
-    matched: [],
-    nearest: { node_id: nearest.node_id, distance: Number(nearest.distance.toFixed(2)), bands: nearest.checks.map((c) => c.band) },
-    checks: nearest.checks,
-    note: `VERDICT: FAIL \u2014 no severity set admits the stated combination. The nearest set (bands: ${nearest.checks.map((c) => c.band).join("; ")}) is the closest match. Say the combination is outside the menu and describe the nearest set's bands; never soften it. The machine set identifier rides the verdict block as data \u2014 never write it in your prose.`
-  };
-}
-
 // workers/worker_public/src/aggregation.ts
-var NUM2 = String.raw`-?\d+(?:[,\s]?\d{3})*(?:[.,]\d+)?`;
+var NUM = String.raw`-?\d+(?:[,\s]?\d{3})*(?:[.,]\d+)?`;
 var UNIT_WORDS = {
   kg: ["mass", "load", "weight"],
   s: ["time", "duration", "second"],
@@ -836,7 +505,7 @@ function intervalPairs(cols) {
 }
 function statedInInterval(query, unit) {
   if (!unit) return null;
-  const re = new RegExp(`(${NUM2})\\s*${unit.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\b`, "i");
+  const re = new RegExp(`(${NUM})\\s*${unit.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\b`, "i");
   const m = query.match(re);
   return m ? num2(m[1]) : null;
 }
@@ -871,7 +540,7 @@ function classValueExists(rows, cols, token) {
 }
 function statedUnits(query) {
   const out = /* @__PURE__ */ new Set();
-  const re = new RegExp(`(${NUM2})\\s*([%\xB0a-zA-Z][a-zA-Z/.%\xB0]*\\b)`, "g");
+  const re = new RegExp(`(${NUM})\\s*([%\xB0a-zA-Z][a-zA-Z/.%\xB0]*\\b)`, "g");
   for (const m of query.matchAll(re)) {
     if (m[2]) out.add(m[2].replace("\u2062", "").trim());
   }
