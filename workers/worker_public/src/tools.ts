@@ -80,9 +80,12 @@ export const TOOL_DECLARATION = [
   "The worker runs it and returns the result attributed — phrase the tool's result as what it returned, with the searched string visible in your answer. Use a tool when the question turns on what it answers (including from a photograph). If you do not need it, answer directly without the line.",
 ].join("\n");
 
-/** Dispatch by LOOKUP — a tool name is never hard-coded at a call site. */
-export async function runTool(env: any, call: ToolCall): Promise<ToolResult | null> {
-  const spec = TOOLS_REGISTRY.find((t) => t.name === call.name && t.audiences.includes("agent"));
+/** Dispatch by LOOKUP — a tool name is never hard-coded at a call site.
+ *  The audience scopes the menu: the agent bridge sees agent tools, the
+ *  MCP adapter sees mcp tools; a tool registered for both dispatches
+ *  identically either way. */
+export async function runTool(env: any, call: ToolCall, audience: "agent" | "mcp" = "agent"): Promise<ToolResult | null> {
+  const spec = TOOLS_REGISTRY.find((t) => t.name === call.name && t.audiences.includes(audience));
   if (!spec) return null;
   return spec.handler(env, call.args ?? {});
 }
