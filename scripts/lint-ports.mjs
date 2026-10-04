@@ -28,6 +28,10 @@ const ALLOWLIST = new Set([
   "worker_public/src/drafts.ts",
   "worker_public/src/context.ts",
   "worker_public/src/ai.ts",
+  // the tool registry + the content tools: their handlers take the whole
+  // env by contract and wrap the modules that own the provider calls
+  "worker_public/src/tools.ts",
+  "worker_public/src/tools-content.ts",
   "worker_public/src/pipeline.ts",
   "worker_public/src/stages/dense.ts",
   "worker_public/src/stages/editionCover.ts",
