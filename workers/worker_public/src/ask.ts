@@ -1253,7 +1253,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       const call = parseToolCall(probeText);
       if (call) {
         mark(`Searching the certificate register for “${String(call.args?.query ?? "")}”`);
-        const result = await runTool(env.DB, call);
+        const result = await runTool(env, call);
         if (result) {
           messages.push({ role: "system", content: toolNote(result) });
           pendingTools.push(result);

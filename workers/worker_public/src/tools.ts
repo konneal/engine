@@ -43,7 +43,7 @@ export interface ToolSpec {
   description: string;
   params: { key: string; required: boolean; description: string }[];
   audiences: ("agent" | "mcp")[];
-  handler: (db: any, args: Record<string, unknown>) => Promise<ToolResult | null>;
+  handler: (env: any, args: Record<string, unknown>) => Promise<ToolResult | null>;
 }
 
 const certificatesSearch: ToolSpec = {
@@ -52,11 +52,11 @@ const certificatesSearch: ToolSpec = {
     "Search the certificate register (a snapshot) by holder name, model designation, or a printed certificate number. Returns the matching rows — number, holder, model, issue year, status, and document links where on file — or the exact no-match statement for the string asked.",
   params: [{ key: "query", required: true, description: "the holder, model, or printed certificate number to look up" }],
   audiences: ["agent", "mcp"],
-  handler: async (db, args) => {
+  handler: async (env, args) => {
     const query = String(args?.query ?? "").trim().slice(0, 160);
     if (!query) return null;
     const { searchRegister, registerNote, certificateLinks } = await import("./certificates");
-    const reg = await searchRegister(db, query, true); // the tool decided — no shaping gate
+    const reg = await searchRegister(env.DB, query, true); // the tool decided — no shaping gate
     const output = reg?.rows?.length
       ? [registerNote(reg.rows), certificateLinks(reg.rows)].filter(Boolean).join("\n")
       : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
@@ -64,7 +64,9 @@ const certificatesSearch: ToolSpec = {
   },
 };
 
-export const TOOLS_REGISTRY: ToolSpec[] = [certificatesSearch];
+import { unitsGet, graphCites, docsSection, glossaryLookup } from "./tools-content.ts";
+
+export const TOOLS_REGISTRY: ToolSpec[] = [certificatesSearch, unitsGet, graphCites, docsSection, glossaryLookup];
 
 /** The agent loop's protocol declaration, GENERATED from the registry —
  *  the model's tool vocabulary is always the registry's, never a
@@ -79,10 +81,10 @@ export const TOOL_DECLARATION = [
 ].join("\n");
 
 /** Dispatch by LOOKUP — a tool name is never hard-coded at a call site. */
-export async function runTool(db: any, call: ToolCall): Promise<ToolResult | null> {
+export async function runTool(env: any, call: ToolCall): Promise<ToolResult | null> {
   const spec = TOOLS_REGISTRY.find((t) => t.name === call.name && t.audiences.includes("agent"));
   if (!spec) return null;
-  return spec.handler(db, call.args ?? {});
+  return spec.handler(env, call.args ?? {});
 }
 
 /** The attributed injection: the answer model sees what the tool

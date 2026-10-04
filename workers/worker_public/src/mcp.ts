@@ -32,6 +32,13 @@ export async function handleMcp(
     });
     // deferred so plain node can load mcp-proto without the handlers'
     // .md prompt imports, which only the bundler resolves
+    // registry tools (certificates.search, units.get, …) dispatch through
+    // the SAME handlers the API would — the no-drift rule, now structural
+    const { runTool, TOOLS_REGISTRY } = await import("./tools.ts");
+    if (TOOLS_REGISTRY.some((t) => t.name === name && t.audiences.includes("mcp"))) {
+      const r = await runTool({ ...env, DB: (env as any).DB }, { name, args });
+      return r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
+    }
     const res = name === "ask"
       ? await (await import("./ask")).handleAsk(env, ctx as any, inner, tier, key)
       : await (await import("./search")).handleSearch(env, ctx as any, inner, tier, key);

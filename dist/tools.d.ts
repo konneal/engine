@@ -21,7 +21,7 @@ export interface ToolSpec {
         description: string;
     }[];
     audiences: ("agent" | "mcp")[];
-    handler: (db: any, args: Record<string, unknown>) => Promise<ToolResult | null>;
+    handler: (env: any, args: Record<string, unknown>) => Promise<ToolResult | null>;
 }
 export declare const TOOLS_REGISTRY: ToolSpec[];
 /** The agent loop's protocol declaration, GENERATED from the registry —
@@ -29,7 +29,7 @@ export declare const TOOLS_REGISTRY: ToolSpec[];
  *  hand-maintained literal. */
 export declare const TOOL_DECLARATION: string;
 /** Dispatch by LOOKUP — a tool name is never hard-coded at a call site. */
-export declare function runTool(db: any, call: ToolCall): Promise<ToolResult | null>;
+export declare function runTool(env: any, call: ToolCall): Promise<ToolResult | null>;
 /** The attributed injection: the answer model sees what the tool
  *  returned, for the string it asked — never a standing claim. */
 export declare function toolNote(r: ToolResult): string;
