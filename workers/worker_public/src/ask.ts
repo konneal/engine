@@ -1227,7 +1227,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   await attachFigureImages(env, messages, usedHits, q.query);
   // the agent loop (the owner's 2026-09-28 direction): ONE bounded tool
   // round, armed only where a tool can help. The model may call
-  // register_search through the strict line protocol; the worker
+  // the registry tools through the strict line protocol; the worker
   // executes it deterministically and the ATTRIBUTED result joins the
   // messages — what the tool returned, for the string it asked. The
   // invocations record into pendingTools; the stream emits them as its
