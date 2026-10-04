@@ -2871,6 +2871,26 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
           }
           const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length);
           send({ type: "quota", quota: { ...quota, ...tq2 } });
+          if (withImage && register?.rows?.length && full.includes(refusalAnswer())) {
+            console.log("blind-answer(stream): regenerating once");
+            mark("Re-answering from the register results");
+            send({ type: "retry" });
+            const regen = await generateStream(env, model, [
+              ...messages.slice(0, -1),
+              { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
+              messages[messages.length - 1]
+            ], effort);
+            if (regen) {
+              full = "";
+              try {
+                for await (const tok of sseTokens(regen)) {
+                  full += tok;
+                  send({ type: "token", v: tok });
+                }
+              } catch {
+              }
+            }
+          }
           const canonical0 = canonicalRefusal(full);
           const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
           send({

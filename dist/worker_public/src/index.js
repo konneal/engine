@@ -6,7 +6,7 @@ import {
   modelGroundingBlock,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-PIEUN5B2.js";
+} from "../../chunk-PQCRL5TL.js";
 import {
   TOOLS_REGISTRY
 } from "../../chunk-GCK6DW7E.js";
@@ -976,7 +976,7 @@ async function handleMcp(env, ctx, req, tier, key) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args });
       return r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     }
-    const res = name === "ask" ? await (await import("../../ask-XM5FO6LR.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-LVUQLA3C.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-IDMQUJBY.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-LVUQLA3C.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
