@@ -1,3 +1,13 @@
+import {
+  embed,
+  hasLane,
+  portIndex,
+  portModelRunner
+} from "./chunk-LOBYXEVD.js";
+import {
+  THRESHOLDS
+} from "./chunk-2PCUAJJO.js";
+
 // workers/worker_public/src/refs.ts
 var REF = /\[\[(u:[A-Za-z0-9_-]+)\]\]/g;
 function availableUnitIds(hits) {
@@ -154,18 +164,29 @@ var glossaryLookup = {
   handler: async (env, args) => {
     const term = String(args?.term ?? "").trim();
     if (term.length < 2) return null;
+    if (!hasLane(env, "glossary")) return null;
     try {
-      const rows = await env.DB.prepare(
-        "SELECT clause_title AS term, chunk_text AS text, docidentifier FROM chunks WHERE corpus = 'glossary' AND (clause_title = ?1 OR clause_title LIKE ?2) LIMIT 3"
-      ).bind(term, `%${term}%`).all();
-      const hits = (rows.results ?? []).filter((r) => r.term);
+      const vec = await embed(portModelRunner(env), "", term);
+      const cands = await portIndex(env, "glossary").query({ vector: vec, topK: 5 });
+      const hits = cands.filter((m) => m.score >= THRESHOLDS.glossaryCosineFloor).map((m) => ({
+        term: String(m.metadata?.clause_title ?? "").trim(),
+        definition: String(m.metadata?.chunk_text ?? "").split(" \u2014 ").slice(1).join(" \u2014 ").slice(0, 400),
+        docidentifier: String(m.metadata?.docidentifier ?? "")
+      })).filter((x) => x.term && x.definition);
       if (!hits.length) {
         return { name: "glossary.lookup", query: term, output: `No defined term matches "${term}" in the terminology datasets. State this plainly.` };
       }
+      const seen = /* @__PURE__ */ new Set();
+      const uniq = hits.filter((h) => {
+        const k = h.term.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/labeler\b/g, "labeller").replace(/\s+/g, " ").trim();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      }).slice(0, 3);
       return {
         name: "glossary.lookup",
         query: term,
-        output: hits.map((r) => `- ${r.term} (${r.docidentifier}): ${String(r.text ?? "").split(" \u2014 ").slice(1).join(" \u2014 ").slice(0, 400)}`).join("\n")
+        output: uniq.map((h) => `- ${h.term} (${h.docidentifier}): ${h.definition}`).join("\n")
       };
     } catch {
       return null;
@@ -212,8 +233,8 @@ var TOOL_DECLARATION = [
   }),
   "The worker runs it and returns the result attributed \u2014 phrase the tool's result as what it returned, with the searched string visible in your answer. Use a tool when the question turns on what it answers (including from a photograph). If you do not need it, answer directly without the line."
 ].join("\n");
-async function runTool(env, call) {
-  const spec = TOOLS_REGISTRY.find((t) => t.name === call.name && t.audiences.includes("agent"));
+async function runTool(env, call, audience = "agent") {
+  const spec = TOOLS_REGISTRY.find((t) => t.name === call.name && t.audiences.includes(audience));
   if (!spec) return null;
   return spec.handler(env, call.args ?? {});
 }
