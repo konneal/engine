@@ -19,7 +19,7 @@ test("tools/list exposes ask, retrieve and the registry's MCP tools with schemas
   const b = (await call({ jsonrpc: "2.0", id: 2, method: "tools/list" })) as any;
   assert.deepEqual(
     (b.result.tools as typeof TOOLS).map((t) => t.name),
-    ["ask", "retrieve", "certificates.search", "units.get", "graph.cites", "docs.section", "glossary.lookup", "documents.family"],
+    ["ask", "retrieve", "certificates.search", "units.get", "graph.cites", "docs.section", "glossary.lookup", "documents.family", "licensed.section"],
   );
   for (const t of TOOLS) {
     assert.equal(t.inputSchema.type, "object");
