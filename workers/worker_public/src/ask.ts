@@ -364,6 +364,16 @@ async function handleAsk(
     return err(503, "generation_disabled", "Generation is temporarily paused; search remains available.");
   }
 
+  // the agent's rounds, visible to the user as they happen: each step the
+  // assistant takes before and during the answer streams as an event (the
+  // owner's 2026-10-04 direction — the user must see the system-to-model
+  // questioning sessions, not stare at a spinner)
+  const agentSteps: string[] = [];
+  const mark = (step: string) => {
+    agentSteps.push(step);
+    console.log(`agent-step: ${step}`);
+  };
+
   // Members get federated retrieval (OIML + ISO/IEC) merged into the same
   // pipeline via the service binding; rag-public never touches the
   // internal index itself, and generation/rerank stay in ONE pipeline.
@@ -666,6 +676,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // holder, and the photograph's own reading is authoritative over them.
   const bridgeImage = userImage ?? storedImage;
   if (bridgeImage && /certificate|certified|certification/i.test(q.query)) {
+    mark("Reading the nameplate photograph");
     const np = await extractNameplate((env as any).AI, MODELS.member, bridgeImage);
     if (np?.manufacturer) {
       const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query), true);
@@ -1230,6 +1241,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   if (/certificate|certified|certification/i.test(q.query) && env.DB) {
     try {
       const imageTurn = typeof withImage === "string";
+      if (imageTurn) mark("Reading the photograph to identify the instrument");
       const probeMessages: any[] = [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}\n\n${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query — never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : ""}\n\n${q.query}`.replace("\n\n\n\n", "\n\n") }];
       if (imageTurn) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
       const probe = await (env as any).AI.run(model, {
@@ -1240,6 +1252,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       const probeText = typeof probe?.response === "string" ? probe.response : probe?.choices?.[0]?.message?.content ?? "";
       const call = parseToolCall(probeText);
       if (call) {
+        mark(`Searching the certificate register for “${String(call.args?.query ?? "")}”`);
         const result = await runTool(env.DB, call);
         if (result) {
           messages.push({ role: "system", content: toolNote(result) });
@@ -1292,8 +1305,12 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       const sse = new ReadableStream({
         async start(controller) {
           const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-          // the reading arrives first: the interpretation that steered
-          // retrieval, before a single token of the answer
+          // the agent trace arrives first: every questioning round the
+          // assistant ran — the photograph read, the register search, any
+          // re-answer — so the user watched what happened, not a spinner
+          for (const step of agentSteps) {
+            try { send({ type: "agent", step }); } catch { /* never block the answer */ }
+          }
           for (const t of pendingTools) {
             try { send({ type: "tool", name: t.name, query: t.query }); } catch { /* never block the answer */ }
           }
@@ -1522,6 +1539,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // that exact signature; the retry carries a sterner ground instruction.
   if (withImage && register?.rows?.length && answer.includes(refusalAnswer())) {
     console.log("blind-answer: the register note carried rows but the answer refused — regenerating once");
+    mark("Re-answering from the register results");
     const regen = await generateOnce(env, model, [
       ...messages.slice(0, -1),
       { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows — number, holder, model, status, and every document link — as the answer. Do not claim that nothing was provided." },

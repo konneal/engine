@@ -2310,6 +2310,11 @@ async function handleAsk(env, ctx, req, tier, key) {
   if (await env.CACHE.get("sys:generation") === "off") {
     return err(503, "generation_disabled", "Generation is temporarily paused; search remains available.");
   }
+  const agentSteps = [];
+  const mark = (step) => {
+    agentSteps.push(step);
+    console.log(`agent-step: ${step}`);
+  };
   const service = env.INTERNAL_SERVICE;
   const fedAuth = {
     cookie: req.headers.get("cookie") ?? "",
@@ -2488,6 +2493,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   let register = await searchRegister(env.DB, q.query);
   const bridgeImage = userImage ?? storedImage;
   if (bridgeImage && /certificate|certified|certification/i.test(q.query)) {
+    mark("Reading the nameplate photograph");
     const np = await extractNameplate(env.AI, MODELS.member, bridgeImage);
     if (np?.manufacturer) {
       const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query), true);
@@ -2878,6 +2884,7 @@ Answer account questions from these records ONLY: name the record when you use i
   if (/certificate|certified|certification/i.test(q.query) && env.DB) {
     try {
       const imageTurn = typeof withImage === "string";
+      if (imageTurn) mark("Reading the photograph to identify the instrument");
       const probeMessages = [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}
 
 ${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query \u2014 never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : ""}
@@ -2892,6 +2899,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
       const probeText = typeof probe?.response === "string" ? probe.response : probe?.choices?.[0]?.message?.content ?? "";
       const call = parseToolCall(probeText);
       if (call) {
+        mark(`Searching the certificate register for \u201C${String(call.args?.query ?? "")}\u201D`);
         const result = await runTool(env.DB, call);
         if (result) {
           messages.push({ role: "system", content: toolNote(result) });
@@ -2926,6 +2934,12 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
           const send = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}
 
 `));
+          for (const step of agentSteps) {
+            try {
+              send({ type: "agent", step });
+            } catch {
+            }
+          }
           for (const t of pendingTools) {
             try {
               send({ type: "tool", name: t.name, query: t.query });
@@ -3085,6 +3099,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
   completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
   if (withImage && register?.rows?.length && answer.includes(refusalAnswer())) {
     console.log("blind-answer: the register note carried rows but the answer refused \u2014 regenerating once");
+    mark("Re-answering from the register results");
     const regen = await generateOnce(env, model, [
       ...messages.slice(0, -1),
       { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
