@@ -1,4 +1,13 @@
 import {
+  TOOL_DECLARATION,
+  contractV2,
+  parseToolCall,
+  resolveBlocks,
+  runTool,
+  tableRetyped,
+  toolNote
+} from "./chunk-GCK6DW7E.js";
+import {
   NO_CONTEXT,
   answerQuality,
   appliedContext,
@@ -362,71 +371,6 @@ function checkQuoteAnchors(answer, passages) {
   return { total, violations };
 }
 var ANCHOR_CORRECTION_NOTE = "Correction notice: your draft quoted text that does not appear verbatim in the provided passages. Rewrite the answer \u2014 every quoted phrase must be an exact copy from a passage, or cite the clause without quoting.";
-
-// workers/worker_public/src/refs.ts
-var REF = /\[\[(u:[A-Za-z0-9_-]+)\]\]/g;
-function availableUnitIds(hits) {
-  const ids = /* @__PURE__ */ new Set();
-  for (const h of hits) {
-    const u = h.metadata?.unit_id;
-    if (u) ids.add(u);
-  }
-  return ids;
-}
-function parseRefs(text) {
-  return [...text.matchAll(REF)].map((m) => m[1]);
-}
-function sanitizeRefs(text, available) {
-  const dropped = [];
-  const out = text.replace(REF, (full, id) => {
-    if (available.has(id)) return full;
-    dropped.push(id);
-    return "";
-  });
-  return { text: out, dropped };
-}
-async function resolveBlocks(db, refs) {
-  if (!refs.length) return [];
-  const uniq = [...new Set(refs)].slice(0, 12);
-  const blocks = [];
-  for (let i = 0; i < uniq.length; i += 20) {
-    const batch = uniq.slice(i, i + 20);
-    const placeholders = batch.map((_, n) => `?${n + 1}`).join(",");
-    try {
-      const res = await db.prepare(`SELECT unit_id, type, docidentifier, edition, payload FROM unit_payloads WHERE unit_id IN (${placeholders})`).bind(...batch).all();
-      for (const r of res.results) {
-        let payload = {};
-        try {
-          payload = JSON.parse(String(r.payload));
-        } catch {
-          continue;
-        }
-        blocks.push({
-          unit_id: String(r.unit_id),
-          type: String(r.type),
-          docidentifier: String(r.docidentifier ?? ""),
-          edition: r.edition ? String(r.edition) : void 0,
-          payload
-        });
-      }
-    } catch (e) {
-      console.log("resolveBlocks failed:", String(e).slice(0, 150));
-    }
-  }
-  return blocks;
-}
-async function contractV2(db, answer, usedHits) {
-  const available = availableUnitIds(usedHits);
-  const { text, dropped } = sanitizeRefs(answer, available);
-  if (dropped.length) console.log("refs: dropped", dropped.length, "invalid (not in passages)");
-  const refs = parseRefs(text);
-  const blocks = await resolveBlocks(db, refs);
-  return { text, blocks, dropped };
-}
-function tableRetyped(text, availableTable) {
-  if (!availableTable) return false;
-  return /(^|\n)\s*\|[^\n]+\|\s*(\n\s*\|[-: |]+\|\s*)?(\n|$)/.test(text) && (text.match(/\|/g) ?? []).length >= 6;
-}
 
 // workers/worker_public/src/completion.ts
 async function completeTables(db, answer, used) {
@@ -1873,55 +1817,6 @@ function exactCacheKey(indexVersion, gen, ns, queryHash) {
   return `a:${indexVersion}:g${gen}:${ns}:${queryHash}`;
 }
 
-// workers/worker_public/src/tools.ts
-function parseToolCall(text) {
-  const m = /^TOOL\s+([a-z_.]+)\s*(\{[^\n}]*\})?/m.exec(String(text ?? ""));
-  if (!m) return null;
-  let args = {};
-  if (m[2]) {
-    try {
-      args = JSON.parse(m[2]);
-    } catch {
-      return null;
-    }
-  } else if (/^TOOL\s+[a-z_.]+\s*\{/m.test(String(text ?? ""))) {
-    return null;
-  }
-  return { name: m[1].toLowerCase(), args };
-}
-var certificatesSearch = {
-  name: "certificates.search",
-  description: "Search the certificate register (a snapshot) by holder name, model designation, or a printed certificate number. Returns the matching rows \u2014 number, holder, model, issue year, status, and document links where on file \u2014 or the exact no-match statement for the string asked.",
-  params: [{ key: "query", required: true, description: "the holder, model, or printed certificate number to look up" }],
-  audiences: ["agent", "mcp"],
-  handler: async (db, args) => {
-    const query = String(args?.query ?? "").trim().slice(0, 160);
-    if (!query) return null;
-    const { searchRegister: searchRegister2, registerNote: registerNote2, certificateLinks: certificateLinks2 } = await import("./certificates-CO7KX2S2.js");
-    const reg = await searchRegister2(db, query, true);
-    const output = reg?.rows?.length ? [registerNote2(reg.rows), certificateLinks2(reg.rows)].filter(Boolean).join("\n") : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
-    return { name: "certificates.search", query, output };
-  }
-};
-var TOOLS_REGISTRY = [certificatesSearch];
-var TOOL_DECLARATION = [
-  "You may use one tool before answering, by writing a single line:",
-  ...TOOLS_REGISTRY.filter((t) => t.audiences.includes("agent")).map((t) => {
-    const shape = `{${t.params.map((p) => `"${p.key}": "<${p.description}>"`).join(", ")}}`;
-    return `TOOL ${t.name} ${shape}`;
-  }),
-  "The worker runs it and returns the result attributed \u2014 phrase the tool's result as what it returned, with the searched string visible in your answer. Use a tool when the question turns on what it answers (including from a photograph). If you do not need it, answer directly without the line."
-].join("\n");
-async function runTool(db, call) {
-  const spec = TOOLS_REGISTRY.find((t) => t.name === call.name && t.audiences.includes("agent"));
-  if (!spec) return null;
-  return spec.handler(db, call.args ?? {});
-}
-function toolNote(r) {
-  return `The ${r.name} tool returned, for the query "${r.query}":
-${r.output}`;
-}
-
 // workers/worker_public/src/operations.ts
 function isOperationIntent(query) {
   return /\b(operations?|endpoints?)\b/i.test(query);
@@ -2916,7 +2811,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
       const call = parseToolCall(probeText);
       if (call) {
         mark(`Searching the certificate register for \u201C${String(call.args?.query ?? "")}\u201D`);
-        const result = await runTool(env.DB, call);
+        const result = await runTool(env, call);
         if (result) {
           messages.push({ role: "system", content: toolNote(result) });
           pendingTools.push(result);
@@ -3179,6 +3074,5 @@ export {
   bindModelNode,
   modelGroundingBlock,
   scoreJudge,
-  TOOLS_REGISTRY,
   handleAsk
 };
