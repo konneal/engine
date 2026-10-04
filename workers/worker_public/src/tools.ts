@@ -64,9 +64,9 @@ const certificatesSearch: ToolSpec = {
   },
 };
 
-import { unitsGet, graphCites, docsSection, glossaryLookup, documentsFamily } from "./tools-content.ts";
+import { unitsGet, graphCites, docsSection, glossaryLookup, documentsFamily, licensedSection } from "./tools-content.ts";
 
-export const TOOLS_REGISTRY: ToolSpec[] = [certificatesSearch, unitsGet, graphCites, docsSection, glossaryLookup, documentsFamily];
+export const TOOLS_REGISTRY: ToolSpec[] = [certificatesSearch, unitsGet, graphCites, docsSection, glossaryLookup, documentsFamily, licensedSection];
 
 /** The agent loop's protocol declaration, GENERATED from the registry —
  *  the model's tool vocabulary is always the registry's, never a

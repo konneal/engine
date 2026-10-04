@@ -10,6 +10,8 @@ import { resolveBlocks } from "./refs.ts";
 import { portIndex, portModelRunner, hasLane } from "./env.ts";
 import { embed } from "./ai.ts";
 import { THRESHOLDS } from "./config.ts";
+import { standardKeysFrom } from "./requestScope.ts";
+import { licenseBoundaryRefusal, licensedEntryForDocNumber } from "./modelplane.ts";
 
 const slug = (docidentifier: string) =>
   docidentifier
@@ -131,6 +133,86 @@ export const documentsFamily: ToolSpec = {
         return { name: "documents.family", query: family, output: `No editions are registered for the family ${family}. State this plainly.` };
       }
       return { name: "documents.family", query: family, output: lines.join("\n") };
+    } catch {
+      return null;
+    }
+  },
+};
+
+
+// The licensed library (the owner's 2026-10-04 direction): "return
+// clause X of document Y" for licensed standards, behind the SAME
+// entitlement predicate the ask path applies — the caller declares
+// keys, the deployment's declared whitelist validates them (a forged
+// key can never widen scope), and the unentitled caller receives the
+// boundary refusal: the standard's title and edition, the declare
+// pointer, never a word of the text. The entitled caller gets the
+// model plane's typed nodes for the clause — the computing form.
+export const licensedSection: ToolSpec = {
+  name: "licensed.section",
+  description:
+    "Fetch one clause of a licensed standard's typed model content — requirements, condition sets and parameters as structured data — behind the caller's license entitlement keys. An unentitled caller receives the license boundary: the standard's title and edition and the declare flow, never its text.",
+  params: [
+    { key: "doc", required: true, description: "the standard's document number, e.g. 60068-2-30 or 61000-4-2" },
+    { key: "clause", required: true, description: "the clause number inside the standard, e.g. 5 or 9" },
+    { key: "licensed_standards", required: true, description: 'the caller\'s license entitlement keys, e.g. ["std:iec-60068-2-30"] — validated against the licenses this deployment declares; keys it does not know drop' },
+  ],
+  audiences: ["mcp"],
+  handler: async (env, args) => {
+    const doc = String(args?.doc ?? "").trim();
+    const clause = String(args?.clause ?? "").trim();
+    if (doc.length < 3 || !clause) return null;
+    // "IEC 60068-2-30" / "ISO/IEC 17025" → the bare doc number the
+    // licensed registry keys on
+    const docNumber = doc.replace(/^(?:ISO\/IEC|ISO|IEC)\s+/i, "").trim();
+    const entry = licensedEntryForDocNumber(docNumber);
+    if (!entry) {
+      return {
+        name: "licensed.section",
+        query: `${doc} §${clause}`,
+        output: `"${doc}" is not among the licensed standards this deployment keys. For clauses of the public corpus use the docs.section tool instead. State this plainly.`,
+      };
+    }
+    const keys = standardKeysFrom({ licensed_standards: args?.licensed_standards });
+    if (!keys.has(entry.key)) {
+      const refusal = licenseBoundaryRefusal(docNumber, keys);
+      return {
+        name: "licensed.section",
+        query: `${doc} §${clause}`,
+        output: refusal ?? "License boundary — the caller's entitlement set does not cover this standard's text.",
+      };
+    }
+    try {
+      const rows = await env.DB.prepare(
+        "SELECT node_id, kind, name, clause_ref, content FROM model_nodes WHERE standard = ?1 AND clause_ref = ?2 ORDER BY node_id LIMIT 20",
+      )
+        .bind(entry.package, clause)
+        .all();
+      const nodes = ((rows.results ?? []) as { node_id: string; kind: string; name: string | null; clause_ref: string; content: string }[]);
+      if (!nodes.length) {
+        const c = await env.DB.prepare(
+          "SELECT DISTINCT clause_ref FROM model_nodes WHERE standard = ?1 ORDER BY clause_ref",
+        )
+          .bind(entry.package)
+          .all();
+        const clauses = ((c.results ?? []) as { clause_ref: string }[]).map((r) => r.clause_ref).filter(Boolean).join(", ");
+        return {
+          name: "licensed.section",
+          query: `${doc} §${clause}`,
+          output: `No typed nodes are indexed for ${doc} §${clause}.${clauses ? ` The clauses with typed nodes: ${clauses}.` : ""} State this plainly.`,
+        };
+      }
+      return {
+        name: "licensed.section",
+        query: `${doc} §${clause}`,
+        output: JSON.stringify(
+          nodes.map((n) => {
+            let content: unknown = n.content;
+            try { content = JSON.parse(n.content); } catch { /* verbatim when not JSON */ }
+            return { node_id: n.node_id, kind: n.kind, name: n.name, clause: n.clause_ref, content };
+          }),
+        ),
+      };
     } catch {
       return null;
     }
