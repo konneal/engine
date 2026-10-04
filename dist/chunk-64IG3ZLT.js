@@ -755,7 +755,7 @@ var verdictEvaluate = {
   params: [
     { key: "node_id", required: true, description: "the model-plane node id, e.g. /req/metrological/repeatability (node ids appear in answers' verdict blocks)" },
     { key: "question", required: true, description: "the statement carrying the quantities, e.g. 'is mpe 0.02 with n_lc 3000 within the limit?'" },
-    { key: "standard", required: false, description: "the package id when the node id indexes under several standards, e.g. oiml-r60-lml" }
+    { key: "standard", required: false, description: "the package id when the node id indexes under several standards, as the ambiguity message names it" }
   ],
   audiences: ["mcp"],
   handler: async (env, args) => {

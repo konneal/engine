@@ -4,12 +4,12 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-3XKLBXAR.js";
+} from "../../chunk-2JC7GXRV.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
   modelGroundingBlock
-} from "../../chunk-XVZEB6JP.js";
+} from "../../chunk-64IG3ZLT.js";
 import {
   handleSearch
 } from "../../chunk-TJTEBS4S.js";
@@ -973,12 +973,12 @@ async function handleMcp(env, ctx, req, tier, key) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-ME4USPIX.js");
+    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-O7OGW54R.js");
     if (TOOLS_REGISTRY2.some((t) => t.name === name && t.audiences.includes("mcp"))) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       return r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     }
-    const res = name === "ask" ? await (await import("../../ask-X3O7SPXU.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-G76DK4AF.js")).handleSearch(env, ctx, inner, tier, key);
+    const res = name === "ask" ? await (await import("../../ask-HCKUKBPB.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-G76DK4AF.js")).handleSearch(env, ctx, inner, tier, key);
     return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
