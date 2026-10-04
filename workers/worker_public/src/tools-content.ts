@@ -339,6 +339,79 @@ export const conditionsCheck: ToolSpec = {
   },
 };
 
+
+// The bibliography record (the owner's 2026-10-04 direction): the full
+// registry entry for one citation label — what documents exist under
+// it, their derived status, the successor/amends/variant edges, and
+// what it cites and is cited by. graph.cites names the labels; this is
+// the record behind the label, for agents that cite properly.
+export const bibEntry: ToolSpec = {
+  name: "bib.entry",
+  description:
+    "Fetch the bibliographic registry record for a citation label: every edition document under it with derived status (in-force/superseded, the ACTIVE flag), the relation edges (successor, amends, variant), and its outgoing citations. Use after graph.cites to resolve a cited label to its own record.",
+  params: [
+    { key: "label", required: true, description: "the citation label exactly as graph.cites returns it, e.g. ISO 8601" },
+  ],
+  audiences: ["mcp"],
+  handler: async (env, args) => {
+    const label = String(args?.label ?? "").trim();
+    if (label.length < 2) return null;
+    try {
+      const rows = await env.DB.prepare(
+        "SELECT id, kind, label FROM graph_nodes WHERE label = ?1 COLLATE NOCASE LIMIT 5",
+      )
+        .bind(label)
+        .all();
+      const nodes = ((rows.results ?? []) as { id: string; kind: string; label: string }[]);
+      if (!nodes.length) {
+        return { name: "bib.entry", query: label, output: `No registry node carries the label "${label}". State this plainly.` };
+      }
+      const out: unknown[] = [];
+      for (const n of nodes) {
+        const entry: Record<string, unknown> = { label: n.label, kind: n.kind };
+        if (n.kind === "doc") {
+          const d = await env.DB.prepare(
+            "SELECT docidentifier, family, part, edition, derived_status, active, superseded_by, title FROM documents WHERE canonical_id = ?1",
+          )
+            .bind(n.id)
+            .all();
+          const doc = (d.results ?? [])[0] as Record<string, unknown> | undefined;
+          if (doc) {
+            entry.document = {
+              docidentifier: doc.docidentifier,
+              family: doc.family,
+              part: doc.part,
+              edition: doc.edition,
+              status: doc.derived_status,
+              active: !!doc.active,
+              superseded_by: doc.superseded_by,
+              title: doc.title,
+            };
+          }
+        }
+        const rel = await env.DB.prepare(
+          "SELECT e.kind, n.label AS target FROM graph_edges e JOIN graph_nodes n ON e.dst = n.id WHERE e.src = ?1 LIMIT 25",
+        )
+          .bind(n.id)
+          .all();
+        const relations = ((rel.results ?? []) as { kind: string; target: string }[]);
+        if (relations.length) entry.relations = relations;
+        const cites = await env.DB.prepare(
+          "SELECT n.label AS cited FROM graph_edges e JOIN graph_nodes n ON e.dst = n.id WHERE e.src = ?1 AND e.kind = 'cites' LIMIT 40",
+        )
+          .bind(n.id)
+          .all();
+        const cited = ((cites.results ?? []) as { cited: string }[]).map((r) => r.cited).filter(Boolean);
+        if (cited.length) entry.cites = cited;
+        out.push(entry);
+      }
+      return { name: "bib.entry", query: label, output: JSON.stringify(out) };
+    } catch {
+      return null;
+    }
+  },
+};
+
 export const glossaryLookup: ToolSpec = {
   name: "glossary.lookup",
   description:

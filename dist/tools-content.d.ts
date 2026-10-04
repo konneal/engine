@@ -6,4 +6,5 @@ export declare const documentsFamily: ToolSpec;
 export declare const licensedSection: ToolSpec;
 export declare const verdictEvaluate: ToolSpec;
 export declare const conditionsCheck: ToolSpec;
+export declare const bibEntry: ToolSpec;
 export declare const glossaryLookup: ToolSpec;
