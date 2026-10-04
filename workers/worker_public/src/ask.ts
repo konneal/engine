@@ -1329,6 +1329,32 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           }
           const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length);
           send({ type: "quota", quota: { ...quota, ...tq } });
+          // the blind-answer guard ON THE STREAM PATH (the JSON path has
+          // had it since 0.2.80): an image rode the turn, the register
+          // note carries rows, and the streamed text is the no-information
+          // refusal — the multimodal call answered around the photograph.
+          // One bounded regeneration: the retry sentinel tells the client
+          // to clear the buffer, the agent step says why, and the fresh
+          // tokens stream as the answer.
+          if (withImage && register?.rows?.length && full.includes(refusalAnswer())) {
+            console.log("blind-answer(stream): regenerating once");
+            mark("Re-answering from the register results");
+            send({ type: "retry" });
+            const regen = await generateStream(env, model, [
+              ...messages.slice(0, -1),
+              { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows — number, holder, model, status, and every document link — as the answer. Do not claim that nothing was provided." },
+              messages[messages.length - 1],
+            ], effort);
+            if (regen) {
+              full = "";
+              try {
+                for await (const tok of sseTokens(regen)) {
+                  full += tok;
+                  send({ type: "token", v: tok });
+                }
+              } catch { /* deliver what we have */ }
+            }
+          }
           const canonical0 = canonicalRefusal(full);
           // answer contract v2: validate [[u:]] refs, resolve typed blocks
           const c2 = canonical0.includes(refusalAnswer())
