@@ -551,6 +551,10 @@ const INFRA_ROUTES: Route[] = [
   { method: "GET", pattern: "/api/", handler: serveIndexPage },
   { method: "GET", pattern: "/api/openapi.json", handler: openapiCatalogRoute },
   { method: "GET", pattern: "/index.html", handler: serveIndexPage },
+  // /mcp is both the docs page (GET) and the JSON-RPC endpoint (POST);
+  // the worker must run first there or the assets router 405s the POST
+  // against the page asset before the route table ever sees it.
+  { method: "GET", pattern: "/mcp", handler: serveIndexPage },
   { method: "GET", pattern: "/assets/*", handler: unitAssetRoute },
   { method: "GET", pattern: "/docs/*", handler: docsRoute },
 ];
