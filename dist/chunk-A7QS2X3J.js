@@ -78,7 +78,7 @@ var slug = (docidentifier) => docidentifier.toLowerCase().replace(/[^a-z0-9]+/g,
 var unitsGet = {
   name: "units.get",
   description: "Fetch typed Recommendation content \u2014 a table, formula or figure as structured data (columns, rows, MathML, caption), by its unit id. The machine-consumable form of a Recommendation's content, for computing with rather than reading.",
-  params: [{ key: "unit_id", required: true, description: "the unit id, e.g. u:table-1 or u:form-3 (ids appear in answers' [[u:\u2026]] references)" }],
+  params: [{ key: "unit_id", required: true, description: "the unit id exactly as an answer's [[u:\u2026]] reference spells it" }],
   audiences: ["mcp"],
   handler: async (env, args) => {
     const unit_id = String(args?.unit_id ?? "").trim().replace(/^\[?\[?u:/, "u:").replace(/]?\]?$/, "");
@@ -156,6 +156,30 @@ var docsSection = {
     }
   }
 };
+var documentsFamily = {
+  name: "documents.family",
+  description: "Look up the publication registry for a family: every edition with its derived status (in-force/superseded), which edition is ACTIVE (terminal of the successor chain), and supersession links. Use for current/latest-edition and edition-history questions.",
+  params: [{ key: "family", required: true, description: "the family key, e.g. R-60 (series letter and number)" }],
+  audiences: ["mcp"],
+  handler: async (env, args) => {
+    const family = String(args?.family ?? "").trim().toUpperCase();
+    if (!/^[A-Z]-\d{1,3}$/.test(family)) return null;
+    try {
+      const rows = await env.DB.prepare(
+        "SELECT d.docidentifier, d.derived_status, d.active, s.docidentifier AS succ FROM documents d LEFT JOIN documents s ON d.superseded_by = s.canonical_id WHERE d.family = ?1 ORDER BY d.part, d.edition"
+      ).bind(family).all();
+      const lines = (rows.results ?? []).map(
+        (r) => `${r.docidentifier} \u2014 ${r.derived_status}${r.active ? " [ACTIVE]" : ""}${r.succ ? ` \u2192 superseded by ${r.succ}` : ""}`
+      );
+      if (!lines.length) {
+        return { name: "documents.family", query: family, output: `No editions are registered for the family ${family}. State this plainly.` };
+      }
+      return { name: "documents.family", query: family, output: lines.join("\n") };
+    } catch {
+      return null;
+    }
+  }
+};
 var glossaryLookup = {
   name: "glossary.lookup",
   description: "Look up a defined term in the terminology datasets \u2014 the concept's definition and its defining publication. Bind everyday words to the defined term before interpreting a question.",
@@ -224,7 +248,7 @@ var certificatesSearch = {
     return { name: "certificates.search", query, output };
   }
 };
-var TOOLS_REGISTRY = [certificatesSearch, unitsGet, graphCites, docsSection, glossaryLookup];
+var TOOLS_REGISTRY = [certificatesSearch, unitsGet, graphCites, docsSection, glossaryLookup, documentsFamily];
 var TOOL_DECLARATION = [
   "You may use one tool before answering, by writing a single line:",
   ...TOOLS_REGISTRY.filter((t) => t.audiences.includes("agent")).map((t) => {
