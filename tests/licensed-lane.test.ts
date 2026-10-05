@@ -70,3 +70,42 @@ test("the lane never fires without the option", () => {
   const silent = ctx(env);
   assert.equal(licensedLane.when!(silent), false);
 });
+
+// ── the seat ──────────────────────────────────────────────────────────
+
+import { licensedCover } from "../workers/worker_public/src/stages/licensedCover.ts";
+import type { Hit } from "../workers/shared/chunk.ts";
+
+test("the cover seats the lane's best unit only when the cut dropped them all", async () => {
+  const UNIT = { id: "mlic1", score: 0, metadata: { standard: "iec-60068-2-30", docidentifier: "IEC 60068-2-30:2005", chunk_text: "the cyclic test procedure" } };
+  const env = {
+    VECTORIZE: {
+      getByIds(ids: string[]) {
+        return Promise.resolve(ids.map((id) => (id === "mlic1" ? UNIT : null)).filter(Boolean));
+      },
+    },
+    DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }) }) }) },
+  };
+  const ctx0 = {
+    env, query: "damp heat", rq: "damp heat", folded: "damp heat",
+    u: null, filters: null, filter: null, vector: [1, 0.5],
+    lexicalHits: [], matches: [], hits: [], glossary: [], notes: [],
+    finalHits: [{ id: "pub-1", score: 0.6, metadata: { docidentifier: "OIML D 11", corpus: "dirty" }, text: "restatement" } as unknown as Hit],
+    opts: { licensedDocNumbers: ["iec-60068-2-30"] },
+    lane: { "licensed-ids": Promise.resolve(["mlic1"]) },
+  } as any;
+
+  const seated = { ...ctx0 };
+  await licensedCover.run!(seated);
+  assert.equal(seated.finalHits.length, 2, "the dropped unit takes one seat");
+  assert.match(String(seated.finalHits[1].metadata.docidentifier), /60068-2-30/);
+
+  const already = {
+    ...ctx0,
+    finalHits: [{ id: "pub-1", score: 0.6, metadata: { docidentifier: "OIML D 11" }, text: "x" } as unknown as Hit,
+      { id: "mlic1", score: 0.5, metadata: UNIT.metadata, text: "the cyclic test procedure" } as unknown as Hit],
+  };
+  await licensedCover.run!(already);
+  assert.equal(already.finalHits.length, 2, "a present unit means no seat");
+}
+);

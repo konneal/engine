@@ -4,18 +4,20 @@
 // saved), the doc/edition-filtered query with its guessed-pin drop and
 // sparse-filter widen, and the plain unfiltered query.
 import { LIMITS } from "../config.ts";
-import { toVectorizeFilter } from "../selfquery.ts";
 import type { Stage } from "./types.ts";
 
 export const dense: Stage = {
   name: "dense",
   run: async (c) => {
-    const { env, filter, filters, vector, opts, rq, folded } = c;
+    const { env, filters, vector, opts, rq, folded } = c;
+    // the index's metadata filtering is DEAD on this platform (measured
+    // 2026-10-05: filters return empty for values proven present), so
+    // the scope never rides the query — the matches filter IN CODE and
+    // the sparse widen still covers thin scopes
     const q: any = { topK: LIMITS.retrieveK, returnMetadata: "all" };
-    if (filter) q.filter = filter;
     const optimistic = opts.optimisticHits ?? [];
     const sameLane = rq === folded; // optimistic vector === this lane's vector
-    if (!filter && sameLane && optimistic.length) {
+    if (!filters?.doc_number && sameLane && optimistic.length) {
       // Option C fast path: the unfiltered dense query already ran
       // concurrently with understanding — same vector, same topK, no
       // filter. Reusing it skips one serial Vectorize round-trip with a
@@ -31,8 +33,13 @@ export const dense: Stage = {
       // REPLACE an identical query, never dilute a better one.
       return;
     }
-    if (filter) {
-      let matches: any[] = (await env.VECTORIZE.query(vector, q)).matches ?? [];
+    if (filters?.doc_number) {
+      const allMatches: any[] = (await env.VECTORIZE.query(vector, q)).matches ?? [];
+      let matches: any[] = allMatches;
+      const before = matches.length;
+      matches = matches.filter((m) => String(m.metadata?.doc_number ?? "") === filters.doc_number);
+      if (filters.edition) matches = matches.filter((m) => !m.metadata?.edition || String(m.metadata.edition) === filters.edition);
+      console.log("dense scope (in code):", before, "→", matches.length, "in doc", filters.doc_number, filters.edition ? `@${filters.edition}` : "");
       // an edition pin corroborated by (almost) nothing means the pin
       // was a guess — understanding emits editions for families it
       // mixes up (observed: R 76 pinned @2021, an R 60 year; the corpus
@@ -42,15 +49,13 @@ export const dense: Stage = {
       // the doc-only filter and let family-relative steering rank
       // editions downstream. A pin the user actually asked for
       // survives — its edition exists in the corpus.
+      // the same guess-drop, in code: a pinned edition that starved the
+      // scoped set drops to the doc-only scope
       if (filters && filters.edition && matches.length < 3) {
-        const docOnly = await env.VECTORIZE.query(vector, {
-          topK: LIMITS.retrieveK,
-          returnMetadata: "all",
-          filter: toVectorizeFilter({ doc_number: filters.doc_number }),
-        });
-        if ((docOnly.matches ?? []).length > matches.length) {
-          console.log("edition pin dropped:", filters.doc_number, "@", filters.edition, "→", docOnly.matches?.length ?? 0, "doc-scoped hits (edition not in corpus)");
-          matches = docOnly.matches ?? [];
+        const docOnly = allMatches.filter((m) => String(m.metadata?.doc_number ?? "") === filters.doc_number);
+        if (docOnly.length > matches.length) {
+          console.log("edition pin dropped:", filters.doc_number, "@", filters.edition, "→", docOnly.length, "doc-scoped hits (edition not in corpus)");
+          matches = docOnly;
           filters.edition = undefined;
         }
       }

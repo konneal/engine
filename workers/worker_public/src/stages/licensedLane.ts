@@ -44,13 +44,18 @@ export const licensedLane: Stage = {
     const matches = await portIndex(c.env, "public").getByIds(ids);
     const seenIds = new Set(c.matches.map((m: any) => m.id));
     let merged = 0;
+    const mergedIds: string[] = [];
     for (const m of matches) {
       if (m.metadata && !seenIds.has(m.id)) {
         c.matches.push({ id: m.id, score: THRESHOLDS.licensedLaneScore, metadata: m.metadata });
         seenIds.add(m.id);
         merged++;
+        mergedIds.push(m.id);
       }
     }
+    // the cover stage's stash: the licensed units' ids, so the seat can
+    // recover a unit the rerank cut dropped
+    c.lane["licensed-ids"] = Promise.resolve(mergedIds);
     console.log("licensed lane:", ids.length, "units,", matches.length, "vectors,", merged, "merged");
   },
 };

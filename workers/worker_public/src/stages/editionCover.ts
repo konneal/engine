@@ -7,7 +7,8 @@
 // left every 2021 chunk out). One registry read per query; at most
 // `maxDocs` documents covered; additive — any failure skips.
 import { THRESHOLDS } from "../config.ts";
-import { toHits, type Stage } from "./types.ts";
+import type { Stage } from "./types.ts";
+import { rowsToHits } from "../lexical.ts";
 
 const maxDocs = 2;
 
@@ -43,12 +44,17 @@ export const editionCover: Stage = {
     let added = 0;
     for (const w of want.slice(0, maxDocs)) {
       try {
-        const q = await c.env.VECTORIZE.query(c.vector, {
-          topK: 3,
-          returnMetadata: "all",
-          filter: { $and: [{ docidentifier: { $eq: w.di } }, { edition: { $eq: w.edition } }] },
-        });
-        const hits = toHits((q as any).matches ?? []).map((h) => ({ ...h, score: top * THRESHOLDS.editionCoverDiscount }));
+        // identity resolution, not index filtering: the index's metadata
+        // filters are dead on this platform (measured 2026-10-05 — the
+        // cover's $and docidentifier/edition query returned empty for
+        // its whole life), but the D1 chunks table IS the corpus — the
+        // current edition's chunks read directly, text and all
+        const rows = await c.env.DB.prepare(
+          "SELECT id, doc_id, docidentifier, doctype, doc_number, edition, language, clause_anchor, clause_title, status, superseded_by, corpus, tier, text FROM chunks WHERE docidentifier = ?1 AND edition = ?2 LIMIT 3",
+        )
+          .bind(w.di, w.edition)
+          .all();
+        const hits = rowsToHits(rows.results ?? []).map((h) => ({ ...h, score: top * THRESHOLDS.editionCoverDiscount }));
         c.hits.push(...hits);
         added += hits.length;
         console.log("edition cover:", w.di, w.edition, `+${hits.length}`);

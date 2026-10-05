@@ -53,7 +53,7 @@ function rowMeta(r: any): ChunkMeta {
   };
 }
 
-function rowsToHits(rows: any[]): Hit[] {
+export function rowsToHits(rows: any[]): Hit[] {
   return rows.map((r: any) => {
     // rank is bm25 (lower better) → convert to positive score that RRF can ignore
     // (RRF uses rank position, not score). score kept for logging only.

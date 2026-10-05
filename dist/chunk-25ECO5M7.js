@@ -22318,27 +22318,27 @@ async function runStages(stages, c) {
 var dense = {
   name: "dense",
   run: async (c) => {
-    const { env, filter, filters, vector, opts, rq, folded } = c;
+    const { env, filters, vector, opts, rq, folded } = c;
     const q = { topK: LIMITS.retrieveK, returnMetadata: "all" };
-    if (filter) q.filter = filter;
     const optimistic = opts.optimisticHits ?? [];
     const sameLane = rq === folded;
-    if (!filter && sameLane && optimistic.length) {
+    if (!filters?.doc_number && sameLane && optimistic.length) {
       c.matches = optimistic.map((h) => ({ id: h.id, score: h.score, metadata: h.metadata }));
       console.log("optimistic lane: reused", c.matches.length, "dense hits (no re-query)");
       return;
     }
-    if (filter) {
-      let matches = (await env.VECTORIZE.query(vector, q)).matches ?? [];
+    if (filters?.doc_number) {
+      const allMatches = (await env.VECTORIZE.query(vector, q)).matches ?? [];
+      let matches = allMatches;
+      const before = matches.length;
+      matches = matches.filter((m) => String(m.metadata?.doc_number ?? "") === filters.doc_number);
+      if (filters.edition) matches = matches.filter((m) => !m.metadata?.edition || String(m.metadata.edition) === filters.edition);
+      console.log("dense scope (in code):", before, "\u2192", matches.length, "in doc", filters.doc_number, filters.edition ? `@${filters.edition}` : "");
       if (filters && filters.edition && matches.length < 3) {
-        const docOnly = await env.VECTORIZE.query(vector, {
-          topK: LIMITS.retrieveK,
-          returnMetadata: "all",
-          filter: toVectorizeFilter({ doc_number: filters.doc_number })
-        });
-        if ((docOnly.matches ?? []).length > matches.length) {
-          console.log("edition pin dropped:", filters.doc_number, "@", filters.edition, "\u2192", docOnly.matches?.length ?? 0, "doc-scoped hits (edition not in corpus)");
-          matches = docOnly.matches ?? [];
+        const docOnly = allMatches.filter((m) => String(m.metadata?.doc_number ?? "") === filters.doc_number);
+        if (docOnly.length > matches.length) {
+          console.log("edition pin dropped:", filters.doc_number, "@", filters.edition, "\u2192", docOnly.length, "doc-scoped hits (edition not in corpus)");
+          matches = docOnly;
           filters.edition = void 0;
         }
       }
@@ -22580,14 +22580,37 @@ var licensedLane = {
     const matches = await portIndex(c.env, "public").getByIds(ids);
     const seenIds = new Set(c.matches.map((m) => m.id));
     let merged = 0;
+    const mergedIds = [];
     for (const m of matches) {
       if (m.metadata && !seenIds.has(m.id)) {
         c.matches.push({ id: m.id, score: THRESHOLDS.licensedLaneScore, metadata: m.metadata });
         seenIds.add(m.id);
         merged++;
+        mergedIds.push(m.id);
       }
     }
+    c.lane["licensed-ids"] = Promise.resolve(mergedIds);
     console.log("licensed lane:", ids.length, "units,", matches.length, "vectors,", merged, "merged");
+  }
+};
+
+// workers/worker_public/src/stages/licensedCover.ts
+var licensedCover = {
+  name: "licensed-cover",
+  failure: "additive",
+  when: (c) => !!c.opts.licensedDocNumbers?.length && c.finalHits.length > 0,
+  run: async (c) => {
+    const keys = new Set(c.opts.licensedDocNumbers);
+    const present = c.finalHits.some((h) => keys.has(String(h.metadata.standard ?? "")));
+    if (present) return;
+    const ids = (await c.lane["licensed-ids"] ?? []).slice(0, 8);
+    if (!ids.length) return;
+    const matches = await portIndex(c.env, "public").getByIds(ids);
+    const unit = matches.find((m) => m.metadata && keys.has(String(m.metadata.standard ?? "")));
+    if (!unit) return;
+    const hit = toHits([unit])[0];
+    c.finalHits = [...c.finalHits, hit];
+    console.log("licensed cover: seated", unit.id, "\u2014", unit.metadata.docidentifier);
   }
 };
 
@@ -22798,12 +22821,10 @@ var editionCover = {
     let added = 0;
     for (const w of want.slice(0, maxDocs)) {
       try {
-        const q = await c.env.VECTORIZE.query(c.vector, {
-          topK: 3,
-          returnMetadata: "all",
-          filter: { $and: [{ docidentifier: { $eq: w.di } }, { edition: { $eq: w.edition } }] }
-        });
-        const hits = toHits(q.matches ?? []).map((h) => ({ ...h, score: top * THRESHOLDS.editionCoverDiscount }));
+        const rows2 = await c.env.DB.prepare(
+          "SELECT id, doc_id, docidentifier, doctype, doc_number, edition, language, clause_anchor, clause_title, status, superseded_by, corpus, tier, text FROM chunks WHERE docidentifier = ?1 AND edition = ?2 LIMIT 3"
+        ).bind(w.di, w.edition).all();
+        const hits = rowsToHits(rows2.results ?? []).map((h) => ({ ...h, score: top * THRESHOLDS.editionCoverDiscount }));
         c.hits.push(...hits);
         added += hits.length;
         console.log("edition cover:", w.di, w.edition, `+${hits.length}`);
@@ -23223,6 +23244,7 @@ var STAGES = [
   editionSteer,
   propagate,
   diversity,
+  licensedCover,
   typedPin,
   sectionDescent,
   dedup,
