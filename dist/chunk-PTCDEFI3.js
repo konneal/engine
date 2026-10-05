@@ -22522,6 +22522,33 @@ var graphLane = {
   }
 };
 
+// workers/worker_public/src/stages/licensedLane.ts
+var licensedLane = {
+  name: "licensed-lane",
+  failure: "additive",
+  when: (c) => !!c.opts.licensedDocNumbers?.length && c.vector.length > 0,
+  prefetch: (c) => {
+    c.lane["licensed-lane"] = portIndex(c.env, "public").query({
+      vector: c.vector,
+      topK: 12,
+      filter: { standard: { $in: c.opts.licensedDocNumbers } }
+    });
+  },
+  run: async (c) => {
+    const g = await c.lane["licensed-lane"];
+    const seenIds = new Set(c.matches.map((m) => m.id));
+    let merged = 0;
+    for (const m of (g ?? []).slice(0, 10)) {
+      if (!seenIds.has(m.id)) {
+        c.matches.push({ id: m.id, score: m.score * THRESHOLDS.graphLaneDiscount, metadata: m.metadata });
+        seenIds.add(m.id);
+        merged++;
+      }
+    }
+    console.log("licensed lane:", g?.length ?? 0, "hits,", merged, "merged");
+  }
+};
+
 // workers/worker_public/src/stages/multiQuery.ts
 var RRF_K = 60;
 var multiQuery = {
@@ -23133,6 +23160,7 @@ var STAGES = [
   glossary,
   conceptGraph,
   graphLane,
+  licensedLane,
   multiQuery,
   subQuery,
   poolOpen,

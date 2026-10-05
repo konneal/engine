@@ -196,10 +196,22 @@ export async function bindModelNode(
   };
   if (opts.standard) return gate(await fetchNode(env, opts.standard, nodeId));
   try {
-    const rows = await env.DB.prepare("SELECT standard FROM model_nodes WHERE node_id = ?1 LIMIT 2").bind(nodeId).all();
-    const standards = (rows?.results ?? []).map((r: any) => String(r.standard));
-    if (standards.length === 1) return gate(await fetchNode(env, standards[0]!, nodeId));
-    return null; // zero (not indexed) or ambiguous (several standards) — no silent pick
+    // The MECE flip left the retired standards' nodes beside their
+    // successors' (the same node id under oiml-r60 and oiml-r60-lml),
+    // so ambiguity is the COMMON case now. The plane's own registry
+    // breaks the tie: the standard loaded most recently is the
+    // canonical layer for that id (the flip's law — the layer owns its
+    // units), standard name descending as the deterministic second key;
+    // a standard with no meta row (orphaned) sorts last. An id under
+    // zero standards still binds to nothing.
+    const rows = await env.DB.prepare(
+      "SELECT n.standard AS standard FROM model_nodes n LEFT JOIN model_plane_meta m ON m.standard = n.standard WHERE n.node_id = ?1 ORDER BY m.indexed_at DESC, n.standard DESC LIMIT 1",
+    )
+      .bind(nodeId)
+      .all();
+    const standard = (rows?.results ?? []).map((r: any) => String(r.standard))[0];
+    if (standard) return gate(await fetchNode(env, standard, nodeId));
+    return null; // not indexed
   } catch {
     return null;
   }

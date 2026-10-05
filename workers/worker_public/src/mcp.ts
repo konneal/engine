@@ -6,6 +6,8 @@
 // mcp-proto.ts (dependency-free, unit-tested). The internal-audience
 // server federates both indexes and lives in its own worker, never here.
 import { json, readJson, type ApiKey } from "./lib/http";
+import { sha256Hex } from "./config.ts";
+import { telemetry } from "./quota.ts";
 import { P } from "./profile.ts";
 import { dispatch } from "./mcp-proto.ts";
 import type { Env } from "./env.ts";
@@ -24,6 +26,37 @@ export async function handleMcp(
   const id = body?.id ?? null;
 
   const out = await dispatch(method, body?.params, async (name, args) => {
+    const t0 = Date.now();
+    try {
+      return await callToolOnce(env, ctx, req, tier, key, name, args, t0);
+    } catch (e) {
+      telemetry(env, ctx, tier, `mcp:${name}`, null, false, 0, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), undefined, undefined, { durationMs: Date.now() - t0 });
+      throw e;
+    }
+  });
+
+  if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
+  if (out.ok) {
+    if ((out.result as any)?.serverInfo) (out.result as any).serverInfo.name = `${P().publisher.id}-rag`;
+    return json({ jsonrpc: "2.0", id, result: out.result });
+  }
+  return json({ jsonrpc: "2.0", id, error: { code: out.code, message: out.message } });
+}
+
+/** One tools/call dispatch, measured: every MCP surface's tool usage
+ *  lands in the queries table under the mcp:<tool> route — which tools
+ *  agents actually call becomes countable, per tier, per key. */
+async function callToolOnce(
+  env: Env,
+  ctx: Background,
+  _req: Request,
+  tier: "anon" | "key" | "member",
+  key: ApiKey | null,
+  name: string,
+  args: Record<string, unknown>,
+  t0: number,
+) {
+  {
     const inner = new Request("https://internal/mcp", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -42,13 +75,8 @@ export async function handleMcp(
     const res = name === "ask"
       ? await (await import("./ask")).handleAsk(env, ctx as any, inner, tier, key)
       : await (await import("./search")).handleSearch(env, ctx as any, inner, tier, key);
-    return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
-  });
-
-  if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
-  if (out.ok) {
-    if ((out.result as any)?.serverInfo) (out.result as any).serverInfo.name = `${P().publisher.id}-rag`;
-    return json({ jsonrpc: "2.0", id, result: out.result });
+    const payload: any = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
+    telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), undefined, undefined, { durationMs: Date.now() - t0 });
+    return payload;
   }
-  return json({ jsonrpc: "2.0", id, error: { code: out.code, message: out.message } });
 }

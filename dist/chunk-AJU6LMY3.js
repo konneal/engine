@@ -148,9 +148,11 @@ async function bindModelNode(env, opts) {
   };
   if (opts.standard) return gate(await fetchNode(env, opts.standard, nodeId));
   try {
-    const rows = await env.DB.prepare("SELECT standard FROM model_nodes WHERE node_id = ?1 LIMIT 2").bind(nodeId).all();
-    const standards = (rows?.results ?? []).map((r) => String(r.standard));
-    if (standards.length === 1) return gate(await fetchNode(env, standards[0], nodeId));
+    const rows = await env.DB.prepare(
+      "SELECT n.standard AS standard FROM model_nodes n LEFT JOIN model_plane_meta m ON m.standard = n.standard WHERE n.node_id = ?1 ORDER BY m.indexed_at DESC, n.standard DESC LIMIT 1"
+    ).bind(nodeId).all();
+    const standard = (rows?.results ?? []).map((r) => String(r.standard))[0];
+    if (standard) return gate(await fetchNode(env, standard, nodeId));
     return null;
   } catch {
     return null;

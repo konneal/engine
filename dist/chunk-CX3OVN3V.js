@@ -18,7 +18,7 @@ import {
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-64IG3ZLT.js";
+} from "./chunk-AJU6LMY3.js";
 import {
   NO_CONTEXT,
   answerQuality,
@@ -56,7 +56,7 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-3BL223VD.js";
+} from "./chunk-PTCDEFI3.js";
 import {
   embed,
   generateOnce,
@@ -2166,6 +2166,7 @@ ${summary}` }] : [],
   if (aggregationVerdict) console.log("aggregation engine:", aggregationVerdict.operation, aggregationVerdict.table, "\u2192", aggregationVerdict.value);
   let boundaryNote = null;
   let boundaryBoost;
+  let licensedDocNumbers;
   let editionBoost;
   try {
     const fam = understanding?.doc ? refCodec().familyOf(understanding.doc) : null;
@@ -2178,7 +2179,9 @@ ${summary}` }] : [],
   const lexicalBoost = [boundaryBoost, editionBoost].filter(Boolean).join(" ") || void 0;
   if (P().sources?.licensed?.length) {
     const match = matchLicensedTopic(q.query, P().sources.licensed);
-    if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
+    if (match && (standardKeys?.has(match.entry.key) ?? false)) {
+      licensedDocNumbers = match.entry.package ? [match.entry.package] : void 0;
+    } else if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
       const docNum = match.entry.doc_number ?? "";
       boundaryBoost = docNum || void 0;
       let citing = [];
@@ -2227,7 +2230,8 @@ Answer account questions from these records ONLY: name the record when you use i
       optimisticVec,
       datasetScope: narrowed ? corpora : null,
       standardKeys,
-      lexicalBoost
+      lexicalBoost,
+      licensedDocNumbers
     });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");

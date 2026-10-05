@@ -4,15 +4,15 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-2JC7GXRV.js";
+} from "../../chunk-CX3OVN3V.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
   modelGroundingBlock
-} from "../../chunk-64IG3ZLT.js";
+} from "../../chunk-AJU6LMY3.js";
 import {
   handleSearch
-} from "../../chunk-TJTEBS4S.js";
+} from "../../chunk-ZLQMRQOV.js";
 import {
   buildMessages,
   citations,
@@ -34,7 +34,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-3BL223VD.js";
+} from "../../chunk-PTCDEFI3.js";
 import {
   cfBlobs,
   embed,
@@ -967,19 +967,13 @@ async function handleMcp(env, ctx, req, tier, key) {
   const method = typeof body?.method === "string" ? body.method : null;
   const id = body?.id ?? null;
   const out = await dispatch(method, body?.params, async (name, args) => {
-    const inner = new Request("https://internal/mcp", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      // stream:false forces the JSON lane (anon defaults to SSE)
-      body: JSON.stringify({ ...args, stream: false })
-    });
-    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-O7OGW54R.js");
-    if (TOOLS_REGISTRY2.some((t) => t.name === name && t.audiences.includes("mcp"))) {
-      const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
-      return r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
+    const t0 = Date.now();
+    try {
+      return await callToolOnce(env, ctx, req, tier, key, name, args, t0);
+    } catch (e) {
+      telemetry(env, ctx, tier, `mcp:${name}`, null, false, 0, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });
+      throw e;
     }
-    const res = name === "ask" ? await (await import("../../ask-HCKUKBPB.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-G76DK4AF.js")).handleSearch(env, ctx, inner, tier, key);
-    return res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
   });
   if (out.ok && "accepted" in out) return new Response(null, { status: 202 });
   if (out.ok) {
@@ -987,6 +981,25 @@ async function handleMcp(env, ctx, req, tier, key) {
     return json({ jsonrpc: "2.0", id, result: out.result });
   }
   return json({ jsonrpc: "2.0", id, error: { code: out.code, message: out.message } });
+}
+async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
+  {
+    const inner = new Request("https://internal/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      // stream:false forces the JSON lane (anon defaults to SSE)
+      body: JSON.stringify({ ...args, stream: false })
+    });
+    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-Z4HQH3QU.js");
+    if (TOOLS_REGISTRY2.some((t) => t.name === name && t.audiences.includes("mcp"))) {
+      const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
+      return r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
+    }
+    const res = name === "ask" ? await (await import("../../ask-KKOQH7HK.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-CGQFGYTR.js")).handleSearch(env, ctx, inner, tier, key);
+    const payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
+    telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });
+    return payload;
+  }
 }
 
 // workers/shared/router.ts
