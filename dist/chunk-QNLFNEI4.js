@@ -2,7 +2,8 @@ import {
   embed,
   hasLane,
   portIndex,
-  portModelRunner
+  portModelRunner,
+  portStore
 } from "./chunk-KNCRYAX3.js";
 import {
   standardKeysFrom
@@ -920,6 +921,140 @@ var bibEntry = {
     }
   }
 };
+async function unitByTerm(store, term) {
+  const t = term.trim();
+  if (!t) return null;
+  const q = (where, bind) => store.prepare(`SELECT * FROM units_db WHERE ${where} LIMIT 1`).bind(...bind).all().catch(() => ({ results: [] }));
+  const exact = await q("code = ?1 OR short = ?1 OR LOWER(name_en) = LOWER(?1)", [t]);
+  let rows = exact.results ?? [];
+  if (rows.length) return rows[0];
+  const sym = await q("LOWER(json_extract(symbols, '$.ascii')) = LOWER(?1)", [t]);
+  rows = sym.results ?? [];
+  if (rows.length) return rows[0];
+  const like = await q("LOWER(short) LIKE LOWER(?1) OR LOWER(name_en) LIKE LOWER(?1)", [`%${t}%`]);
+  rows = like.results ?? [];
+  return rows[0] ?? null;
+}
+async function resolveWithPrefix(store, term) {
+  const direct = await unitByTerm(store, term);
+  if (direct) return { unit: direct, prefixFactor: 1, prefixName: null };
+  const t = term.trim();
+  for (let cut = 1; cut < Math.min(t.length, 3); cut++) {
+    const pSym = t.slice(0, cut);
+    const rest = t.slice(cut);
+    if (!rest) continue;
+    const pres = await store.prepare("SELECT id, name_en, symbol, base, power FROM unit_prefixes WHERE symbol = ?1 AND base IS NOT NULL AND power IS NOT NULL").bind(pSym).all().catch(() => ({ results: [] }));
+    const prefix = (pres.results ?? [])[0];
+    if (!prefix) continue;
+    const unit = await unitByTerm(store, rest);
+    if (unit) return { unit, prefixFactor: Math.pow(prefix.base, prefix.power), prefixName: prefix.name_en };
+  }
+  return null;
+}
+var unitsLookup = {
+  name: "units.lookup",
+  description: "Look up a measurement unit in the unitsdb plane: its names and symbols, its dimension, its quantity kinds, and its SI decomposition. Bind a symbol or an everyday unit name to the dataset's canonical unit before computing with it.",
+  params: [{ key: "term", required: true, description: "a unit's code, short name, symbol or plain name, e.g. m, Pa, pascal, meter per second" }],
+  audiences: ["mcp"],
+  handler: async (env, args) => {
+    const term = String(args?.term ?? "").trim();
+    if (term.length < 1) return null;
+    try {
+      const store = portStore(env);
+      const unit = await unitByTerm(store, term);
+      if (!unit) {
+        return { name: "units.lookup", query: term, output: `No unit matches "${term}" in the unitsdb plane. State this plainly.` };
+      }
+      const qtyNames = [];
+      for (const qid of JSON.parse(unit.quantity_ids || "[]")) {
+        const r = await store.prepare("SELECT name_en FROM unit_quantities WHERE id = ?1").bind(qid).all().catch(() => ({ results: [] }));
+        const n = (r.results ?? [])[0]?.name_en;
+        if (n) qtyNames.push(n);
+      }
+      const roots = JSON.parse(unit.root_units || "[]");
+      const rootNames = await Promise.all(
+        roots.map(async (r) => {
+          const row = await unitByTerm(store, r.code);
+          return `${row?.short ?? r.code}^${r.power}`;
+        })
+      );
+      const symbols = JSON.parse(unit.symbols || "null");
+      return {
+        name: "units.lookup",
+        query: term,
+        output: JSON.stringify({
+          code: unit.code,
+          name_en: unit.name_en,
+          name_fr: unit.name_fr,
+          symbol: symbols?.ascii ?? null,
+          si_root: !!unit.root,
+          unit_system: unit.unit_system,
+          dimension: unit.dimension_ascii,
+          quantities: qtyNames.slice(0, 4),
+          si_decomposition: rootNames,
+          scale: unit.scale
+        })
+      };
+    } catch {
+      return null;
+    }
+  }
+};
+var unitsConvert = {
+  name: "units.convert",
+  description: "Convert a value between two measurement units through the unitsdb plane. SI-coherent units convert exactly (prefix powers over the same dimension); a non-SI unit is stated honestly \u2014 the dataset defines a ratio scale for it, not a factor, and none is invented.",
+  params: [
+    { key: "value", required: true, description: "the numeric value to convert" },
+    { key: "from_unit", required: true, description: "the source unit, e.g. kPa, km, m" },
+    { key: "to_unit", required: true, description: "the target unit, e.g. Pa, m" }
+  ],
+  audiences: ["mcp"],
+  handler: async (env, args) => {
+    const value = Number(args?.value);
+    const fromTerm = String(args?.from_unit ?? "").trim();
+    const toTerm = String(args?.to_unit ?? "").trim();
+    if (!Number.isFinite(value) || !fromTerm || !toTerm) return null;
+    try {
+      const store = portStore(env);
+      const from = await resolveWithPrefix(store, fromTerm);
+      const to = await resolveWithPrefix(store, toTerm);
+      if (!from || !to) {
+        const missing = !from ? fromTerm : toTerm;
+        return { name: "units.convert", query: `${value} ${fromTerm} \u2192 ${toTerm}`, output: `No unit matches "${missing}" in the unitsdb plane. State this plainly.` };
+      }
+      if ((from.unit.dimension_ascii ?? "") !== (to.unit.dimension_ascii ?? "")) {
+        return {
+          name: "units.convert",
+          query: `${value} ${fromTerm} \u2192 ${toTerm}`,
+          output: `Not convertible: ${fromTerm} carries dimension ${from.unit.dimension_ascii ?? "unknown"} and ${toTerm} carries ${to.unit.dimension_ascii ?? "unknown"}. State this plainly.`
+        };
+      }
+      const coherent = (u) => !!u.unit_system && u.unit_system.toLowerCase().startsWith("si");
+      if (!coherent(from.unit) || !coherent(to.unit)) {
+        const nonSi = !coherent(from.unit) ? fromTerm : toTerm;
+        return {
+          name: "units.convert",
+          query: `${value} ${fromTerm} \u2192 ${toTerm}`,
+          output: `The dataset defines no numeric factor for ${nonSi} (a non-SI unit carried on a ${from.unit.scale ?? to.unit.scale ?? "ratio"} scale) \u2014 no factor is invented. State this plainly; the caller may supply the factor itself.`
+        };
+      }
+      const result = value * from.prefixFactor / to.prefixFactor;
+      return {
+        name: "units.convert",
+        query: `${value} ${fromTerm} \u2192 ${toTerm}`,
+        output: JSON.stringify({
+          value,
+          from: `${from.prefixName ? from.prefixName + " " : ""}${from.unit.name_en}`,
+          to: `${to.prefixName ? to.prefixName + " " : ""}${to.unit.name_en}`,
+          dimension: from.unit.dimension_ascii,
+          result
+        })
+      };
+    } catch {
+      return null;
+    }
+  }
+};
 var glossaryLookup = {
   name: "glossary.lookup",
   description: "Look up a defined term in the terminology datasets \u2014 the concept's definition and its defining publication. Bind everyday words to the defined term before interpreting a question.",
@@ -988,7 +1123,7 @@ var certificatesSearch = {
     return { name: "certificates.search", query, output };
   }
 };
-var TOOLS_REGISTRY = [certificatesSearch, unitsGet, graphCites, docsSection, glossaryLookup, documentsFamily, licensedSection, verdictEvaluate, conditionsCheck, bibEntry];
+var TOOLS_REGISTRY = [certificatesSearch, unitsGet, graphCites, docsSection, glossaryLookup, documentsFamily, licensedSection, verdictEvaluate, conditionsCheck, bibEntry, unitsLookup, unitsConvert];
 var TOOL_DECLARATION = [
   "You may use one tool before answering, by writing a single line:",
   ...TOOLS_REGISTRY.filter((t) => t.audiences.includes("agent")).map((t) => {
