@@ -3,12 +3,13 @@ import {
   hasLane,
   portIndex,
   portModelRunner,
+  portStore,
   rerank
-} from "./chunk-LOBYXEVD.js";
+} from "./chunk-KNCRYAX3.js";
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-SPKPH54J.js";
+} from "./chunk-DTW4UW2E.js";
 import {
   DATASETS,
   LIMITS,
@@ -18,7 +19,7 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-2PCUAJJO.js";
+} from "./chunk-BOAITSVV.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -22523,29 +22524,35 @@ var graphLane = {
 };
 
 // workers/worker_public/src/stages/licensedLane.ts
+var sha1Hex = async (s8) => {
+  const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(s8));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+};
 var licensedLane = {
   name: "licensed-lane",
   failure: "additive",
-  when: (c) => !!c.opts.licensedDocNumbers?.length && c.vector.length > 0,
-  prefetch: (c) => {
-    c.lane["licensed-lane"] = portIndex(c.env, "public").query({
-      vector: c.vector,
-      topK: 12,
-      filter: { standard: { $in: c.opts.licensedDocNumbers } }
-    });
-  },
+  when: (c) => !!c.opts.licensedDocNumbers?.length,
   run: async (c) => {
-    const g = await c.lane["licensed-lane"];
+    const standards = c.opts.licensedDocNumbers;
+    const placeholders = standards.map((_, i) => `?${i + 1}`).join(",");
+    const rows = await portStore(c.env).prepare(`SELECT standard, node_id FROM model_nodes WHERE standard IN (${placeholders}) LIMIT 40`).bind(...standards).all().catch(() => ({ results: [] }));
+    const ids = await Promise.all(
+      (rows.results ?? []).map(
+        async (r) => "m" + (await sha1Hex(`${r.standard}|${r.node_id}`)).slice(0, 16)
+      )
+    );
+    if (!ids.length) return;
+    const matches = await portIndex(c.env, "public").getByIds(ids);
     const seenIds = new Set(c.matches.map((m) => m.id));
     let merged = 0;
-    for (const m of (g ?? []).slice(0, 10)) {
-      if (!seenIds.has(m.id)) {
-        c.matches.push({ id: m.id, score: m.score * THRESHOLDS.graphLaneDiscount, metadata: m.metadata });
+    for (const m of matches) {
+      if (m.metadata && !seenIds.has(m.id)) {
+        c.matches.push({ id: m.id, score: THRESHOLDS.licensedLaneScore, metadata: m.metadata });
         seenIds.add(m.id);
         merged++;
       }
     }
-    console.log("licensed lane:", g?.length ?? 0, "hits,", merged, "merged");
+    console.log("licensed lane:", ids.length, "units,", matches.length, "vectors,", merged, "merged");
   }
 };
 
