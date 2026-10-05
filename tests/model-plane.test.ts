@@ -5,9 +5,11 @@
 // The invariants under test are the wave's own:
 //   - THE BIND IS EXACT: a model node binds by its canonical id (the
 //     strict grammar), from the declared chip label first, the question
-//     second; an ambiguous or unindexed id binds NOTHING (never a silent
-//     pick); the standard comes only from the declared/question-named
-//     publication, never from an inference.
+//     second; an unindexed id binds NOTHING; an id indexed under several
+//     standards binds the canonical layer — the one the plane's registry
+//     ranks first (most recently indexed; the MECE flip's law), never a
+//     coin flip; the standard comes from the declared/question-named
+//     publication when named, never from an inference.
 //   - THE GROUNDING IS THE NODE'S OWN: the grounding block carries the
 //     constraint VERBATIM, the applicability, the acceptance, the
 //     provenance — and a DECLARED source discrepancy always rides (the
@@ -108,7 +110,7 @@ function dbStub(opts: { nodes?: Record<string, any>; standardsFor?: Record<strin
             },
             async all() {
               if (opts.fail) throw new Error("no such table: model_nodes");
-              if (/SELECT standard FROM model_nodes WHERE node_id/i.test(sql)) {
+              if (/FROM model_nodes/i.test(sql) && /node_id/i.test(sql)) {
                 const standards = opts.standardsFor?.[args[0]] ?? [];
                 return { results: standards.map((s) => ({ standard: s })) };
               }
@@ -164,18 +166,21 @@ test("the declared chip label wins over the question; the scope's standard narro
   assert.equal(bound?.clause?.urn, "urn:oiml:pub:r:60-1:2021#clause-5.3.2");
 });
 
-test("a scope-less bind holds only when the node id is unambiguous; ambiguity binds NOTHING", async () => {
+test("a scope-less bind resolves: unambiguous directly, ambiguous via the plane's canonical layer", async () => {
   const unique = await bindModelNode(
     { DB: dbStub({ nodes: { "oiml-r60/req/metrological/mpe": rowFor("oiml-r60", MPE_NODE) }, standardsFor: { "/req/metrological/mpe": ["oiml-r60"] } }) },
     { query: "explain /req/metrological/mpe", standard: null },
   );
   assert.equal(unique?.standard, "oiml-r60");
 
-  const ambiguous = await bindModelNode(
-    { DB: dbStub({ standardsFor: { "/req/metrological/mpe": ["oiml-r60", "oiml-r91"] } }) },
+  // the MECE flip left the retired standard's nodes beside the
+  // successors' — the precedence query ranks the canonical layer first
+  // (most recently indexed), and the binder follows it, never a coin flip
+  const flipped = await bindModelNode(
+    { DB: dbStub({ nodes: { "oiml-r60-lml/req/metrological/mpe": rowFor("oiml-r60-lml", MPE_NODE) }, standardsFor: { "/req/metrological/mpe": ["oiml-r60-lml", "oiml-r60"] } }) },
     { query: "explain /req/metrological/mpe", standard: null },
   );
-  assert.equal(ambiguous, null, "an ambiguous id never binds a silent pick");
+  assert.equal(flipped?.standard, "oiml-r60-lml", "ambiguity binds the plane's canonical layer, in registry order");
 
   const unindexed = await bindModelNode(
     { DB: dbStub({ standardsFor: {} }) },

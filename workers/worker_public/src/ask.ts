@@ -1017,6 +1017,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // publication's own clause — surface for a question the document's
   // vocabulary alone would miss
   let boundaryBoost: string | undefined;
+  let licensedDocNumbers: string[] | undefined;
   // the EDITION boost: the grounding pool tilts to the publication's
   // ACTIVE edition (the graph's own registry) — the dirty corpus's
   // superseded editions otherwise outrank the current ones on shared
@@ -1037,7 +1038,11 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   const lexicalBoost = [boundaryBoost, editionBoost].filter(Boolean).join(" ") || undefined;
   if (P().sources?.licensed?.length) {
     const match = matchLicensedTopic(q.query, P().sources.licensed);
-    if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
+    if (match && (standardKeys?.has(match.entry.key) ?? false)) {
+      // the entitled caller: the licensed lane pulls the package's own
+      // units so they compete with (and outrank) the public restatements
+      licensedDocNumbers = match.entry.package ? [match.entry.package] : undefined;
+    } else if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
       const docNum = match.entry.doc_number ?? "";
       boundaryBoost = docNum || undefined;
       let citing: string[] = [];
@@ -1106,7 +1111,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     // publications there).
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
       sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec,
-      datasetScope: narrowed ? corpora : null, standardKeys, lexicalBoost });
+      datasetScope: narrowed ? corpora : null, standardKeys, lexicalBoost, licensedDocNumbers });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —

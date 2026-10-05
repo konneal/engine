@@ -20,6 +20,10 @@ export interface RetrieveOptions {
   federate?: (query: string) => Promise<Hit[]>;
   warmEmbed?: Promise<number[] | null>;
   graphDocNumbers?: string[];
+  /** The licensed standards the entitled, topically-matched question
+   *  pulls (the licensed lane's metadata filter — the package ids, e.g.
+   *  iec-60068-2-30). Empty/absent for everyone else. */
+  licensedDocNumbers?: string[];
   /** The declared context's HARD seal (TODO.ai-platform/02): when the
    *  panel's chip declares a document scope, the CANDIDATE POOL is cut
    *  to the publication family before rerank + the top-N cut — the
