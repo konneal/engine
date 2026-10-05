@@ -20,6 +20,7 @@
 import { THRESHOLDS } from "../config.ts";
 import type { Stage } from "./types.ts";
 import { refCodec } from "../codecs.ts";
+import { lexicalWithin } from "../lexical.ts";
 
 export const conceptGraph: Stage = {
   name: "concept-graph",
@@ -49,14 +50,14 @@ export const conceptGraph: Stage = {
       }
     }
     if (numbers.size) {
-      const gc = await c.env.VECTORIZE.query(c.vector, {
-        topK: 12,
-        returnMetadata: "all",
-        filter: { doc_number: { $in: [...numbers] } },
-      });
+      // identity resolution: the linked documents' query-relevant
+      // candidates rank by the corpus's own BM25 within the set — the
+      // index filter this lane used returned empty for its whole life
+      // (Vectorize metadata filtering is dead on this index)
+      const gc = await lexicalWithin(c.env, c.rq || c.query, [...numbers], 12);
       const seenIds0 = new Set(c.matches.map((m: any) => m.id));
       let merged0 = 0;
-      for (const m of (gc.matches ?? []).slice(0, 6)) {
+      for (const m of gc.slice(0, 6)) {
         if (!seenIds0.has(m.id)) {
           c.matches.push({ id: m.id, score: m.score * THRESHOLDS.conceptGraphDiscount, metadata: m.metadata });
           seenIds0.add(m.id);

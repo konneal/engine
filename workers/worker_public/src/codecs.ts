@@ -142,7 +142,14 @@ export const oimlPubid: RefCodec = {
 export const plainSlug: RefCodec = {
   parse: () => null,
   scanQuestion: () => null,
-  graphDocNumber: () => null,
+  // the graph node id scheme (doc:OIML-<TYPE>-<NUM>-<EDITION>) is the
+  // GRAPH's own identity, estate-wide — not publisher-flavored — so the
+  // plain codec parses it too (a null here silenced the concept-graph
+  // lane's resolution for its whole life)
+  graphDocNumber: (nodeId) => {
+    const m = nodeId.match(/^doc:OIML-[A-Z]-(\d+)-/);
+    return m ? m[1] : null;
+  },
   familyOf: () => null,
 };
 
