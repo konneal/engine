@@ -48,7 +48,7 @@ test("the graph lane merges the family's BM25-ranked candidates at the discount,
   await graphLane.run!(c);
   assert.equal(c.matches.length, 1);
   assert.equal(c.matches[0].id, FAMILY_ROW.id);
-  assert.equal(c.matches[0].score, (1 / (1 + 2)) * THRESHOLDS.graphLaneDiscount);
+  assert.equal(c.matches[0].score, (1 / (1 + 2)) * THRESHOLDS.graphLaneDiscount * 0.5, "the narrowing halves the lane discount — the flood guard");
   assert.equal((c.matches[0].metadata as any).chunk_text, FAMILY_ROW.text, "toHits reads the text from here");
 });
 

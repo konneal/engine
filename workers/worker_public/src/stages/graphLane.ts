@@ -23,9 +23,15 @@ export const graphLane: Stage = {
     const g = (await c.lane["graph-lane"]!) as any;
     const seenIds = new Set(c.matches.map((m: any) => m.id));
     let merged = 0;
-    for (const m of (g ?? []).slice(0, 10)) {
+    // narrow by the reverted experiment's own law (rag#137): candidate-
+    // family flooding dilutes the pool — five candidates, and at HALF
+    // the lane discount so only family text the cross-encoder genuinely
+    // prefers survives the cut (the first breathing gate measured the
+    // flood signature: faithfulness sagging across unrelated legs and
+    // the typed blocks displaced from the context)
+    for (const m of (g ?? []).slice(0, 5)) {
       if (!seenIds.has(m.id)) {
-        c.matches.push({ id: m.id, score: m.score * THRESHOLDS.graphLaneDiscount, metadata: m.metadata });
+        c.matches.push({ id: m.id, score: m.score * THRESHOLDS.graphLaneDiscount * 0.5, metadata: m.metadata });
         seenIds.add(m.id);
         merged++;
       }

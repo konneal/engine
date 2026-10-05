@@ -22520,10 +22520,10 @@ var conceptGraph = {
       }
     }
     if (numbers.size) {
-      const gc = await lexicalWithin(c.env, c.rq || c.query, [...numbers], 12);
+      const gc = await lexicalWithin(c.env, c.rq || c.query, [...numbers], 6);
       const seenIds0 = new Set(c.matches.map((m) => m.id));
       let merged0 = 0;
-      for (const m of gc.slice(0, 6)) {
+      for (const m of gc.slice(0, 3)) {
         if (!seenIds0.has(m.id)) {
           c.matches.push({ id: m.id, score: m.score * THRESHOLDS.conceptGraphDiscount, metadata: m.metadata });
           seenIds0.add(m.id);
@@ -22547,9 +22547,9 @@ var graphLane = {
     const g = await c.lane["graph-lane"];
     const seenIds = new Set(c.matches.map((m) => m.id));
     let merged = 0;
-    for (const m of (g ?? []).slice(0, 10)) {
+    for (const m of (g ?? []).slice(0, 5)) {
       if (!seenIds.has(m.id)) {
-        c.matches.push({ id: m.id, score: m.score * THRESHOLDS.graphLaneDiscount, metadata: m.metadata });
+        c.matches.push({ id: m.id, score: m.score * THRESHOLDS.graphLaneDiscount * 0.5, metadata: m.metadata });
         seenIds.add(m.id);
         merged++;
       }

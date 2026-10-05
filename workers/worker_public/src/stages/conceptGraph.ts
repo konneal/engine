@@ -54,10 +54,10 @@ export const conceptGraph: Stage = {
       // candidates rank by the corpus's own BM25 within the set — the
       // index filter this lane used returned empty for its whole life
       // (Vectorize metadata filtering is dead on this index)
-      const gc = await lexicalWithin(c.env, c.rq || c.query, [...numbers], 12);
+      const gc = await lexicalWithin(c.env, c.rq || c.query, [...numbers], 6);
       const seenIds0 = new Set(c.matches.map((m: any) => m.id));
       let merged0 = 0;
-      for (const m of gc.slice(0, 6)) {
+      for (const m of gc.slice(0, 3)) {
         if (!seenIds0.has(m.id)) {
           c.matches.push({ id: m.id, score: m.score * THRESHOLDS.conceptGraphDiscount, metadata: m.metadata });
           seenIds0.add(m.id);
