@@ -68,14 +68,16 @@ async function callToolOnce(
     // registry tools (certificates.search, units.get, …) dispatch through
     // the SAME handlers the API would — the no-drift rule, now structural
     const { runTool, TOOLS_REGISTRY } = await import("./tools.ts");
+    let payload: any;
     if (TOOLS_REGISTRY.some((t) => t.name === name && t.audiences.includes("mcp"))) {
       const r = await runTool({ ...env, DB: (env as any).DB }, { name, args }, "mcp");
-      return r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
+      payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
+    } else {
+      const res = name === "ask"
+        ? await (await import("./ask")).handleAsk(env, ctx as any, inner, tier, key)
+        : await (await import("./search")).handleSearch(env, ctx as any, inner, tier, key);
+      payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
-    const res = name === "ask"
-      ? await (await import("./ask")).handleAsk(env, ctx as any, inner, tier, key)
-      : await (await import("./search")).handleSearch(env, ctx as any, inner, tier, key);
-    const payload: any = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), undefined, undefined, { durationMs: Date.now() - t0 });
     return payload;
   }
