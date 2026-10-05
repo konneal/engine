@@ -186,12 +186,18 @@ async function healthRoute(c: RouteContext): Promise<Response> {
  *  key. */
 async function tierFor(c: RouteContext): Promise<{ tier: "anon" | "key" | "member"; key: ApiKey | null } | Response> {
   const isApi = c.path.startsWith("/v1/");
+  // /mcp rides the same key tiering: a bearer presented to the JSON-RPC
+  // endpoint authenticates like /v1 (key tier, the caller's quota and
+  // telemetry) — but the endpoint stays open to anonymous agents, so an
+  // ABSENT bearer is not an error, only a PRESENT-but-invalid one is.
+  const isMcp = c.path === "/mcp";
+  const bearer = c.req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
   let key: ApiKey | null = null;
-  if (isApi) {
+  if (isApi || (isMcp && bearer)) {
     key = await authenticate(c.env, c.req);
     if (!key) return err(401, "unauthorized", `Provide a valid API key: Authorization: Bearer ${P().publisher.id}_...`);
   }
-  let tier: "anon" | "key" | "member" = isApi ? "key" : "anon";
+  let tier: "anon" | "key" | "member" = key ? "key" : "anon";
   // No SESSION_SECRET precondition: the delegated bearer (the platform
   // bubble's OP-minted JWT, delegated.ts) admits the member lane on its
   // own — sessionFrom returns null honestly when neither lane applies.
