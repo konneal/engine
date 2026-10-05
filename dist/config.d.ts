@@ -37,6 +37,7 @@ export declare const THRESHOLDS: {
      *  pool below the primary dense lane; they must earn their window
      *  slot under the cross-encoder, not by graph membership alone. */
     readonly graphLaneDiscount: 0.75;
+    readonly licensedLaneScore: 0.5;
     /** The entailment gate (TODO.new-era/10): the faithfulness scorer
      *  promoted from eval-only onto the serving path. The confidence line
      *  then states a measurement — claim support in the cited passages —
