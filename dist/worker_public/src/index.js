@@ -4,7 +4,7 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-2SWMTCVX.js";
+} from "../../chunk-GYCUMFOA.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
@@ -12,7 +12,7 @@ import {
 } from "../../chunk-QNLFNEI4.js";
 import {
   handleSearch
-} from "../../chunk-GY33RTEO.js";
+} from "../../chunk-OREMF5LK.js";
 import {
   buildMessages,
   citations,
@@ -34,7 +34,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-TXPWLKCI.js";
+} from "../../chunk-BBKAETKM.js";
 import {
   cfBlobs,
   embed,
@@ -996,7 +996,7 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-W6NUC3MG.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-EQAOPFCC.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-KP42T6DH.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-4CBKKNBJ.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });

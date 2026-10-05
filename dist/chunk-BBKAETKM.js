@@ -114,6 +114,69 @@ var STOP = /* @__PURE__ */ new Set([
   "their",
   "there"
 ]);
+function rowMeta(r) {
+  return {
+    doc_id: String(r.doc_id ?? ""),
+    docidentifier: String(r.docidentifier ?? ""),
+    doctype: String(r.doctype ?? ""),
+    doc_number: String(r.doc_number ?? ""),
+    edition: String(r.edition ?? ""),
+    language: String(r.language ?? "en"),
+    clause_anchor: String(r.clause_anchor ?? ""),
+    clause_title: String(r.clause_title ?? ""),
+    tier: String(r.tier ?? ""),
+    corpus: String(r.corpus ?? ""),
+    text_ref: "",
+    status: String(r.status ?? "unknown"),
+    superseded_by: String(r.superseded_by ?? ""),
+    // contract v2 over the lexical lane: typed chunks arriving via BM25
+    // keep their unit identity ([[u:…]] refs, typed pin, retyping check)
+    unit_id: String(r.unit_id ?? "") || void 0,
+    block: String(r.block ?? "") || void 0
+  };
+}
+function rowsToHits(rows) {
+  return rows.map((r) => {
+    const bm25 = typeof r.rank === "number" ? r.rank : 0;
+    return {
+      id: String(r.id),
+      score: 1 / (1 + Math.max(0, bm25)),
+      metadata: rowMeta(r),
+      text: String(r.text ?? "")
+    };
+  });
+}
+function rowsToMatches(rows) {
+  return rows.map((r) => {
+    const bm25 = typeof r.rank === "number" ? Math.max(0, r.rank) : 0;
+    return {
+      id: String(r.id),
+      score: 1 / (1 + bm25),
+      metadata: { ...rowMeta(r), chunk_text: String(r.text ?? "") }
+    };
+  });
+}
+async function lexicalWithin(env, query, docNumbers, k = 12) {
+  const match2 = ftsMatchQuery(query);
+  if (!match2 || !docNumbers.length) return [];
+  try {
+    const placeholders = docNumbers.map((_, i) => `?${i + 2}`).join(",");
+    const res = await env.DB.prepare(
+      `SELECT c.id, c.doc_id, c.docidentifier, c.doctype, c.doc_number, c.edition,
+              c.language, c.clause_anchor, c.clause_title, c.status, c.superseded_by,
+              c.corpus, c.tier, c.text, c.unit_id, c.block, bm25(chunks_fts) AS rank
+         FROM chunks_fts
+         JOIN chunks c ON c.rowid = chunks_fts.rowid
+        WHERE chunks_fts MATCH ?1 AND c.doc_number IN (${placeholders})
+        ORDER BY rank
+        LIMIT ?${docNumbers.length + 2}`
+    ).bind(match2, ...docNumbers, k).all();
+    return rowsToMatches(res.results ?? []);
+  } catch (e) {
+    console.log("lexical-within failed:", String(e).slice(0, 200));
+    return [];
+  }
+}
 async function lexicalPrefilter(env, query, k = LEXICAL_K) {
   const match2 = ftsMatchQuery(query);
   if (!match2) return [];
@@ -129,34 +192,7 @@ async function lexicalPrefilter(env, query, k = LEXICAL_K) {
         LIMIT ?2`
     ).bind(match2, k).all();
     const rows = res.results ?? [];
-    return rows.map((r, i) => {
-      const meta = {
-        doc_id: String(r.doc_id ?? ""),
-        docidentifier: String(r.docidentifier ?? ""),
-        doctype: String(r.doctype ?? ""),
-        doc_number: String(r.doc_number ?? ""),
-        edition: String(r.edition ?? ""),
-        language: String(r.language ?? "en"),
-        clause_anchor: String(r.clause_anchor ?? ""),
-        clause_title: String(r.clause_title ?? ""),
-        tier: String(r.tier ?? ""),
-        corpus: String(r.corpus ?? ""),
-        text_ref: "",
-        status: String(r.status ?? "unknown"),
-        superseded_by: String(r.superseded_by ?? ""),
-        // contract v2 over the lexical lane: typed chunks arriving via BM25
-        // keep their unit identity ([[u:…]] refs, typed pin, retyping check)
-        unit_id: String(r.unit_id ?? "") || void 0,
-        block: String(r.block ?? "") || void 0
-      };
-      const bm25 = typeof r.rank === "number" ? r.rank : i;
-      return {
-        id: String(r.id),
-        score: 1 / (1 + Math.max(0, bm25)),
-        metadata: meta,
-        text: String(r.text ?? "")
-      };
-    });
+    return rowsToHits(rows);
   } catch (e) {
     console.log("lexical prefilter failed:", String(e).slice(0, 200));
     return [];
@@ -21935,7 +21971,14 @@ var oimlPubid = {
 var plainSlug = {
   parse: () => null,
   scanQuestion: () => null,
-  graphDocNumber: () => null,
+  // the graph node id scheme (doc:OIML-<TYPE>-<NUM>-<EDITION>) is the
+  // GRAPH's own identity, estate-wide — not publisher-flavored — so the
+  // plain codec parses it too (a null here silenced the concept-graph
+  // lane's resolution for its whole life)
+  graphDocNumber: (nodeId) => {
+    const m = nodeId.match(/^doc:OIML-[A-Z]-(\d+)-/);
+    return m ? m[1] : null;
+  },
   familyOf: () => null
 };
 var REGISTRY = {
@@ -22477,14 +22520,10 @@ var conceptGraph = {
       }
     }
     if (numbers.size) {
-      const gc = await c.env.VECTORIZE.query(c.vector, {
-        topK: 12,
-        returnMetadata: "all",
-        filter: { doc_number: { $in: [...numbers] } }
-      });
+      const gc = await lexicalWithin(c.env, c.rq || c.query, [...numbers], 12);
       const seenIds0 = new Set(c.matches.map((m) => m.id));
       let merged0 = 0;
-      for (const m of (gc.matches ?? []).slice(0, 6)) {
+      for (const m of gc.slice(0, 6)) {
         if (!seenIds0.has(m.id)) {
           c.matches.push({ id: m.id, score: m.score * THRESHOLDS.conceptGraphDiscount, metadata: m.metadata });
           seenIds0.add(m.id);
@@ -22502,24 +22541,20 @@ var graphLane = {
   failure: "additive",
   when: (c) => !!c.opts.graphDocNumbers?.length && c.vector.length > 0,
   prefetch: (c) => {
-    c.lane["graph-lane"] = c.env.VECTORIZE.query(c.vector, {
-      topK: 15,
-      returnMetadata: "all",
-      filter: { doc_number: { $in: c.opts.graphDocNumbers } }
-    });
+    c.lane["graph-lane"] = lexicalWithin(c.env, c.rq || c.query, c.opts.graphDocNumbers, 15);
   },
   run: async (c) => {
     const g = await c.lane["graph-lane"];
     const seenIds = new Set(c.matches.map((m) => m.id));
     let merged = 0;
-    for (const m of (g.matches ?? []).slice(0, 10)) {
+    for (const m of (g ?? []).slice(0, 10)) {
       if (!seenIds.has(m.id)) {
         c.matches.push({ id: m.id, score: m.score * THRESHOLDS.graphLaneDiscount, metadata: m.metadata });
         seenIds.add(m.id);
         merged++;
       }
     }
-    console.log("graph lane:", g.matches?.length ?? 0, "hits,", merged, "merged");
+    console.log("graph lane:", g?.length ?? 0, "hits,", merged, "merged");
   }
 };
 
