@@ -1415,12 +1415,14 @@ async function healthRoute(c) {
 }
 async function tierFor(c) {
   const isApi = c.path.startsWith("/v1/");
+  const isMcp = c.path === "/mcp";
+  const bearer = c.req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim();
   let key = null;
-  if (isApi) {
+  if (isApi || isMcp && bearer) {
     key = await authenticate(c.env, c.req);
     if (!key) return err(401, "unauthorized", `Provide a valid API key: Authorization: Bearer ${P().publisher.id}_...`);
   }
-  let tier = isApi ? "key" : "anon";
+  let tier = key ? "key" : "anon";
   if (!isApi && await sessionFrom(c.req, c.env)) tier = "member";
   else if (!isApi && await opTokenMember(c.env, opCfg(c.env), c.req)) tier = "member";
   return { tier, key };
