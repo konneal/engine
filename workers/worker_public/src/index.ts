@@ -17,6 +17,7 @@ import { bindModelNode, modelGroundingBlock } from "./modelplane";
 import { refCodec } from "./codecs";
 import { entitlementScope, standardKeysFrom } from "./requestScope";
 import type { Env } from "./env";
+import { portModelRunner } from "./env.ts";
 export type { Env };
 import { json, err, corsHeaders, withCors, readJson, authenticate, type ApiKey } from "./lib/http";
 
@@ -390,8 +391,11 @@ async function laneRoute(c: RouteContext): Promise<Response> {
   if (!query || query.length > 2000) return err(400, "invalid_input", "query required (1-2000 chars)");
 
   try {
-    // embed the query
-    const vector = await embed(env.AI, MODELS.embed, query);
+    // embed the query — through the port (the raw binding has no
+    // .embed; this call site predates the ports and failed every call
+    // with "ai.embed is not a function", unprobed until the primmel
+    // lane eval went through the endpoint)
+    const vector = await embed(portModelRunner(env), MODELS.embed, query);
     // dense retrieval from the comparison index
     const dense = await binding.query(vector, { topK: 20, returnMetadata: "all" });
     const hits = (dense.matches ?? []).map((m: any) => ({

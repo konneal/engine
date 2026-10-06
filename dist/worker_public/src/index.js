@@ -1573,7 +1573,7 @@ async function laneRoute(c) {
   }
   if (!query || query.length > 2e3) return err(400, "invalid_input", "query required (1-2000 chars)");
   try {
-    const vector = await embed(env.AI, MODELS.embed, query);
+    const vector = await embed(portModelRunner(env), MODELS.embed, query);
     const dense = await binding.query(vector, { topK: 20, returnMetadata: "all" });
     const hits = (dense.matches ?? []).map((m) => ({
       id: m.id,
