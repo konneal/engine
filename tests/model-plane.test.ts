@@ -268,3 +268,54 @@ test("the corpus note instructs the model/prose disagreement posture for every r
   assert.match(modelCorpusNote(), /quote machine limits verbatim/);
   assert.match(modelCorpusNote(), /disagree, say so explicitly and cite both/);
 });
+
+// ── bind by stated quantities (the constraint resolution) ───────────
+
+import { bindConstraintByQuantities } from "../workers/worker_public/src/modelplane.ts";
+
+const CONSTRAINT_ROWS = [
+  {
+    standard: "oiml-r60-lml", node_id: "/constraint/dead_load_max_geometry", kind: "constraint",
+    name: "Dead-load maximum geometry", clause_doc: "urn:oiml:pub:r:60-1:2021", clause_ref: "3.6",
+    content: JSON.stringify({
+      check: "ocl{model.parameters.d_max >= 0.9 * model.parameters.e_max and model.parameters.d_max <= model.parameters.e_max}",
+      on_violation: "invalid",
+    }),
+  },
+  {
+    standard: "oiml-smart-core", node_id: "/constraint/completion_fees_settled", kind: "constraint",
+    name: "Fees settled", clause_doc: null, clause_ref: null,
+    content: JSON.stringify({ check: "ocl{application.fees >= 0 and application.fees <= 0}" }),
+  },
+];
+
+function constraintDb(rows: any[]) {
+  return {
+    prepare(sql: string) {
+      return {
+        // the constraint sweep is UNBOUND; fetchNode binds
+        all: async () => ({ results: sql.includes("kind = 'constraint'") ? rows : [] }),
+        bind: (..._a: unknown[]) => ({
+          all: async () => ({ results: [] }),
+          first: async () => (sql.includes("WHERE standard") ? rows[0] : null),
+        }),
+      };
+    },
+  };
+}
+
+test("a constraint-shaped question binds by its stated symbols, not its id", async () => {
+  const bound = await bindConstraintByQuantities(
+    { DB: constraintDb(CONSTRAINT_ROWS) },
+    "The type evaluation of a load cell whose E_max is 30000 v proposes testing to a dead load D_max of 26000 v. Is that proposal acceptable?",
+  );
+  assert.ok(bound, "the quantities bind");
+  assert.equal(bound!.node_id, "/constraint/dead_load_max_geometry");
+  assert.equal(bound!.standard, "oiml-r60-lml");
+});
+
+test("a non-verdict question never binds, and neither does a single shared symbol", async () => {
+  const db = constraintDb(CONSTRAINT_ROWS);
+  assert.equal(await bindConstraintByQuantities({ DB: db }, "what is E_max for a class C load cell?"), null, "no verdict vocabulary");
+  assert.equal(await bindConstraintByQuantities({ DB: db }, "is a fee of 10 acceptable?"), null, "one symbol only never binds");
+});

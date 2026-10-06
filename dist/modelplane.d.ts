@@ -71,6 +71,17 @@ export declare function bindModelNode(env: any, opts: {
     standard?: string | null;
     standardKeys?: ReadonlySet<string> | null;
 }): Promise<BoundModelNode | null>;
+/** A constraint-shaped question binds its constraint: when the question
+ *  states two or more of a constraint node's own check symbols (the
+ *  leaf names — d_max, e_max) alongside verdict vocabulary ("is that
+ *  proposal acceptable"), the node binds by WHAT THE QUESTION STATES,
+ *  not by whether the question spells a node id. The id grammar stays
+ *  the primary bind; this is the fallback for the user-shaped question
+ *  ("E_max 30000 v, testing to D_max 26000 v — acceptable?"), and it
+ *  is deliberately narrow: constraint kind only (requirements are too
+ *  numerous and too loosely tied to vocabulary), most-matched-symbols
+ *  wins, license-gated like every model lane. */
+export declare function bindConstraintByQuantities(env: any, query: string, standardKeys?: ReadonlySet<string> | null): Promise<BoundModelNode | null>;
 /** The structured grounding block for the prompt — every line is the
  *  node's own declared content (the bundle projection), never a model
  *  paraphrase. The discrepancy block, when the model declares one, is the

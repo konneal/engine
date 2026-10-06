@@ -80,170 +80,6 @@ function tableRetyped(text, availableTable) {
   return /(^|\n)\s*\|[^\n]+\|\s*(\n\s*\|[-: |]+\|\s*)?(\n|$)/.test(text) && (text.match(/\|/g) ?? []).length >= 6;
 }
 
-// workers/worker_public/src/modelplane.ts
-var NODE_RE = /(?:^|[\s("'`])\/(req|conf|term|constraint|characteristic|state-machine|dimension)\/([a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)?)(?=[\s)"'`,;:.]|$)/i;
-function modelNodeRefIn(text) {
-  if (!text) return null;
-  const m = text.match(NODE_RE);
-  if (!m) return null;
-  const id = `/${m[1].toLowerCase()}/${m[2]}`;
-  return id.length <= 120 ? id : null;
-}
-function standardForDocNumber(docNumber) {
-  if (!docNumber) return null;
-  const models = P().sources?.models;
-  if (!models?.standards?.length || !models?.standard_prefix) return null;
-  return models.standards.includes(docNumber) ? `${models.standard_prefix}${docNumber}` : null;
-}
-function licensedEntryForPackage(packageId) {
-  if (!packageId) return null;
-  return (P().sources?.licensed ?? []).find((l) => l.package === packageId) ?? null;
-}
-function licensedEntryForDocNumber(docNumber) {
-  if (!docNumber) return null;
-  return (P().sources?.licensed ?? []).find((l) => String(l.doc_number ?? "") === docNumber) ?? null;
-}
-function licenseBoundaryNote(docNumber, standardKeys) {
-  const entry = licensedEntryForDocNumber(docNumber);
-  if (!entry || standardKeys && standardKeys.has(entry.key)) return void 0;
-  const pointer = P().prompts?.vars?.license_declare_pointer;
-  return `License boundary \u2014 the question is about ${licenseBoundaryName(entry)}, a licensed publication (entitlement key ${entry.key}). The caller's organization license does not cover its text, so no passage of it was retrieved and NONE of its procedural content (steps, parameters, severities, limits) may be stated, paraphrased or recalled from memory. You MAY answer at the citation level: name the standard and edition, and cite the invoking clause from the PUBLIC passages in context (the Recommendation's own applicability and normative references are public and stay answerable). Then say the organization's license does not cover the standard's text` + (pointer ? ` and point to the declare flow: ${pointer}.` : ".");
-}
-function licenseBoundaryName(entry) {
-  const id = entry.doc_number ? ` ${entry.doc_number}` : ` ${entry.package}`;
-  return `${entry.title ?? "standard"}${entry.edition ? ` (${entry.edition})` : ""} \u2014${id}`;
-}
-function licenseBoundaryRefusal(docNumber, standardKeys) {
-  const entry = licensedEntryForDocNumber(docNumber);
-  if (!entry || standardKeys && standardKeys.has(entry.key)) return void 0;
-  const pointer = P().prompts?.vars?.license_declare_pointer;
-  return `${licenseBoundaryName(entry)} is a licensed publication and your organization's license does not cover its text, so I can't quote or summarize its procedure. I can answer at the citation level \u2014 the standard's title and edition, and the clause your Recommendation invokes \u2014 and the public ${P().publisher.name} content in full.` + (pointer ? ` To unlock the full text, an org admin can declare the license under ${pointer}.` : "");
-}
-async function fetchNode(env, standard, nodeId) {
-  try {
-    const row = await env.DB.prepare(
-      "SELECT standard, node_id, kind, name, clause_doc, clause_ref, content FROM model_nodes WHERE standard = ?1 AND node_id = ?2"
-    ).bind(standard, nodeId).first();
-    if (!row) return null;
-    const content = JSON.parse(String(row.content));
-    const clause = row.clause_doc && row.clause_ref ? { doc: String(row.clause_doc), ref: String(row.clause_ref), urn: `${row.clause_doc}#clause-${row.clause_ref}` } : row.clause_doc ? { doc: String(row.clause_doc), ref: "", urn: String(row.clause_doc) } : null;
-    return {
-      standard: String(row.standard),
-      node_id: String(row.node_id),
-      kind: String(row.kind),
-      name: String(row.name ?? row.node_id),
-      clause,
-      content
-    };
-  } catch {
-    return null;
-  }
-}
-async function bindModelNode(env, opts) {
-  const nodeId = modelNodeRefIn(opts.label) ?? modelNodeRefIn(opts.query);
-  if (!nodeId) return null;
-  const gate = (node) => {
-    if (!node) return null;
-    const entry = licensedEntryForPackage(node.standard);
-    return entry && !(opts.standardKeys?.has(entry.key) ?? false) ? { ...node, gated: true, content: {} } : node;
-  };
-  if (opts.standard) return gate(await fetchNode(env, opts.standard, nodeId));
-  try {
-    const rows = await env.DB.prepare(
-      "SELECT n.standard AS standard FROM model_nodes n LEFT JOIN model_plane_meta m ON m.standard = n.standard WHERE n.node_id = ?1 ORDER BY m.indexed_at DESC, n.standard DESC LIMIT 1"
-    ).bind(nodeId).all();
-    const standard = (rows?.results ?? []).map((r) => String(r.standard))[0];
-    if (standard) return gate(await fetchNode(env, standard, nodeId));
-    return null;
-  } catch {
-    return null;
-  }
-}
-function clip(s, n = 500) {
-  const t = String(s ?? "").trim();
-  return t.length <= n ? t : t.slice(0, n - 1).trimEnd() + " \u2026";
-}
-function applicabilityText(app) {
-  if (!app || typeof app !== "object") return "";
-  const parts = [];
-  for (const [dim, cond] of Object.entries(app)) {
-    if (Array.isArray(cond)) parts.push(`${dim.replace(/_/g, " ")}: ${cond.join(", ")}`);
-    else if (cond && typeof cond === "object" && Array.isArray(cond.values)) {
-      parts.push(`${dim.replace(/_/g, " ")} (${cond.match ?? "any"}): ${cond.values.join(", ")}`);
-    }
-  }
-  return parts.join("; ");
-}
-function modelGroundingBlock(node) {
-  const c = node.content ?? {};
-  const lines = [];
-  lines.push(
-    P().prompts.vars.model_grounding_intro ?? "Model grounding \u2014 the model plane's own statement:"
-  );
-  lines.push(`Node: ${node.node_id} (${node.kind.replace(/_/g, " ")}) \u2014 ${node.name} [${node.standard}]`);
-  if (node.clause) lines.push(`Provenance: ${node.clause.urn}`);
-  if (c.statement) lines.push(`Statement: ${clip(c.statement)}`);
-  if (c.definition) lines.push(`Definition: ${clip(c.definition)}`);
-  if (c.purpose) lines.push(`Purpose: ${clip(c.purpose)}`);
-  const limit = c.limit ?? {};
-  if (limit.expression) lines.push(`Machine limit (the constraint the platform's verdict engine evaluates \u2014 quote it verbatim): ${limit.expression}`);
-  if (limit.accepts?.verdict) lines.push(`Machine limit: ${limit.accepts.verdict} ${limit.accepts.op} ${limit.accepts.limit} (the canonical acceptance chain)`);
-  if (c.check) lines.push(`Machine check: ${c.check}`);
-  if (c.derive) lines.push(`Derivation: ${c.derive}${Array.isArray(c.inputs) ? ` (inputs: ${c.inputs.join(", ")})` : ""}`);
-  const app = applicabilityText(c.applicability);
-  const scopeApp = applicabilityText(c.scope_applicability);
-  if (app || scopeApp) lines.push(`Applicability: ${[scopeApp, app].filter(Boolean).join("; ")}`);
-  if (Array.isArray(c.binds_to) && c.binds_to.length) lines.push(`Binds to: ${c.binds_to.join(", ")}`);
-  if (Array.isArray(c.targets) && c.targets.length) lines.push(`Verifies requirements: ${c.targets.join(", ")}`);
-  if (Array.isArray(c.preconditions) && c.preconditions.length) {
-    const pcs = c.preconditions.map((p) => `${p.id}: ${clip(p.check ?? (p.state ? `state = ${p.state}` : ""), 120)}`).join("; ");
-    lines.push(`Run-validity preconditions (a violation voids the run \u2014 invalid, never a fail): ${pcs}`);
-  }
-  if (c.acceptance_criteria?.description) lines.push(`Acceptance: ${clip(c.acceptance_criteria.description, 300)}`);
-  if (c.violation_meaning) lines.push(`Violation meaning (verbatim): ${clip(c.violation_meaning, 300)} \u2014 on violation: ${c.on_violation ?? "invalid"}`);
-  if (Array.isArray(c.values) && c.values.length) {
-    lines.push(`Values: ${c.values.map((v) => `${v.id}${v.implies?.length ? ` (implies ${v.implies.join(", ")})` : ""}`).join("; ")}`);
-  }
-  if (c.source_discrepancy) {
-    const sd = c.source_discrepancy;
-    lines.push(
-      `DECLARED SOURCE DISCREPANCY \u2014 the model and the text disagree; you MUST surface this and cite both: ${clip(sd.summary, 300)} Sources: ${(sd.sources ?? []).join(" and ")}. The model ${sd.resolution === "follows_clause_x" ? "follows one side" : "records the conflict without resolving it"}: ${clip(sd.rationale, 300)}`
-    );
-  }
-  lines.push(
-    "Rules for this answer: the machine facts (the constraint, the applicability, the acceptance, the provenance) come from THIS node \u2014 quote the machine limit verbatim, never invent one the node does not carry. If this model content and a prose passage disagree \u2014 including a passage from a different edition \u2014 say so explicitly and cite both (this node and the prose clause)."
-  );
-  return lines.join("\n");
-}
-function modelCitation(node) {
-  return {
-    doc_id: `model:${node.standard}`,
-    docidentifier: `${P().publisher.name} SMART model (${(() => {
-      const prefix = P().sources?.models?.standard_prefix ?? "";
-      const letter = prefix.replace(/^.*-/, "").toUpperCase();
-      return String(node.standard).replace(new RegExp(`^${prefix}`, "i"), `${letter} `);
-    })()})`,
-    edition: "",
-    language: "en",
-    clause_anchor: node.clause?.ref || "model",
-    clause_title: `${node.kind.replace(/_/g, " ")} \u2014 ${node.name} (${node.node_id})`,
-    status: "in-force",
-    corpus: "smart-model",
-    quality: "verified",
-    url: void 0,
-    snippet: `${node.node_id}${node.clause ? ` \xB7 ${node.clause.urn}` : ""}${node.content?.statement ? ` \u2014 ${clip(node.content.statement, 240)}` : ""}`,
-    score: 1
-  };
-}
-function modelEcho(node) {
-  return {
-    node_id: node.node_id.slice(0, 120),
-    kind: node.kind.slice(0, 40),
-    standard: node.standard.slice(0, 40),
-    ...node.clause?.urn ? { clause: node.clause.urn.slice(0, 120) } : {}
-  };
-}
-
 // workers/worker_public/src/verdict.ts
 function tokenize(src) {
   const toks = [];
@@ -499,6 +335,205 @@ function verdictNote(v, node) {
   }
   lines.push("This verdict is computed data \u2014 quote it faithfully; do not recompute, soften, or contradict it.");
   return lines.join("\n");
+}
+
+// workers/worker_public/src/modelplane.ts
+var NODE_RE = /(?:^|[\s("'`])\/(req|conf|term|constraint|characteristic|state-machine|dimension)\/([a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)?)(?=[\s)"'`,;:.]|$)/i;
+function modelNodeRefIn(text) {
+  if (!text) return null;
+  const m = text.match(NODE_RE);
+  if (!m) return null;
+  const id = `/${m[1].toLowerCase()}/${m[2]}`;
+  return id.length <= 120 ? id : null;
+}
+function standardForDocNumber(docNumber) {
+  if (!docNumber) return null;
+  const models = P().sources?.models;
+  if (!models?.standards?.length || !models?.standard_prefix) return null;
+  return models.standards.includes(docNumber) ? `${models.standard_prefix}${docNumber}` : null;
+}
+function licensedEntryForPackage(packageId) {
+  if (!packageId) return null;
+  return (P().sources?.licensed ?? []).find((l) => l.package === packageId) ?? null;
+}
+function licensedEntryForDocNumber(docNumber) {
+  if (!docNumber) return null;
+  return (P().sources?.licensed ?? []).find((l) => String(l.doc_number ?? "") === docNumber) ?? null;
+}
+function licenseBoundaryNote(docNumber, standardKeys) {
+  const entry = licensedEntryForDocNumber(docNumber);
+  if (!entry || standardKeys && standardKeys.has(entry.key)) return void 0;
+  const pointer = P().prompts?.vars?.license_declare_pointer;
+  return `License boundary \u2014 the question is about ${licenseBoundaryName(entry)}, a licensed publication (entitlement key ${entry.key}). The caller's organization license does not cover its text, so no passage of it was retrieved and NONE of its procedural content (steps, parameters, severities, limits) may be stated, paraphrased or recalled from memory. You MAY answer at the citation level: name the standard and edition, and cite the invoking clause from the PUBLIC passages in context (the Recommendation's own applicability and normative references are public and stay answerable). Then say the organization's license does not cover the standard's text` + (pointer ? ` and point to the declare flow: ${pointer}.` : ".");
+}
+function licenseBoundaryName(entry) {
+  const id = entry.doc_number ? ` ${entry.doc_number}` : ` ${entry.package}`;
+  return `${entry.title ?? "standard"}${entry.edition ? ` (${entry.edition})` : ""} \u2014${id}`;
+}
+function licenseBoundaryRefusal(docNumber, standardKeys) {
+  const entry = licensedEntryForDocNumber(docNumber);
+  if (!entry || standardKeys && standardKeys.has(entry.key)) return void 0;
+  const pointer = P().prompts?.vars?.license_declare_pointer;
+  return `${licenseBoundaryName(entry)} is a licensed publication and your organization's license does not cover its text, so I can't quote or summarize its procedure. I can answer at the citation level \u2014 the standard's title and edition, and the clause your Recommendation invokes \u2014 and the public ${P().publisher.name} content in full.` + (pointer ? ` To unlock the full text, an org admin can declare the license under ${pointer}.` : "");
+}
+async function fetchNode(env, standard, nodeId) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT standard, node_id, kind, name, clause_doc, clause_ref, content FROM model_nodes WHERE standard = ?1 AND node_id = ?2"
+    ).bind(standard, nodeId).first();
+    if (!row) return null;
+    const content = JSON.parse(String(row.content));
+    const clause = row.clause_doc && row.clause_ref ? { doc: String(row.clause_doc), ref: String(row.clause_ref), urn: `${row.clause_doc}#clause-${row.clause_ref}` } : row.clause_doc ? { doc: String(row.clause_doc), ref: "", urn: String(row.clause_doc) } : null;
+    return {
+      standard: String(row.standard),
+      node_id: String(row.node_id),
+      kind: String(row.kind),
+      name: String(row.name ?? row.node_id),
+      clause,
+      content
+    };
+  } catch {
+    return null;
+  }
+}
+async function bindModelNode(env, opts) {
+  const nodeId = modelNodeRefIn(opts.label) ?? modelNodeRefIn(opts.query);
+  if (!nodeId) return null;
+  const gate = (node) => {
+    if (!node) return null;
+    const entry = licensedEntryForPackage(node.standard);
+    return entry && !(opts.standardKeys?.has(entry.key) ?? false) ? { ...node, gated: true, content: {} } : node;
+  };
+  if (opts.standard) return gate(await fetchNode(env, opts.standard, nodeId));
+  try {
+    const rows = await env.DB.prepare(
+      "SELECT n.standard AS standard FROM model_nodes n LEFT JOIN model_plane_meta m ON m.standard = n.standard WHERE n.node_id = ?1 ORDER BY m.indexed_at DESC, n.standard DESC LIMIT 1"
+    ).bind(nodeId).all();
+    const standard = (rows?.results ?? []).map((r) => String(r.standard))[0];
+    if (standard) return gate(await fetchNode(env, standard, nodeId));
+    return null;
+  } catch {
+    return null;
+  }
+}
+async function bindConstraintByQuantities(env, query, standardKeys) {
+  const verdictish = /\b(acceptable|valid|violate|violation|within|comply|proposal|severity|conform)\b/i.test(query);
+  if (!verdictish) return null;
+  try {
+    const rows = await env.DB.prepare(
+      "SELECT standard, node_id, kind, name, clause_doc, clause_ref, content FROM model_nodes WHERE kind = 'constraint' LIMIT 120"
+    ).all();
+    const q = query.toLowerCase();
+    let best = null;
+    for (const r of rows.results ?? []) {
+      const checks = extractChecks(JSON.parse(String(r.content ?? "{}")));
+      if (!checks.length) continue;
+      const leaves = new Set(
+        symbolsIn(checks).map((sym) => sym.split(".").pop() ?? sym).filter((leaf) => leaf.length >= 2)
+      );
+      let matched = 0;
+      for (const leaf of leaves) {
+        const re = new RegExp(`(?<![a-z_])${leaf.replace(/[^a-z0-9_]/g, "")}(?![a-z_])`, "i");
+        if (re.test(q)) matched++;
+      }
+      if (matched >= 2 && (!best || matched > best.score)) {
+        best = { score: matched, standard: String(r.standard), node_id: String(r.node_id) };
+      }
+    }
+    if (!best) return null;
+    const gate = (node) => {
+      if (!node) return null;
+      const entry = licensedEntryForPackage(node.standard);
+      return entry && !(standardKeys?.has(entry.key) ?? false) ? { ...node, gated: true, content: {} } : node;
+    };
+    return gate(await fetchNode(env, best.standard, best.node_id));
+  } catch {
+    return null;
+  }
+}
+function clip(s, n = 500) {
+  const t = String(s ?? "").trim();
+  return t.length <= n ? t : t.slice(0, n - 1).trimEnd() + " \u2026";
+}
+function applicabilityText(app) {
+  if (!app || typeof app !== "object") return "";
+  const parts = [];
+  for (const [dim, cond] of Object.entries(app)) {
+    if (Array.isArray(cond)) parts.push(`${dim.replace(/_/g, " ")}: ${cond.join(", ")}`);
+    else if (cond && typeof cond === "object" && Array.isArray(cond.values)) {
+      parts.push(`${dim.replace(/_/g, " ")} (${cond.match ?? "any"}): ${cond.values.join(", ")}`);
+    }
+  }
+  return parts.join("; ");
+}
+function modelGroundingBlock(node) {
+  const c = node.content ?? {};
+  const lines = [];
+  lines.push(
+    P().prompts.vars.model_grounding_intro ?? "Model grounding \u2014 the model plane's own statement:"
+  );
+  lines.push(`Node: ${node.node_id} (${node.kind.replace(/_/g, " ")}) \u2014 ${node.name} [${node.standard}]`);
+  if (node.clause) lines.push(`Provenance: ${node.clause.urn}`);
+  if (c.statement) lines.push(`Statement: ${clip(c.statement)}`);
+  if (c.definition) lines.push(`Definition: ${clip(c.definition)}`);
+  if (c.purpose) lines.push(`Purpose: ${clip(c.purpose)}`);
+  const limit = c.limit ?? {};
+  if (limit.expression) lines.push(`Machine limit (the constraint the platform's verdict engine evaluates \u2014 quote it verbatim): ${limit.expression}`);
+  if (limit.accepts?.verdict) lines.push(`Machine limit: ${limit.accepts.verdict} ${limit.accepts.op} ${limit.accepts.limit} (the canonical acceptance chain)`);
+  if (c.check) lines.push(`Machine check: ${c.check}`);
+  if (c.derive) lines.push(`Derivation: ${c.derive}${Array.isArray(c.inputs) ? ` (inputs: ${c.inputs.join(", ")})` : ""}`);
+  const app = applicabilityText(c.applicability);
+  const scopeApp = applicabilityText(c.scope_applicability);
+  if (app || scopeApp) lines.push(`Applicability: ${[scopeApp, app].filter(Boolean).join("; ")}`);
+  if (Array.isArray(c.binds_to) && c.binds_to.length) lines.push(`Binds to: ${c.binds_to.join(", ")}`);
+  if (Array.isArray(c.targets) && c.targets.length) lines.push(`Verifies requirements: ${c.targets.join(", ")}`);
+  if (Array.isArray(c.preconditions) && c.preconditions.length) {
+    const pcs = c.preconditions.map((p) => `${p.id}: ${clip(p.check ?? (p.state ? `state = ${p.state}` : ""), 120)}`).join("; ");
+    lines.push(`Run-validity preconditions (a violation voids the run \u2014 invalid, never a fail): ${pcs}`);
+  }
+  if (c.acceptance_criteria?.description) lines.push(`Acceptance: ${clip(c.acceptance_criteria.description, 300)}`);
+  if (c.violation_meaning) lines.push(`Violation meaning (verbatim): ${clip(c.violation_meaning, 300)} \u2014 on violation: ${c.on_violation ?? "invalid"}`);
+  if (Array.isArray(c.values) && c.values.length) {
+    lines.push(`Values: ${c.values.map((v) => `${v.id}${v.implies?.length ? ` (implies ${v.implies.join(", ")})` : ""}`).join("; ")}`);
+  }
+  if (c.source_discrepancy) {
+    const sd = c.source_discrepancy;
+    lines.push(
+      `DECLARED SOURCE DISCREPANCY \u2014 the model and the text disagree; you MUST surface this and cite both: ${clip(sd.summary, 300)} Sources: ${(sd.sources ?? []).join(" and ")}. The model ${sd.resolution === "follows_clause_x" ? "follows one side" : "records the conflict without resolving it"}: ${clip(sd.rationale, 300)}`
+    );
+  }
+  lines.push(
+    "Rules for this answer: the machine facts (the constraint, the applicability, the acceptance, the provenance) come from THIS node \u2014 quote the machine limit verbatim, never invent one the node does not carry. If this model content and a prose passage disagree \u2014 including a passage from a different edition \u2014 say so explicitly and cite both (this node and the prose clause)."
+  );
+  return lines.join("\n");
+}
+function modelCitation(node) {
+  return {
+    doc_id: `model:${node.standard}`,
+    docidentifier: `${P().publisher.name} SMART model (${(() => {
+      const prefix = P().sources?.models?.standard_prefix ?? "";
+      const letter = prefix.replace(/^.*-/, "").toUpperCase();
+      return String(node.standard).replace(new RegExp(`^${prefix}`, "i"), `${letter} `);
+    })()})`,
+    edition: "",
+    language: "en",
+    clause_anchor: node.clause?.ref || "model",
+    clause_title: `${node.kind.replace(/_/g, " ")} \u2014 ${node.name} (${node.node_id})`,
+    status: "in-force",
+    corpus: "smart-model",
+    quality: "verified",
+    url: void 0,
+    snippet: `${node.node_id}${node.clause ? ` \xB7 ${node.clause.urn}` : ""}${node.content?.statement ? ` \u2014 ${clip(node.content.statement, 240)}` : ""}`,
+    score: 1
+  };
+}
+function modelEcho(node) {
+  return {
+    node_id: node.node_id.slice(0, 120),
+    kind: node.kind.slice(0, 40),
+    standard: node.standard.slice(0, 40),
+    ...node.clause?.urn ? { clause: node.clause.urn.slice(0, 120) } : {}
+  };
 }
 
 // workers/worker_public/src/conditions.ts
@@ -1143,19 +1178,20 @@ ${r.output}`;
 }
 
 export {
+  evaluate,
+  verdictNote,
   standardForDocNumber,
   licensedEntryForPackage,
   licenseBoundaryNote,
   licenseBoundaryRefusal,
   bindModelNode,
+  bindConstraintByQuantities,
   modelGroundingBlock,
   modelCitation,
   modelEcho,
   resolveBlocks,
   contractV2,
   tableRetyped,
-  evaluate,
-  verdictNote,
   quantitiesIn,
   evaluateConditionSets,
   parseToolCall,
