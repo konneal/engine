@@ -30,6 +30,7 @@
  *  /conf/<class>/<id>, /term/<id>, /constraint/<id>, /characteristic/<id>,
  *  /state-machine/<id>, /dimension/<id>). */
 import { P } from "./profile.ts";
+import { extractChecks, symbolsIn } from "./verdict.ts";
 const NODE_RE = /(?:^|[\s("'`])\/(req|conf|term|constraint|characteristic|state-machine|dimension)\/([a-z0-9][a-z0-9_-]*(?:\/[a-z0-9][a-z0-9_-]*)?)(?=[\s)"'`,;:.]|$)/i;
 
 /** The first model-node id a text names (the declared chip label first,
@@ -212,6 +213,60 @@ export async function bindModelNode(
     const standard = (rows?.results ?? []).map((r: any) => String(r.standard))[0];
     if (standard) return gate(await fetchNode(env, standard, nodeId));
     return null; // not indexed
+  } catch {
+    return null;
+  }
+}
+
+// ── bind by stated quantities (the constraint resolution) ────────────
+
+/** A constraint-shaped question binds its constraint: when the question
+ *  states two or more of a constraint node's own check symbols (the
+ *  leaf names — d_max, e_max) alongside verdict vocabulary ("is that
+ *  proposal acceptable"), the node binds by WHAT THE QUESTION STATES,
+ *  not by whether the question spells a node id. The id grammar stays
+ *  the primary bind; this is the fallback for the user-shaped question
+ *  ("E_max 30000 v, testing to D_max 26000 v — acceptable?"), and it
+ *  is deliberately narrow: constraint kind only (requirements are too
+ *  numerous and too loosely tied to vocabulary), most-matched-symbols
+ *  wins, license-gated like every model lane. */
+export async function bindConstraintByQuantities(
+  env: any,
+  query: string,
+  standardKeys?: ReadonlySet<string> | null,
+): Promise<BoundModelNode | null> {
+  const verdictish = /\b(acceptable|valid|violate|violation|within|comply|proposal|severity|conform)\b/i.test(query);
+  if (!verdictish) return null;
+  try {
+    const rows = await env.DB.prepare(
+      "SELECT standard, node_id, kind, name, clause_doc, clause_ref, content FROM model_nodes WHERE kind = 'constraint' LIMIT 120",
+    ).all();
+    const q = query.toLowerCase();
+    let best: { score: number; standard: string; node_id: string } | null = null;
+    for (const r of (rows.results ?? []) as any[]) {
+      const checks = extractChecks(JSON.parse(String(r.content ?? "{}")));
+      if (!checks.length) continue;
+      const leaves = new Set(
+        symbolsIn(checks)
+          .map((sym) => sym.split(".").pop() ?? sym)
+          .filter((leaf) => leaf.length >= 2),
+      );
+      let matched = 0;
+      for (const leaf of leaves) {
+        const re = new RegExp(`(?<![a-z_])${leaf.replace(/[^a-z0-9_]/g, "")}(?![a-z_])`, "i");
+        if (re.test(q)) matched++;
+      }
+      if (matched >= 2 && (!best || matched > best.score)) {
+        best = { score: matched, standard: String(r.standard), node_id: String(r.node_id) };
+      }
+    }
+    if (!best) return null;
+    const gate = (node: BoundModelNode | null): BoundModelNode | null => {
+      if (!node) return null;
+      const entry = licensedEntryForPackage(node.standard);
+      return entry && !(standardKeys?.has(entry.key) ?? false) ? { ...node, gated: true, content: {} } : node;
+    };
+    return gate(await fetchNode(env, best.standard, best.node_id));
   } catch {
     return null;
   }

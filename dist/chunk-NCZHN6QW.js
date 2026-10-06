@@ -1,5 +1,6 @@
 import {
   TOOL_DECLARATION,
+  bindConstraintByQuantities,
   bindModelNode,
   contractV2,
   evaluate,
@@ -18,7 +19,7 @@ import {
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-QNLFNEI4.js";
+} from "./chunk-ANUHRJ4Z.js";
 import {
   NO_CONTEXT,
   answerQuality,
@@ -2059,7 +2060,7 @@ ${summary}` }] : [],
     query: q.query,
     standard: standardForDocNumber(modelDocHint?.doc_number),
     standardKeys
-  }) : null;
+  }) ?? await bindConstraintByQuantities(env, q.query, standardKeys) : null;
   if (boundModel) {
     ctxApplied = { ...ctxApplied, model: modelEcho(boundModel) };
     console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause", boundModel.gated ? "(gated: license)" : "");

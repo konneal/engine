@@ -22,7 +22,7 @@ import { contractV2, tableRetyped } from "./refs";
 import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { liveDataConfig, liveTokenFor, opCfg, opTokenMember, resolveLiveAccount, type LiveRecord } from "./livedata";
-import { bindModelNode, licenseBoundaryNote, licenseBoundaryRefusal, licensedEntryForPackage, modelCitation, modelEcho, modelGroundingBlock, standardForDocNumber } from "./modelplane";
+import { bindModelNode, bindConstraintByQuantities, licenseBoundaryNote, licenseBoundaryRefusal, licensedEntryForPackage, modelCitation, modelEcho, modelGroundingBlock, standardForDocNumber } from "./modelplane";
 import { evaluate as machineEvaluate, verdictNote } from "./verdict";
 import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./conditions";
 import { evaluateAggregation, type AggregationVerdict } from "./aggregation";
@@ -857,12 +857,12 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // unambiguous across the indexed standards.
   const modelDocHint = named ?? docScope ?? namedDocumentIn(q.query);
   const boundModel = P().publisher.features?.model_plane
-    ? await bindModelNode(env, {
+    ? (await bindModelNode(env, {
         label: declaredCtx?.label,
         query: q.query,
         standard: standardForDocNumber(modelDocHint?.doc_number),
         standardKeys,
-      })
+      })) ?? (await bindConstraintByQuantities(env, q.query, standardKeys))
     : null;
   if (boundModel) {
     ctxApplied = { ...ctxApplied, model: modelEcho(boundModel) };
