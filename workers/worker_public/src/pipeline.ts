@@ -33,6 +33,7 @@ export function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_m, k: string) => (k in vars ? vars[k] : ""));
 }
 import { QueryFilters, toVectorizeFilter, standardKeyAllowed } from "./selfquery";
+import { matchesDocScope } from "./context";
 import { hitQuality } from "./quality";
 import { lexicalPrefilter } from "./lexical";
 import { positionOrder } from "./structural";
@@ -133,7 +134,7 @@ export async function retrieve(
     ? lexicalHits0.filter(
         (h) =>
           (!opts.sealScope ||
-            (h.metadata.doc_number === opts.sealScope!.doc_number &&
+            (matchesDocScope(h.metadata, opts.sealScope!.doc_number) &&
               (!opts.sealScope!.edition || h.metadata.edition === opts.sealScope!.edition))) &&
           standardKeyAllowed(h.metadata, opts.standardKeys),
       )

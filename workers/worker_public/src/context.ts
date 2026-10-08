@@ -170,6 +170,26 @@ export function namedDocumentIn(query: string): DocScope | null {
  *  scoped_to stays null). A registry READ failure proceeds with the
  *  parsed scope — a scoped refusal is more honest than silently
  *  widening to the whole corpus. */
+/** The seal's grain fix (the 2026-10-09 gate): the corpus stores PART
+ *  publications at family grain — R 60-1:2021's chunks carry
+ *  doc_number "60" with the part identity only in the docidentifier —
+ *  so a scope naming a part ("60-1") admits a family-grain chunk only
+ *  when the chunk's OWN identifier stem names the same part (the
+ *  stem's last token is the number, edition and language markers
+ *  stripped). Exact grain agreement always matches; R 60-2 never
+ *  passes an R 60-1 chip. */
+export function matchesDocScope(
+  meta: { doc_number?: string; docidentifier?: string },
+  scopeDocNumber: string,
+): boolean {
+  if (meta.doc_number === scopeDocNumber) return true;
+  if (!scopeDocNumber.includes("-")) return false;
+  if (meta.doc_number !== scopeDocNumber.split("-")[0]) return false;
+  const stem = (meta.docidentifier ?? "").replace(/\s*\([A-Z]\)\s*$/, "").replace(/:\d+$/, "").trim();
+  const last = stem.split(/\s+/).pop()?.toLowerCase();
+  return last === scopeDocNumber.toLowerCase();
+}
+
 export async function resolveDocScope(env: any, ctx: DeclaredContext): Promise<DocScope | null> {
   if (!ctx.doc) return null;
   const parsed = parseDocRef(ctx.doc, ctx.edition);
