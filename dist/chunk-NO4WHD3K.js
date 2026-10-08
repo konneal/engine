@@ -24,181 +24,6 @@ import {
   P
 } from "./chunk-3FYJM7LH.js";
 
-// workers/worker_public/src/quality.ts
-var ORDER = { verified: 0, curated: 1, ocr: 2 };
-function hitQuality(m) {
-  if (m.model_node || m.model_version || m.producer === "primmel") return "verified";
-  if (m.tier === "curated") return "curated";
-  return "ocr";
-}
-function answerQuality(qualities) {
-  let worst = null;
-  for (const q of qualities) {
-    if (!q) continue;
-    if (!worst || ORDER[q] > ORDER[worst]) worst = q;
-  }
-  return worst;
-}
-function qualityNote(q) {
-  if (q === "verified") return "High confidence: this publication's requirements ride a machine-checkable data model.";
-  if (q === "curated") return "Established sources: Metanorma-edited documents, chunked at clause boundaries.";
-  return "WARNING: Partly grounded in experimental data source that was derived from OCR content. Please verify content against official publications.";
-}
-function experimentalSourceLabels(cites, cap = 6) {
-  const labels = [];
-  for (const c of cites) {
-    if (c.quality !== "ocr") continue;
-    const id = String(c.docidentifier || c.doc_id || "source");
-    const anchor = String(c.clause_anchor ?? "");
-    const garbage = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(anchor) || anchor.startsWith("_") && anchor.length > 12;
-    labels.push(garbage || !anchor || anchor === "overview" ? id : `${id} \xA7${anchor}`);
-    if (labels.length >= cap) break;
-  }
-  return labels;
-}
-
-// workers/worker_public/src/lexical.ts
-var LEXICAL_K = 40;
-function ftsMatchQuery(query) {
-  const terms = query.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length >= 2 && t.length <= 40).filter((t) => !STOP.has(t));
-  const uniq = [...new Set(terms)].slice(0, 12);
-  if (!uniq.length) return null;
-  return uniq.map((t) => `"${t.replace(/"/g, "")}"`).join(" OR ");
-}
-var STOP = /* @__PURE__ */ new Set([
-  "the",
-  "a",
-  "an",
-  "of",
-  "and",
-  "or",
-  "to",
-  "in",
-  "for",
-  "on",
-  "is",
-  "are",
-  "was",
-  "were",
-  "be",
-  "by",
-  "with",
-  "as",
-  "at",
-  "from",
-  "that",
-  "this",
-  "what",
-  "how",
-  "when",
-  "where",
-  "which",
-  "who",
-  "does",
-  "do",
-  "did",
-  "can",
-  "could",
-  "should",
-  "would",
-  "may",
-  "might",
-  "shall",
-  "must",
-  "about",
-  "into",
-  "than",
-  "then",
-  "its",
-  "it",
-  "their",
-  "there"
-]);
-function rowMeta(r) {
-  return {
-    doc_id: String(r.doc_id ?? ""),
-    docidentifier: String(r.docidentifier ?? ""),
-    doctype: String(r.doctype ?? ""),
-    doc_number: String(r.doc_number ?? ""),
-    edition: String(r.edition ?? ""),
-    language: String(r.language ?? "en"),
-    clause_anchor: String(r.clause_anchor ?? ""),
-    clause_title: String(r.clause_title ?? ""),
-    tier: String(r.tier ?? ""),
-    corpus: String(r.corpus ?? ""),
-    text_ref: "",
-    status: String(r.status ?? "unknown"),
-    superseded_by: String(r.superseded_by ?? ""),
-    // contract v2 over the lexical lane: typed chunks arriving via BM25
-    // keep their unit identity ([[u:…]] refs, typed pin, retyping check)
-    unit_id: String(r.unit_id ?? "") || void 0,
-    block: String(r.block ?? "") || void 0
-  };
-}
-function rowsToHits(rows) {
-  return rows.map((r) => {
-    const bm25 = typeof r.rank === "number" ? r.rank : 0;
-    return {
-      id: String(r.id),
-      score: 1 / (1 + Math.max(0, bm25)),
-      metadata: rowMeta(r),
-      text: String(r.text ?? "")
-    };
-  });
-}
-function rowsToMatches(rows) {
-  return rows.map((r) => {
-    const bm25 = typeof r.rank === "number" ? Math.max(0, r.rank) : 0;
-    return {
-      id: String(r.id),
-      score: 1 / (1 + bm25),
-      metadata: { ...rowMeta(r), chunk_text: String(r.text ?? "") }
-    };
-  });
-}
-async function lexicalWithin(env, query, docNumbers, k = 12) {
-  const match2 = ftsMatchQuery(query);
-  if (!match2 || !docNumbers.length) return [];
-  try {
-    const placeholders = docNumbers.map((_, i) => `?${i + 2}`).join(",");
-    const res = await env.DB.prepare(
-      `SELECT c.id, c.doc_id, c.docidentifier, c.doctype, c.doc_number, c.edition,
-              c.language, c.clause_anchor, c.clause_title, c.status, c.superseded_by,
-              c.corpus, c.tier, c.text, c.unit_id, c.block, bm25(chunks_fts) AS rank
-         FROM chunks_fts
-         JOIN chunks c ON c.rowid = chunks_fts.rowid
-        WHERE chunks_fts MATCH ?1 AND c.doc_number IN (${placeholders})
-        ORDER BY rank
-        LIMIT ?${docNumbers.length + 2}`
-    ).bind(match2, ...docNumbers, k).all();
-    return rowsToMatches(res.results ?? []);
-  } catch (e) {
-    console.log("lexical-within failed:", String(e).slice(0, 200));
-    return [];
-  }
-}
-async function lexicalPrefilter(env, query, k = LEXICAL_K) {
-  const match2 = ftsMatchQuery(query);
-  if (!match2) return [];
-  try {
-    const res = await env.DB.prepare(
-      `SELECT c.id, c.doc_id, c.docidentifier, c.doctype, c.doc_number, c.edition,
-              c.language, c.clause_anchor, c.clause_title, c.status, c.superseded_by,
-              c.corpus, c.tier, c.text, c.unit_id, c.block, bm25(chunks_fts) AS rank
-         FROM chunks_fts
-         JOIN chunks c ON c.rowid = chunks_fts.rowid
-        WHERE chunks_fts MATCH ?1
-        ORDER BY rank
-        LIMIT ?2`
-    ).bind(match2, k).all();
-    const rows = res.results ?? [];
-    return rowsToHits(rows);
-  } catch (e) {
-    console.log("lexical prefilter failed:", String(e).slice(0, 200));
-    return [];
-  }
-}
-
 // node_modules/@pubid/pubid/dist/grammar/engine.js
 var ParseFailed = class extends Error {
   pos;
@@ -22029,6 +21854,14 @@ function parseDocRef(doc, edition) {
 function namedDocumentIn(query) {
   return refCodec().scanQuestion(query);
 }
+function matchesDocScope(meta, scopeDocNumber) {
+  if (meta.doc_number === scopeDocNumber) return true;
+  if (!scopeDocNumber.includes("-")) return false;
+  if (meta.doc_number !== scopeDocNumber.split("-")[0]) return false;
+  const stem = (meta.docidentifier ?? "").replace(/\s*\([A-Z]\)\s*$/, "").replace(/:\d+$/, "").trim();
+  const last = stem.split(/\s+/).pop()?.toLowerCase();
+  return last === scopeDocNumber.toLowerCase();
+}
 async function resolveDocScope(env, ctx) {
   if (!ctx.doc) return null;
   const parsed = parseDocRef(ctx.doc, ctx.edition);
@@ -22102,6 +21935,181 @@ function syntheticUnderstanding(scope) {
     hypothetical_answer: "",
     follow_ups: []
   };
+}
+
+// workers/worker_public/src/quality.ts
+var ORDER = { verified: 0, curated: 1, ocr: 2 };
+function hitQuality(m) {
+  if (m.model_node || m.model_version || m.producer === "primmel") return "verified";
+  if (m.tier === "curated") return "curated";
+  return "ocr";
+}
+function answerQuality(qualities) {
+  let worst = null;
+  for (const q of qualities) {
+    if (!q) continue;
+    if (!worst || ORDER[q] > ORDER[worst]) worst = q;
+  }
+  return worst;
+}
+function qualityNote(q) {
+  if (q === "verified") return "High confidence: this publication's requirements ride a machine-checkable data model.";
+  if (q === "curated") return "Established sources: Metanorma-edited documents, chunked at clause boundaries.";
+  return "WARNING: Partly grounded in experimental data source that was derived from OCR content. Please verify content against official publications.";
+}
+function experimentalSourceLabels(cites, cap = 6) {
+  const labels = [];
+  for (const c of cites) {
+    if (c.quality !== "ocr") continue;
+    const id = String(c.docidentifier || c.doc_id || "source");
+    const anchor = String(c.clause_anchor ?? "");
+    const garbage = /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(anchor) || anchor.startsWith("_") && anchor.length > 12;
+    labels.push(garbage || !anchor || anchor === "overview" ? id : `${id} \xA7${anchor}`);
+    if (labels.length >= cap) break;
+  }
+  return labels;
+}
+
+// workers/worker_public/src/lexical.ts
+var LEXICAL_K = 40;
+function ftsMatchQuery(query) {
+  const terms = query.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, " ").split(/\s+/).map((t) => t.trim()).filter((t) => t.length >= 2 && t.length <= 40).filter((t) => !STOP.has(t));
+  const uniq = [...new Set(terms)].slice(0, 12);
+  if (!uniq.length) return null;
+  return uniq.map((t) => `"${t.replace(/"/g, "")}"`).join(" OR ");
+}
+var STOP = /* @__PURE__ */ new Set([
+  "the",
+  "a",
+  "an",
+  "of",
+  "and",
+  "or",
+  "to",
+  "in",
+  "for",
+  "on",
+  "is",
+  "are",
+  "was",
+  "were",
+  "be",
+  "by",
+  "with",
+  "as",
+  "at",
+  "from",
+  "that",
+  "this",
+  "what",
+  "how",
+  "when",
+  "where",
+  "which",
+  "who",
+  "does",
+  "do",
+  "did",
+  "can",
+  "could",
+  "should",
+  "would",
+  "may",
+  "might",
+  "shall",
+  "must",
+  "about",
+  "into",
+  "than",
+  "then",
+  "its",
+  "it",
+  "their",
+  "there"
+]);
+function rowMeta(r) {
+  return {
+    doc_id: String(r.doc_id ?? ""),
+    docidentifier: String(r.docidentifier ?? ""),
+    doctype: String(r.doctype ?? ""),
+    doc_number: String(r.doc_number ?? ""),
+    edition: String(r.edition ?? ""),
+    language: String(r.language ?? "en"),
+    clause_anchor: String(r.clause_anchor ?? ""),
+    clause_title: String(r.clause_title ?? ""),
+    tier: String(r.tier ?? ""),
+    corpus: String(r.corpus ?? ""),
+    text_ref: "",
+    status: String(r.status ?? "unknown"),
+    superseded_by: String(r.superseded_by ?? ""),
+    // contract v2 over the lexical lane: typed chunks arriving via BM25
+    // keep their unit identity ([[u:…]] refs, typed pin, retyping check)
+    unit_id: String(r.unit_id ?? "") || void 0,
+    block: String(r.block ?? "") || void 0
+  };
+}
+function rowsToHits(rows) {
+  return rows.map((r) => {
+    const bm25 = typeof r.rank === "number" ? r.rank : 0;
+    return {
+      id: String(r.id),
+      score: 1 / (1 + Math.max(0, bm25)),
+      metadata: rowMeta(r),
+      text: String(r.text ?? "")
+    };
+  });
+}
+function rowsToMatches(rows) {
+  return rows.map((r) => {
+    const bm25 = typeof r.rank === "number" ? Math.max(0, r.rank) : 0;
+    return {
+      id: String(r.id),
+      score: 1 / (1 + bm25),
+      metadata: { ...rowMeta(r), chunk_text: String(r.text ?? "") }
+    };
+  });
+}
+async function lexicalWithin(env, query, docNumbers, k = 12) {
+  const match2 = ftsMatchQuery(query);
+  if (!match2 || !docNumbers.length) return [];
+  try {
+    const placeholders = docNumbers.map((_, i) => `?${i + 2}`).join(",");
+    const res = await env.DB.prepare(
+      `SELECT c.id, c.doc_id, c.docidentifier, c.doctype, c.doc_number, c.edition,
+              c.language, c.clause_anchor, c.clause_title, c.status, c.superseded_by,
+              c.corpus, c.tier, c.text, c.unit_id, c.block, bm25(chunks_fts) AS rank
+         FROM chunks_fts
+         JOIN chunks c ON c.rowid = chunks_fts.rowid
+        WHERE chunks_fts MATCH ?1 AND c.doc_number IN (${placeholders})
+        ORDER BY rank
+        LIMIT ?${docNumbers.length + 2}`
+    ).bind(match2, ...docNumbers, k).all();
+    return rowsToMatches(res.results ?? []);
+  } catch (e) {
+    console.log("lexical-within failed:", String(e).slice(0, 200));
+    return [];
+  }
+}
+async function lexicalPrefilter(env, query, k = LEXICAL_K) {
+  const match2 = ftsMatchQuery(query);
+  if (!match2) return [];
+  try {
+    const res = await env.DB.prepare(
+      `SELECT c.id, c.doc_id, c.docidentifier, c.doctype, c.doc_number, c.edition,
+              c.language, c.clause_anchor, c.clause_title, c.status, c.superseded_by,
+              c.corpus, c.tier, c.text, c.unit_id, c.block, bm25(chunks_fts) AS rank
+         FROM chunks_fts
+         JOIN chunks c ON c.rowid = chunks_fts.rowid
+        WHERE chunks_fts MATCH ?1
+        ORDER BY rank
+        LIMIT ?2`
+    ).bind(match2, k).all();
+    const rows = res.results ?? [];
+    return rowsToHits(rows);
+  } catch (e) {
+    console.log("lexical prefilter failed:", String(e).slice(0, 200));
+    return [];
+  }
 }
 
 // workers/shared/chunk.ts
@@ -22693,7 +22701,7 @@ var seal = {
     const before = c.hits.length;
     const scope = c.opts.sealScope;
     if (scope) {
-      c.hits = c.hits.filter((h) => h.metadata.doc_number === scope.doc_number && (!scope.edition || h.metadata.edition === scope.edition));
+      c.hits = c.hits.filter((h) => matchesDocScope(h.metadata, scope.doc_number) && (!scope.edition || h.metadata.edition === scope.edition));
       console.log("context seal:", before, "\u2192", c.hits.length, "candidates within", `doc#${scope.doc_number}${scope.edition ? "@" + scope.edition : ""}`);
       return;
     }
@@ -23471,7 +23479,7 @@ async function retrieve(env, query, opts = {}) {
   const lexicalP = lexicalPrefilter(env, opts.lexicalBoost ? `${rq} ${opts.lexicalBoost}` : rq).catch(() => []);
   const [vector, lexicalHits0] = await Promise.all([vectorP, lexicalP]);
   const lexicalHits = opts.sealScope || opts.standardKeys ? lexicalHits0.filter(
-    (h) => (!opts.sealScope || h.metadata.doc_number === opts.sealScope.doc_number && (!opts.sealScope.edition || h.metadata.edition === opts.sealScope.edition)) && standardKeyAllowed(h.metadata, opts.standardKeys)
+    (h) => (!opts.sealScope || matchesDocScope(h.metadata, opts.sealScope.doc_number) && (!opts.sealScope.edition || h.metadata.edition === opts.sealScope.edition)) && standardKeyAllowed(h.metadata, opts.standardKeys)
   ) : lexicalHits0;
   if (lexicalHits.length) console.log("lexical prefilter:", lexicalHits.length, "hits");
   const ctx = {
@@ -24735,10 +24743,6 @@ async function editionNote(env, u) {
 }
 
 export {
-  answerQuality,
-  qualityNote,
-  experimentalSourceLabels,
-  ftsMatchQuery,
   refCodec,
   NO_CONTEXT,
   machineOffers,
@@ -24749,6 +24753,10 @@ export {
   parseAppliedContext,
   contextNote,
   syntheticUnderstanding,
+  answerQuality,
+  qualityNote,
+  experimentalSourceLabels,
+  ftsMatchQuery,
   STAGE_NAMES,
   promptVars,
   fill,
