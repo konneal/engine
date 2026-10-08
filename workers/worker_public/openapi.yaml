@@ -1154,6 +1154,25 @@ components:
             response also carries the grounding passages in context.
             Evaluation callers use it to observe what the answer was
             built from.
+        ablate_stages:
+          type: array
+          items:
+            type: string
+          description: >-
+            Research-only (TODO.sota/09): run the retrieval registry
+            projected to these stage names (registry order preserved;
+            unknown names are a 400). Requires the x-admin-token header —
+            a request naming a configuration without it is a 403.
+            Ablated answers bypass every answer cache read and write and
+            echo the active configuration in the response's ablate field.
+        ablate_no_verdict:
+          type: boolean
+          default: false
+          description: >-
+            Research-only: skip the verdict engine (machine verdicts and
+            condition-set evaluation); the answer model narrates from
+            passages alone. Same admin credential and cache law as
+            ablate_stages.
         lang:
           type: string
           description: Forces the answer language, for example en or fr.

@@ -34,6 +34,8 @@ import { memoryNote } from "./memories";
 import { entitlementScope, resolveRequestScope, requestSalt, standardKeysFrom } from "./requestScope";
 import { rawSessionToken, type SessionClaims } from "./session";
 import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested } from "./answercache";
+import { parseAblate } from "./ablate";
+import { STAGE_NAMES } from "./stages/index.ts";
 import type { Env } from "./env";
 export type { Env };
 import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
@@ -298,6 +300,12 @@ async function handleAsk(
   const body = await readJson(req);
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
+  // the ablation boundary (TODO.sota/09): a runner-scored configuration
+  // rides the body behind the admin credential. Failures are loud — a
+  // runner must never mistake a rejected configuration for a measured one.
+  const ablated = parseAblate(body, env.ADMIN_TOKEN, req.headers.get("x-admin-token"), STAGE_NAMES);
+  if (!ablated.ok) return err(ablated.status, ablated.code, ablated.message);
+  const ablate = ablated.config;
 
   // The declared context (TODO.ai-platform/02): the panel's opt-in chips.
   // A declared context makes the answer depend on MORE than the query, so
@@ -469,7 +477,7 @@ async function handleAsk(
   // cache.py) and old-generation entries miss (oimlsmart/rag#72)
   const gen = await corpusGen(env.CACHE);
   const withImage = effectiveImage || storedImage;
-  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
+  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage || ablate ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
   if (cached) {
@@ -877,7 +885,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // the worker EXECUTES the bound node's machine checks against the
   // question's stated values; the model narrates the computed verdict
   // and the verdict BLOCK is server-built — data, never generated prose
-  const machineVerdict = boundModel && !boundModel.gated ? machineEvaluate(boundModel.content, q.query) : null;
+  const machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? machineEvaluate(boundModel.content, q.query) : null;
   const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : undefined;
   // ── condition-set membership (konneal/engine#90): the test-method
   // packages' severity menus as machine-verifiable membership. Fires
@@ -903,7 +911,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   };
   let conditionVerdict: ConditionVerdict | null = null;
   let conditionStandard: string | null = null;
-  if (!machineVerdict && !boundModel && P().publisher.features?.model_plane) {
+  if (!machineVerdict && !boundModel && !ablate?.noVerdict && P().publisher.features?.model_plane) {
     const ql = q.query.toLowerCase();
     const severityWord = /\b(severity|test|valid|tolerance|condition|within)\b/.test(ql);
     const stated = quantitiesIn(q.query);
@@ -1111,7 +1119,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     // publications there).
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
       sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec,
-      datasetScope: narrowed ? corpora : null, standardKeys, lexicalBoost, licensedDocNumbers });
+      datasetScope: narrowed ? corpora : null, standardKeys, lexicalBoost, licensedDocNumbers,
+      ...(ablate?.stages ? { stageSubset: ablate.stages } : {}) });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
@@ -1145,7 +1154,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...(ablate?.stages ? { stageSubset: ablate.stages } : {}) });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h: Hit) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better
@@ -1163,7 +1172,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     // point at the declare flow
     const answer =
       licenseBoundaryRefusal(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys) ?? refusalAnswer();
-    const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
+    const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied, ...(ablate ? { ablate } : {}) };
     telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang, undefined, telemetryMeta());
     return json({ ...out, quota, });
   }
@@ -1401,7 +1410,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified — not caching");
           }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(refusalAnswer())) {
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(refusalAnswer()) && !ablate) {
             ctx.waitUntil(
               env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...(sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}), ...(streamedEntailment ? { entailment: streamedEntailment } : {}) }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
@@ -1519,6 +1528,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         sealScope: declaredScoped ? docScope : null,
         datasetScope: narrowed ? corpora : null,
         standardKeys,
+        ...(ablate?.stages ? { stageSubset: ablate.stages } : {}),
       });
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
@@ -1602,8 +1612,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
     }
   }
-  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}) };
-  const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
+  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}) };
+  const cacheable = !contextual && !declaredCtx && !ablate && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));

@@ -67,6 +67,12 @@ export interface RetrieveOptions {
    *  metadata stays). Null = the deployment declares no licensed
    *  content, the scope is inert. */
   standardKeys?: Set<string> | null;
+  /** The ablation switch (TODO.sota/09): run the registry PROJECTED to
+   *  these stage names (registry order preserved, unknown names throw —
+   *  projectStages owns the semantics). Absent = the full registry.
+   *  Admin-gated at the ask boundary (src/ablate.ts); a stage-subset
+   *  ask never reads or writes the answer caches. */
+  stageSubset?: string[];
 }
 
 export interface GlossaryEntry {

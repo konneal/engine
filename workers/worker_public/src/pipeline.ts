@@ -36,7 +36,7 @@ import { QueryFilters, toVectorizeFilter, standardKeyAllowed } from "./selfquery
 import { hitQuality } from "./quality";
 import { lexicalPrefilter } from "./lexical";
 import { positionOrder } from "./structural";
-import { STAGES, runStages } from "./stages";
+import { STAGES, projectStages, runStages } from "./stages";
 import type { PipelineContext, RetrieveOptions, GlossaryEntry } from "./stages/types";
 // the chunk wire contract lives with its pydantic twin (workers/shared/
 // chunk.ts ↔ ingest/vector_adapter.py); re-exported here so the existing
@@ -144,7 +144,10 @@ export async function retrieve(
     env, query, rq, folded, u, filters, filter, vector, lexicalHits,
     matches: [], hits: [], finalHits: [], glossary: [], notes: [], opts, lane: {},
   };
-  await runStages(STAGES, ctx);
+  // the registry IS the switch: an ablation configuration projects the
+  // SAME registry (same modules, same order) to its named subset — a
+  // narrower pipeline, never a forked one
+  await runStages(opts.stageSubset?.length ? projectStages(opts.stageSubset) : STAGES, ctx);
   return {
     hits: ctx.finalHits,
     filters: ctx.filters ?? {},

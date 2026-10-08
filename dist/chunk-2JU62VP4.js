@@ -22,6 +22,7 @@ import {
 } from "./chunk-ANUHRJ4Z.js";
 import {
   NO_CONTEXT,
+  STAGE_NAMES,
   answerQuality,
   appliedContext,
   buildMessages,
@@ -57,7 +58,7 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-25ECO5M7.js";
+} from "./chunk-OHD5KSAG.js";
 import {
   embed,
   generateOnce,
@@ -1335,6 +1336,38 @@ function exactCacheKey(indexVersion, gen, ns, queryHash) {
   return `a:${indexVersion}:g${gen}:${ns}:${queryHash}`;
 }
 
+// workers/worker_public/src/ablate.ts
+function parseAblate(body, adminToken, presentedToken, knownStages) {
+  const rawStages = body?.ablate_stages;
+  const noVerdict = body?.ablate_no_verdict === true;
+  const namesAblation = rawStages !== void 0 && rawStages !== null;
+  if (!namesAblation && !noVerdict) return { ok: true, config: null };
+  if (!adminToken || presentedToken !== adminToken) {
+    return {
+      ok: false,
+      status: 403,
+      code: "ablation_forbidden",
+      message: "ablation fields require the admin credential (x-admin-token)"
+    };
+  }
+  let stages = null;
+  if (namesAblation) {
+    if (!Array.isArray(rawStages) || rawStages.length === 0) {
+      return { ok: false, status: 400, code: "invalid_ablation", message: "ablate_stages must be a non-empty array of stage names" };
+    }
+    if (rawStages.some((n) => typeof n !== "string")) {
+      return { ok: false, status: 400, code: "invalid_ablation", message: "ablate_stages must contain only stage-name strings" };
+    }
+    const known = new Set(knownStages);
+    const unknown = rawStages.filter((n) => !known.has(n));
+    if (unknown.length) {
+      return { ok: false, status: 400, code: "invalid_ablation", message: `unknown stage(s): ${unknown.join(", ")}` };
+    }
+    stages = [...new Set(rawStages)];
+  }
+  return { ok: true, config: { stages, noVerdict } };
+}
+
 // workers/worker_public/src/operations.ts
 function isOperationIntent(query) {
   return /\b(operations?|endpoints?)\b/i.test(query);
@@ -1706,6 +1739,9 @@ async function handleAsk(env, ctx, req, tier, key) {
   const body = await readJson(req);
   const q = validateQuery(body);
   if (!q) return err(400, "invalid_input", `query is required (1-${LIMITS.maxInputChars} chars)`);
+  const ablated = parseAblate(body, env.ADMIN_TOKEN, req.headers.get("x-admin-token"), STAGE_NAMES);
+  if (!ablated.ok) return err(ablated.status, ablated.code, ablated.message);
+  const ablate = ablated.config;
   const declaredCtx = parseContext(body);
   const draftAct = P().publisher.features?.drafts ? detectDraftIntent(q.query) : null;
   const apiCallIntent = !draftAct && P().publisher.features?.api_call_drafts ? detectApiCallIntent(q.query, declaredCtx) : null;
@@ -1792,7 +1828,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   const fresh = freshRequested(body);
   const gen = await corpusGen(env.CACHE);
   const withImage = effectiveImage || storedImage;
-  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
+  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage || ablate ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   const wantsStream = body?.stream === true || tier === "anon" && body?.stream !== false;
   if (cached) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact", telemetryMeta());
@@ -2066,7 +2102,7 @@ ${summary}` }] : [],
     console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause", boundModel.gated ? "(gated: license)" : "");
   }
   const modelNote = boundModel && !boundModel.gated ? modelGroundingBlock(boundModel) : void 0;
-  const machineVerdict = boundModel && !boundModel.gated ? evaluate(boundModel.content, q.query) : null;
+  const machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? evaluate(boundModel.content, q.query) : null;
   const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : void 0;
   const modelNodeRows = async (kind, docNum) => {
     const attempt = (num3) => {
@@ -2081,7 +2117,7 @@ ${summary}` }] : [],
   };
   let conditionVerdict = null;
   let conditionStandard = null;
-  if (!machineVerdict && !boundModel && P().publisher.features?.model_plane) {
+  if (!machineVerdict && !boundModel && !ablate?.noVerdict && P().publisher.features?.model_plane) {
     const ql = q.query.toLowerCase();
     const severityWord = /\b(severity|test|valid|tolerance|condition|within)\b/.test(ql);
     const stated = quantitiesIn(q.query);
@@ -2232,7 +2268,8 @@ Answer account questions from these records ONLY: name the record when you use i
       datasetScope: narrowed ? corpora : null,
       standardKeys,
       lexicalBoost,
-      licensedDocNumbers
+      licensedDocNumbers,
+      ...ablate?.stages ? { stageSubset: ablate.stages } : {}
     });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
@@ -2256,7 +2293,7 @@ Answer account questions from these records ONLY: name the record when you use i
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...ablate?.stages ? { stageSubset: ablate.stages } : {} });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second;
@@ -2269,7 +2306,7 @@ Answer account questions from these records ONLY: name the record when you use i
   const { hits } = retrieved;
   if (hits.length === 0 && !liveRecords?.length && (!boundModel || boundModel.gated)) {
     const answer2 = licenseBoundaryRefusal(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys) ?? refusalAnswer();
-    const out2 = { answer: answer2, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied };
+    const out2 = { answer: answer2, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied, ...ablate ? { ablate } : {} };
     telemetry(env, ctx, tier, "ask", model, true, answer2.length, out2.query_hash, q.lang, void 0, telemetryMeta());
     return json({ ...out2, quota });
   }
@@ -2451,7 +2488,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified \u2014 not caching");
           }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(refusalAnswer())) {
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(refusalAnswer()) && !ablate) {
             ctx.waitUntil(
               env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}, ...streamedEntailment ? { entailment: streamedEntailment } : {} }), { expirationTtl: LIMITS.cacheTtlSec })
             );
@@ -2521,7 +2558,8 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
         understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` },
         sealScope: declaredScoped ? docScope : null,
         datasetScope: narrowed ? corpora : null,
-        standardKeys
+        standardKeys,
+        ...ablate?.stages ? { stageSubset: ablate.stages } : {}
       });
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, void 0, summary, budget);
@@ -2578,8 +2616,8 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
       if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
     }
   }
-  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {} };
-  const cacheable = !contextual && !declaredCtx && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
+  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {} };
+  const cacheable = !contextual && !declaredCtx && !ablate && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
