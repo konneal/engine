@@ -861,13 +861,13 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           ...(readAs() ? [{ type: "read", read: readAs() }] : []),
           { type: "citations", citations, context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, },
           { type: "token", v: verdict.answer },
-          { type: "done", model, query_hash: queryHash, context_applied: draftCtxApplied, read: readAs() },
+          { type: "done", model, query_hash: queryHash, context_applied: draftCtxApplied, read: readAs(), ...(ablate ? { ablate } : {}) },
         ],
         corsHeaders(req),
       );
     }
     const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer.length);
-    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), quota: { ...quota, ...tq } });
+    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), ...(ablate ? { ablate } : {}), quota: { ...quota, ...tq } });
   }
 
   // ── The api_call draft (TODO.ai-platform/09) — the operations
@@ -899,13 +899,13 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           ...(readAs() ? [{ type: "read", read: readAs() }] : []),
           { type: "citations", citations: [], context_applied: callCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, },
           { type: "token", v: verdict.answer },
-          { type: "done", model, query_hash: queryHash, context_applied: callCtxApplied, read: readAs() },
+          { type: "done", model, query_hash: queryHash, context_applied: callCtxApplied, read: readAs(), ...(ablate ? { ablate } : {}) },
         ],
         corsHeaders(req),
       );
     }
     const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer.length);
-    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), quota: { ...quota, ...tq } });
+    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), ...(ablate ? { ablate } : {}), quota: { ...quota, ...tq } });
   }
 
   // (declared before the retrieval try: the account block, the refusal

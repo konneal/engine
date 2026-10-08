@@ -2145,13 +2145,13 @@ ${summary}` }] : [],
           ...readAs() ? [{ type: "read", read: readAs() }] : [],
           { type: "citations", citations: citations2, context_applied: draftCtxApplied, ...draftPayload ? { draft: draftPayload } : {}, quota },
           { type: "token", v: verdict.answer },
-          { type: "done", model, query_hash: queryHash2, context_applied: draftCtxApplied, read: readAs() }
+          { type: "done", model, query_hash: queryHash2, context_applied: draftCtxApplied, read: readAs(), ...ablate ? { ablate } : {} }
         ],
         corsHeaders(req)
       );
     }
     const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q.query.length, verdict.answer.length);
-    return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, quota: { ...quota, ...tq2 } });
+    return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, ...ablate ? { ablate } : {}, quota: { ...quota, ...tq2 } });
   }
   if (apiCallIntent) {
     const callCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
@@ -2173,13 +2173,13 @@ ${summary}` }] : [],
           ...readAs() ? [{ type: "read", read: readAs() }] : [],
           { type: "citations", citations: [], context_applied: callCtxApplied, ...draftPayload ? { draft: draftPayload } : {}, quota },
           { type: "token", v: verdict.answer },
-          { type: "done", model, query_hash: queryHash2, context_applied: callCtxApplied, read: readAs() }
+          { type: "done", model, query_hash: queryHash2, context_applied: callCtxApplied, read: readAs(), ...ablate ? { ablate } : {} }
         ],
         corsHeaders(req)
       );
     }
     const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q.query.length, verdict.answer.length);
-    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, quota: { ...quota, ...tq2 } });
+    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, ...ablate ? { ablate } : {}, quota: { ...quota, ...tq2 } });
   }
   let liveRecords;
   let accountNote;
