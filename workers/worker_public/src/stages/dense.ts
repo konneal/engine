@@ -4,6 +4,7 @@
 // saved), the doc/edition-filtered query with its guessed-pin drop and
 // sparse-filter widen, and the plain unfiltered query.
 import { LIMITS } from "../config.ts";
+import { matchesDocScope } from "../context.ts";
 import type { Stage } from "./types.ts";
 
 export const dense: Stage = {
@@ -37,7 +38,7 @@ export const dense: Stage = {
       const allMatches: any[] = (await env.VECTORIZE.query(vector, q)).matches ?? [];
       let matches: any[] = allMatches;
       const before = matches.length;
-      matches = matches.filter((m) => String(m.metadata?.doc_number ?? "") === filters.doc_number);
+      matches = matches.filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number!));
       if (filters.edition) matches = matches.filter((m) => !m.metadata?.edition || String(m.metadata.edition) === filters.edition);
       console.log("dense scope (in code):", before, "→", matches.length, "in doc", filters.doc_number, filters.edition ? `@${filters.edition}` : "");
       // an edition pin corroborated by (almost) nothing means the pin
@@ -52,7 +53,7 @@ export const dense: Stage = {
       // the same guess-drop, in code: a pinned edition that starved the
       // scoped set drops to the doc-only scope
       if (filters && filters.edition && matches.length < 3) {
-        const docOnly = allMatches.filter((m) => String(m.metadata?.doc_number ?? "") === filters.doc_number);
+        const docOnly = allMatches.filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number!));
         if (docOnly.length > matches.length) {
           console.log("edition pin dropped:", filters.doc_number, "@", filters.edition, "→", docOnly.length, "doc-scoped hits (edition not in corpus)");
           matches = docOnly;
