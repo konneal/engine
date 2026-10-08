@@ -9,6 +9,10 @@ export interface AblateConfig {
      *  full registry, "adaptive" (the default) lets the router decide
      *  (TODO.sota/05). The grid measures the routes by forcing them. */
     route: "fast" | "deep" | "adaptive";
+    /** Speculative draft-verify (TODO.sota/02 row 2): cheap drafts per
+     *  diversified subset + one strong verifier. Off in serving until the
+     *  gate promotes it; the grid arms it per ask. */
+    speculative: boolean;
 }
 export type AblateParse = {
     ok: true;

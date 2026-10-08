@@ -30,6 +30,10 @@ export interface AblateConfig {
    *  full registry, "adaptive" (the default) lets the router decide
    *  (TODO.sota/05). The grid measures the routes by forcing them. */
   route: "fast" | "deep" | "adaptive";
+  /** Speculative draft-verify (TODO.sota/02 row 2): cheap drafts per
+   *  diversified subset + one strong verifier. Off in serving until the
+   *  gate promotes it; the grid arms it per ask. */
+  speculative: boolean;
 }
 
 export type AblateParse =
@@ -50,10 +54,11 @@ export function parseAblate(
   const rawStages = body?.ablate_stages;
   const noVerdict = body?.ablate_no_verdict === true;
   const rawRoute = body?.ablate_route;
+  const speculative = body?.ablate_speculative === true;
   const namesAblation = rawStages !== undefined && rawStages !== null;
   const routeAblation = rawRoute !== undefined && rawRoute !== null && rawRoute !== "adaptive";
 
-  if (!namesAblation && !noVerdict && !routeAblation) return { ok: true, config: null };
+  if (!namesAblation && !noVerdict && !routeAblation && !speculative) return { ok: true, config: null };
 
   if (!adminToken || presentedToken !== adminToken) {
     return {
@@ -88,5 +93,5 @@ export function parseAblate(
     stages = [...new Set(rawStages as string[])];
   }
 
-  return { ok: true, config: { stages, noVerdict, route } };
+  return { ok: true, config: { stages, noVerdict, route, speculative } };
 }

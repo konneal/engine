@@ -1173,6 +1173,16 @@ components:
             condition-set evaluation); the answer model narrates from
             passages alone. Same admin credential and cache law as
             ablate_stages.
+        ablate_speculative:
+          type: boolean
+          default: false
+          description: >-
+            Research-only (TODO.sota/02 row 2): arm speculative
+            draft-verify — the cheap model drafts an answer per
+            diversified subset of the window in parallel, one strong
+            call verifies every candidate against the full passages and
+            produces the final answer. Same admin credential and cache
+            law as ablate_stages.
         ablate_route:
           type: string
           enum: [fast, deep, adaptive]

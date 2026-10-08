@@ -10,6 +10,7 @@ export declare const MODELS: {
     readonly enrich: "@cf/deepseek-ai/deepseek-v4-pro-0813";
     readonly listwise: "@cf/zai-org/glm-4.7-flash";
     readonly research: "@cf/zai-org/glm-5.3-flash";
+    readonly verifier: "@cf/zai-org/glm-5.2";
 };
 export declare const LIMITS: {
     /** Attachment quotas (TODO.new-era/8): per-member ceilings so a member's
