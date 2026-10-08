@@ -26,6 +26,16 @@ edits to existing stages, the runner, or `retrieve()`. A stage that
 needs a new context field declares it on `PipelineContext` (the field's
 owner is the stage that writes it).
 
+The registry is also the ablation switch (TODO.sota/09):
+`projectStages(names)` projects it to a named subset — registry order
+preserved, unknown names thrown — and `RetrieveOptions.stageSubset`
+carries the projection. The ask boundary (`src/ablate.ts`) gates the
+`ablate_stages` / `ablate_no_verdict` body fields behind the admin
+credential (`x-admin-token`); an ablated ask bypasses every answer-cache
+read and write and echoes its configuration in the response. A new
+stage updates the pinned vocabulary in `tests/ablate.test.ts`
+consciously — that list is the runner's contract.
+
 ## Registry order and invariants
 
 Order is load-bearing. The phase structure:

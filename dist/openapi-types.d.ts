@@ -871,6 +871,13 @@ export interface components {
              * @default false
              */
             fresh: boolean;
+            /** @description Research-only (TODO.sota/09): run the retrieval registry projected to these stage names (registry order preserved; unknown names are a 400). Requires the x-admin-token header — a request naming a configuration without it is a 403. Ablated answers bypass every answer cache read and write and echo the active configuration in the response's ablate field. */
+            ablate_stages?: string[];
+            /**
+             * @description Research-only: skip the verdict engine (machine verdicts and condition-set evaluation); the answer model narrates from passages alone. Same admin credential and cache law as ablate_stages.
+             * @default false
+             */
+            ablate_no_verdict: boolean;
             /** @description Forces the answer language, for example en or fr. */
             lang?: string;
             /** @description The previous question, for conversational context. */

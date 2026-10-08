@@ -75,3 +75,20 @@ export const STAGES: Stage[] = [
   dedup,
   windowFloor,
 ];
+
+export const STAGE_NAMES: string[] = STAGES.map((s) => s.name);
+
+/** The ablation switch (TODO.sota/09): a configuration is a stage list.
+ *  The projection keeps REGISTRY order — a subset can narrow the
+ *  pipeline, never reorder it (the ordering invariants are
+ *  load-bearing). Unknown names throw so a typo'd configuration can
+ *  never measure the wrong pipeline silently. */
+export function projectStages(names: readonly string[]): Stage[] {
+  const wanted = new Set(names);
+  const projected = STAGES.filter((s) => wanted.has(s.name));
+  if (projected.length !== wanted.size) {
+    const known = new Set(STAGE_NAMES);
+    for (const n of wanted) if (!known.has(n)) throw new Error(`unknown stage: ${n}`);
+  }
+  return projected;
+}
