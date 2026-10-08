@@ -37,13 +37,36 @@ test("ablation is refused when no admin token is configured", () => {
 test("a valid stage list parses with the admin credential", () => {
   const r = parseAblate({ ablate_stages: ["dense", "pool-open", "diversity", "window-floor"] }, "tok", "tok", KNOWN);
   assert.equal(r.ok, true);
-  assert.deepEqual((r as any).config, { stages: ["dense", "pool-open", "diversity", "window-floor"], noVerdict: false });
+  assert.deepEqual((r as any).config, { stages: ["dense", "pool-open", "diversity", "window-floor"], noVerdict: false, route: "adaptive" });
 });
 
 test("no-verdict parses standalone", () => {
   const r = parseAblate({ ablate_no_verdict: true }, "tok", "tok", KNOWN);
   assert.equal(r.ok, true);
-  assert.deepEqual((r as any).config, { stages: null, noVerdict: true });
+  assert.deepEqual((r as any).config, { stages: null, noVerdict: true, route: "adaptive" });
+});
+
+test("ablate_route: \"adaptive\" is the default and needs no gate", () => {
+  const r = parseAblate({ ablate_route: "adaptive" }, undefined, null, KNOWN);
+  assert.equal(r.ok, true);
+  assert.equal((r as any).config, null);
+});
+
+test("ablate_route: forced routes gate on the admin credential", () => {
+  const denied = parseAblate({ ablate_route: "fast" }, "tok", "wrong", KNOWN);
+  assert.equal(denied.ok, false);
+  assert.equal((denied as any).status, 403);
+  const fast = parseAblate({ ablate_route: "fast" }, "tok", "tok", KNOWN);
+  assert.equal(fast.ok, true);
+  assert.deepEqual((fast as any).config, { stages: null, noVerdict: false, route: "fast" });
+  const deep = parseAblate({ ablate_route: "deep" }, "tok", "tok", KNOWN);
+  assert.equal((deep as any).config.route, "deep");
+});
+
+test("ablate_route: an unknown route is 400", () => {
+  const r = parseAblate({ ablate_route: "turbo" }, "tok", "tok", KNOWN);
+  assert.equal(r.ok, false);
+  assert.equal((r as any).status, 400);
 });
 
 test("unknown stage names are 400 — a typo'd config must never measure", () => {

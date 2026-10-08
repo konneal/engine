@@ -21,11 +21,15 @@
 
 export interface AblateConfig {
   /** Registry projection (names; projectStages applies them). Null/absent
-   *  = the full registry. */
+   *  = the serving default (adaptive routing decides). */
   stages: string[] | null;
   /** Skip the verdict engine (machineVerdict + condition sets): the
    *  answer model narrates from passages alone. */
   noVerdict: boolean;
+  /** Force a route: "fast" drops the expansion lanes, "deep" keeps the
+   *  full registry, "adaptive" (the default) lets the router decide
+   *  (TODO.sota/05). The grid measures the routes by forcing them. */
+  route: "fast" | "deep" | "adaptive";
 }
 
 export type AblateParse =
@@ -45,9 +49,11 @@ export function parseAblate(
 ): AblateParse {
   const rawStages = body?.ablate_stages;
   const noVerdict = body?.ablate_no_verdict === true;
+  const rawRoute = body?.ablate_route;
   const namesAblation = rawStages !== undefined && rawStages !== null;
+  const routeAblation = rawRoute !== undefined && rawRoute !== null && rawRoute !== "adaptive";
 
-  if (!namesAblation && !noVerdict) return { ok: true, config: null };
+  if (!namesAblation && !noVerdict && !routeAblation) return { ok: true, config: null };
 
   if (!adminToken || presentedToken !== adminToken) {
     return {
@@ -56,6 +62,14 @@ export function parseAblate(
       code: "ablation_forbidden",
       message: "ablation fields require the admin credential (x-admin-token)",
     };
+  }
+
+  let route: AblateConfig["route"] = "adaptive";
+  if (routeAblation) {
+    if (rawRoute !== "fast" && rawRoute !== "deep") {
+      return { ok: false, status: 400, code: "invalid_ablation", message: "ablate_route must be \"fast\", \"deep\" or \"adaptive\"" };
+    }
+    route = rawRoute;
   }
 
   let stages: string[] | null = null;
@@ -74,5 +88,5 @@ export function parseAblate(
     stages = [...new Set(rawStages as string[])];
   }
 
-  return { ok: true, config: { stages, noVerdict } };
+  return { ok: true, config: { stages, noVerdict, route } };
 }

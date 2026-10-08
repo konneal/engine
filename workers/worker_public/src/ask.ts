@@ -36,6 +36,7 @@ import { rawSessionToken, type SessionClaims } from "./session";
 import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested } from "./answercache";
 import { parseAblate } from "./ablate";
 import { STAGE_NAMES } from "./stages/index.ts";
+import { routeFor, fastRouteStages } from "./route.ts";
 import type { Env } from "./env";
 export type { Env };
 import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
@@ -347,6 +348,13 @@ async function handleAsk(
       : null);
   // resolved before the quota check: the effort choice prices the ask
   const effort = requestEffort(env, member, (body as any)?.effort);
+  // the fast route floors GENERATION effort at low (a scoped or
+  // definitional question needs no deep reasoning; the caller's
+  // declared effort always wins). Quota keeps the declared weight —
+  // the floor is a serving decision, not a billing one.
+  const declaredEffort = (body as any)?.effort;
+  const routeEffort = (route: "fast" | "deep") =>
+    route === "fast" && !declaredEffort ? ("low" as const) : effort;
 
   const limit =
     tier === "key" ? key!.day_limit : tier === "member" || member ? num(env as any, "MEMBER_DAY_ASK", 300) : num(env as any, "ANON_DAY_ASK", 20);
@@ -1063,6 +1071,18 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       boundaryNote = boundaryNoteText(match, citing);
     }
   }
+  // ── the adaptive route (TODO.sota/05): understanding's features pick
+  // fast (the registry minus the expansion lanes) or deep (full). The
+  // ablation override wins when present — the grid measures the routes
+  // by forcing them; adaptive is the serving default. The decision
+  // reads the FINAL understanding (the declared-context and text-naming
+  // reconciliations above may have written the scope the router trusts).
+  const routeMode = ablate?.route ?? "adaptive";
+  const routed = routeMode === "adaptive"
+    ? routeFor(understanding, q.query)
+    : { route: routeMode, features: [`forced-${routeMode}`] };
+  const routeSubset = ablate?.stages ?? (routed.route === "fast" ? fastRouteStages(STAGE_NAMES) : null);
+  if (routeSubset) console.log("route:", routed.route, routed.features.join("+"), "—", STAGE_NAMES.length - routeSubset.length, "lanes dropped");
   try {
     const tR = Date.now();
     // ── The "my account" live read (TODO.ai-platform/03) — resolved
@@ -1120,7 +1140,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
       sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec,
       datasetScope: narrowed ? corpora : null, standardKeys, lexicalBoost, licensedDocNumbers,
-      ...(ablate?.stages ? { stageSubset: ablate.stages } : {}) });
+      ...(routeSubset ? { stageSubset: routeSubset } : {}) });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
     // ── TTFT surgery: the two post-retrieval LLM calls run IN PARALLEL —
@@ -1154,7 +1174,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...(ablate?.stages ? { stageSubset: ablate.stages } : {}) });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...(routeSubset ? { stageSubset: routeSubset } : {}) });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h: Hit) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better
@@ -1172,7 +1192,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     // point at the declare flow
     const answer =
       licenseBoundaryRefusal(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys) ?? refusalAnswer();
-    const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied, ...(ablate ? { ablate } : {}) };
+    const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied, ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
     telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang, undefined, telemetryMeta());
     return json({ ...out, quota, });
   }
@@ -1313,7 +1333,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   const cites = boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits);
 
   if (wantsStream) {
-    const stream = await generateStream(env, model, messages, effort);
+    const stream = await generateStream(env, model, messages, routeEffort(routed.route));
     if (stream) {
       const encoder = new TextEncoder();
       const sse = new ReadableStream({
@@ -1358,7 +1378,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
               ...messages.slice(0, -1),
               { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows — number, holder, model, status, and every document link — as the answer. Do not claim that nothing was provided." },
               messages[messages.length - 1],
-            ], effort);
+            ], routeEffort(routed.route));
             if (regen) {
               full = "";
               try {
@@ -1430,7 +1450,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   }
 
   const tGen = Date.now();
-  let answer = await generateOnce(env, model, messages, effort);
+  let answer = await generateOnce(env, model, messages, routeEffort(routed.route));
   if (answer === null) {
     generateRetries += 1;
     // the fallback is a text-only model: image parts must be flattened
@@ -1450,7 +1470,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           ? m
           : { ...m, content: m.content.filter((p: any) => p?.type === "text").map((p: any) => (p?.text ?? "").replace(/\n?\(The user attached an image with this question; interpret it directly when answering\.\)/, "")).join("\n") },
       );
-    answer = await generateOnce(env, MODELS.fallback, flat, effort);
+    answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
   if (answer) answer = canonicalRefusal(answer);
   stageTiming.generate = Date.now() - tGen;
@@ -1488,7 +1508,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.`
         : ANCHOR_CORRECTION_NOTE;
       generateRetries += 1;
-      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], effort);
+      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], routeEffort(routed.route));
       if (corrected) {
         const correctedAnswer = canonicalRefusal(corrected);
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
@@ -1528,11 +1548,11 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         sealScope: declaredScoped ? docScope : null,
         datasetScope: narrowed ? corpora : null,
         standardKeys,
-        ...(ablate?.stages ? { stageSubset: ablate.stages } : {}),
+        ...(routeSubset ? { stageSubset: routeSubset } : {}),
       });
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
-        const retryAnswer = await generateOnce(env, model, retryMessages, effort);
+        const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
         // the answer now comes from the retry passages — citations must follow
         if (retryAnswer) {
           answer = canonicalRefusal(retryAnswer);
@@ -1612,7 +1632,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
     }
   }
-  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}) };
+  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
   const cacheable = !contextual && !declaredCtx && !ablate && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));

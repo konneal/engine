@@ -878,6 +878,12 @@ export interface components {
              * @default false
              */
             ablate_no_verdict: boolean;
+            /**
+             * @description Research-only: force the route (TODO.sota/05). fast drops the candidate-expansion lanes (hyde, multi-query, sub-query) and floors generation effort at low; deep keeps the full registry. adaptive (the default) lets the router decide from understanding's features. Same admin credential and cache law as ablate_stages.
+             * @default adaptive
+             * @enum {string}
+             */
+            ablate_route: "fast" | "deep" | "adaptive";
             /** @description Forces the answer language, for example en or fr. */
             lang?: string;
             /** @description The previous question, for conversational context. */
@@ -920,6 +926,12 @@ export interface components {
                 intent?: string;
                 doc?: string | null;
                 edition?: string | null;
+            };
+            /** @description The adaptive route the ask rode (TODO.sota/05): fast (the registry minus the candidate-expansion lanes, generation effort floored at low) or deep (the full registry), with the features that fired — the telemetry the routing-accuracy analysis reads. */
+            route?: {
+                /** @enum {string} */
+                route?: "fast" | "deep";
+                features?: string[];
                 term?: string | null;
                 terms?: string[];
                 lang?: string | null;
