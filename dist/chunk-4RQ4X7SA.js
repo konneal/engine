@@ -22158,11 +22158,11 @@ var dense = {
       const allMatches = (await env.VECTORIZE.query(vector, q)).matches ?? [];
       let matches = allMatches;
       const before = matches.length;
-      matches = matches.filter((m) => String(m.metadata?.doc_number ?? "") === filters.doc_number);
+      matches = matches.filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number));
       if (filters.edition) matches = matches.filter((m) => !m.metadata?.edition || String(m.metadata.edition) === filters.edition);
       console.log("dense scope (in code):", before, "\u2192", matches.length, "in doc", filters.doc_number, filters.edition ? `@${filters.edition}` : "");
       if (filters && filters.edition && matches.length < 3) {
-        const docOnly = allMatches.filter((m) => String(m.metadata?.doc_number ?? "") === filters.doc_number);
+        const docOnly = allMatches.filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number));
         if (docOnly.length > matches.length) {
           console.log("edition pin dropped:", filters.doc_number, "@", filters.edition, "\u2192", docOnly.length, "doc-scoped hits (edition not in corpus)");
           matches = docOnly;
