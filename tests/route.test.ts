@@ -16,10 +16,15 @@ test("deep features: complexity, sub-queries, process intent, long questions", (
   assert.ok(routeFor(null, "word ".repeat(ROUTE_FAST_WORD_CAP + 1)).features.includes("long-question"));
 });
 
-test("fast features: doc-scoped, definitional, terminology, short", () => {
+test("a document scope rides deep: the narrowed pool keeps every lane", () => {
+  // the 2026-10-08 gate: a chip-declared scope routed fast refused
+  // intermittently — the sealed pool starved without the variant lanes
   const r = routeFor({ doc_number: "60", complexity: "simple" }, SHORT);
-  assert.equal(r.route, "fast");
+  assert.equal(r.route, "deep");
   assert.ok(r.features.includes("doc-scoped"));
+});
+
+test("fast features: definitional, terminology, short", () => {
   assert.ok(routeFor({ term: "creep" }, SHORT).features.includes("definitional"));
   assert.ok(routeFor({ defined_terms: ["drift"] }, SHORT).features.includes("terminology"));
   assert.ok(routeFor(null, SHORT).features.includes("short-question"));
