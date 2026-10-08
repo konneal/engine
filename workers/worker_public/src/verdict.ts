@@ -148,6 +148,11 @@ export function extractChecks(content: unknown): string[] {
   const out: string[] = [];
   const push = (e?: string) => { const b = e && oclBody(e); if (b) out.push(b); };
   push(c.check);
+  // the plain oiml-r60 projection carries the OCL under `expression`
+  // (the r60-lml projection under `check`) — the dead-load geometry
+  // nodes bound for their whole life and evaluated to null because
+  // their only check sat under the key nobody read
+  push(c.expression);
   push(c.limit?.expression);
   push(c.acceptance_criteria?.limit && !c.acceptance_criteria.limit.expression?.includes("ocl{") ? null : c.acceptance_criteria?.limit?.expression);
   // structured threshold limits compile to a comparison expression

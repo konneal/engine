@@ -66,3 +66,20 @@ test("note narrates the arithmetic without recomputing", () => {
 test("no machine checks → null (node not evaluable)", () => {
   assert.equal(evaluate({ statement: "prose only" }, "any question"), null);
 });
+
+test("the plain oiml-r60 projection carries the OCL under `expression` — it evaluates", () => {
+  // the exact shape the deployed node store carries for
+  // /constraint/dead_load_max_geometry (the model-plane projection):
+  // this node bound for its whole life and evaluated to null because
+  // extractChecks never read the key
+  const plain = {
+    expression: "ocl{model.parameters.d_max >= 0.9 * model.parameters.e_max and model.parameters.d_max <= model.parameters.e_max}",
+    clause: { clause: "3.6", doc: "urn:oiml:pub:r:60-1:2021" },
+    name: "Dead-load maximum geometry",
+  };
+  const fail = evaluate(plain, "For OIML R 60, /constraint/dead_load_max_geometry: with E_max 30000 v, is testing to D_max 26000 v valid?")!;
+  assert.equal(fail.verdict, "fail");
+  assert.equal(fail.checks[0].values["model.parameters.d_max"], 26000);
+  const pass = evaluate(plain, "with E_max 30000 v, is testing to D_max 28500 v valid?")!;
+  assert.equal(pass.verdict, "pass");
+});
