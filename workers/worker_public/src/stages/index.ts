@@ -17,6 +17,7 @@ import { hyde } from "./hyde.ts";
 import { glossary } from "./glossary.ts";
 import { conceptGraph } from "./conceptGraph.ts";
 import { graphLane } from "./graphLane.ts";
+import { graphPpr } from "./graphPpr.ts";
 import { licensedLane } from "./licensedLane.ts";
 import { licensedCover } from "./licensedCover.ts";
 import { multiQuery } from "./multiQuery.ts";
@@ -48,6 +49,7 @@ export const STAGES: Stage[] = [
   glossary,
   conceptGraph,
   graphLane,
+  graphPpr,
   licensedLane,
   multiQuery,
   subQuery,

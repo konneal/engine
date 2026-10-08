@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { parseAblate } from "../workers/worker_public/src/ablate.ts";
 import { STAGE_NAMES, projectStages } from "../workers/worker_public/src/stages/index.ts";
 
-const KNOWN = ["dense", "hyde", "glossary", "concept-graph", "graph-lane", "licensed-lane", "multi-query", "sub-query", "pool-open", "lexical-union", "federate", "seal", "license-scope", "overview-demote", "family-boost", "rerank", "lexical-rrf", "citation-probe", "corpus-scope", "edition-cover", "std-ref-nudge", "term-nudge", "concept-steer", "edition-steer", "structural-propagate", "diversity", "licensed-cover", "typed-pin", "section-descent", "dedup", "window-floor"];
+const KNOWN = ["dense", "hyde", "glossary", "concept-graph", "graph-lane", "graph-ppr", "licensed-lane", "multi-query", "sub-query", "pool-open", "lexical-union", "federate", "seal", "license-scope", "overview-demote", "family-boost", "rerank", "lexical-rrf", "citation-probe", "corpus-scope", "edition-cover", "std-ref-nudge", "term-nudge", "concept-steer", "edition-steer", "structural-propagate", "diversity", "licensed-cover", "typed-pin", "section-descent", "dedup", "window-floor"];
 
 test("no ablation fields: a normal ask, config null", () => {
   const r = parseAblate({}, "tok", "tok", KNOWN);

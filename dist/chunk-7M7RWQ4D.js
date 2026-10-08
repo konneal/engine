@@ -5,11 +5,11 @@ import {
   portModelRunner,
   portStore,
   rerank
-} from "./chunk-JQGY5TDF.js";
+} from "./chunk-TH5XGPD5.js";
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-B4QL6VW4.js";
+} from "./chunk-DJ65EF5G.js";
 import {
   DATASETS,
   LIMITS,
@@ -19,7 +19,7 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-QL3GDVOS.js";
+} from "./chunk-VT7DR6NQ.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -22392,6 +22392,130 @@ var graphLane = {
   }
 };
 
+// workers/worker_public/src/stages/graphPpr.ts
+var EDGE_KINDS = "('defines','successor','part_of','variant_of','amends','cites')";
+var PPR_DAMPING = 0.85;
+var PPR_ITERATIONS = 12;
+var PPR_FRONTIER_CAP = 24;
+function pageRank(edges, seeds, opts = {}) {
+  const damping = opts.damping ?? PPR_DAMPING;
+  const iterations = opts.iterations ?? PPR_ITERATIONS;
+  const adj = /* @__PURE__ */ new Map();
+  for (const [a, b] of edges) {
+    if (!adj.has(a)) adj.set(a, []);
+    if (!adj.has(b)) adj.set(b, []);
+    adj.get(a).push(b);
+    adj.get(b).push(a);
+  }
+  const live = seeds.filter((s8) => adj.has(s8));
+  if (!live.length) return /* @__PURE__ */ new Map();
+  const base = 1 / live.length;
+  let rank = new Map(live.map((s8) => [s8, base]));
+  for (let it = 0; it < iterations; it++) {
+    const next = /* @__PURE__ */ new Map();
+    for (const s8 of live) next.set(s8, (1 - damping) * base);
+    for (const [node, r] of rank) {
+      const nbrs = adj.get(node);
+      if (!nbrs?.length) {
+        for (const s8 of live) next.set(s8, (next.get(s8) ?? 0) + damping * r * base);
+        continue;
+      }
+      const share = damping * r / nbrs.length;
+      for (const n of nbrs) next.set(n, (next.get(n) ?? 0) + share);
+    }
+    rank = next;
+  }
+  return rank;
+}
+async function seedNodes(store, glossary2, docidentifier) {
+  const jobs = [];
+  for (const gl of glossary2.slice(0, 3)) {
+    if (gl.term.length < 3) continue;
+    jobs.push(
+      store.prepare(
+        "SELECT id FROM graph_nodes WHERE kind = 'concept' AND (label = ?1 OR label LIKE ?2) LIMIT 6"
+      ).bind(gl.term, `%${gl.term}%`).all().then((r) => (r.results ?? []).map((x) => String(x.id))).catch(() => [])
+    );
+  }
+  const fam = docidentifier ? refCodec().familyOf(docidentifier) : null;
+  if (fam) {
+    jobs.push(
+      store.prepare("SELECT id FROM graph_nodes WHERE kind = 'family' AND id = ?1").bind(`family:${fam}`).first().then((r) => r?.id ? [String(r.id)] : []).catch(() => [])
+    );
+  }
+  const settled = await Promise.all(jobs);
+  return [...new Set(settled.flat())].slice(0, 4);
+}
+async function neighborhood(store, seeds) {
+  const seenEdges = /* @__PURE__ */ new Set();
+  const edges = [];
+  let frontier = seeds.slice(0, PPR_FRONTIER_CAP);
+  const visited = new Set(seeds);
+  for (let hop = 0; hop < 2 && frontier.length; hop++) {
+    const marks = frontier.map(() => "?").join(",");
+    const rows = await store.prepare(
+      `SELECT src, dst FROM graph_edges WHERE kind IN ${EDGE_KINDS} AND (src IN (${marks}) OR dst IN (${marks})) LIMIT 400`
+    ).bind(...frontier).all().catch(() => ({ results: [] }));
+    const next = [];
+    for (const r of rows.results ?? []) {
+      const key = `${r.src}>${r.dst}`;
+      if (seenEdges.has(key)) continue;
+      seenEdges.add(key);
+      edges.push([String(r.src), String(r.dst)]);
+      for (const n of [String(r.src), String(r.dst)]) {
+        if (!visited.has(n)) {
+          visited.add(n);
+          if (next.length < PPR_FRONTIER_CAP) next.push(n);
+        }
+      }
+    }
+    frontier = next;
+  }
+  const nodeIds = [...visited].slice(0, 60);
+  const kinds = /* @__PURE__ */ new Map();
+  for (let i = 0; i < nodeIds.length; i += 30) {
+    const chunk = nodeIds.slice(i, i + 30);
+    const marks = chunk.map(() => "?").join(",");
+    const rows = await store.prepare(`SELECT id, kind FROM graph_nodes WHERE id IN (${marks})`).bind(...chunk).all().catch(() => ({ results: [] }));
+    for (const r of rows.results ?? []) kinds.set(String(r.id), String(r.kind));
+  }
+  return { edges, kinds };
+}
+async function pprDocuments(store, glossary2, docidentifier) {
+  const seeds = await seedNodes(store, glossary2, docidentifier);
+  if (!seeds.length) return [];
+  const { edges, kinds } = await neighborhood(store, seeds);
+  if (!edges.length) return [];
+  const rank = pageRank(edges, seeds);
+  const docs = [...rank.entries()].filter(([id, mass]) => kinds.get(id) === "doc" && mass > 0).sort((a, b) => b[1] - a[1]).map(([id]) => refCodec().graphDocNumber(id)).filter((n) => !!n);
+  return [...new Set(docs)].slice(0, 6);
+}
+var graphPpr = {
+  name: "graph-ppr",
+  failure: "additive",
+  // no raw-binding guard: a deployment without the store degrades
+  // through the prefetch's own catch (the lane stays silent)
+  when: (c) => (c.glossary.length > 0 || !!c.u?.docidentifier) && c.vector.length > 0,
+  prefetch: (c) => {
+    c.lane["graph-ppr"] = pprDocuments(portStore(c.env), c.glossary, c.u?.docidentifier ?? null).catch(() => []);
+  },
+  run: async (c) => {
+    const docs = await c.lane["graph-ppr"];
+    if (!docs?.length) return;
+    const g = await lexicalWithin(c.env, c.rq || c.query, docs, 6);
+    const seenIds = new Set(c.matches.map((m) => m.id));
+    let merged = 0;
+    for (const m of (g ?? []).slice(0, 5)) {
+      if (!seenIds.has(m.id)) {
+        c.matches.push({ id: m.id, score: m.score * THRESHOLDS.pprDiscount, metadata: m.metadata });
+        seenIds.add(m.id);
+        merged++;
+      }
+    }
+    if (merged) console.log("graph ppr:", docs.join(","), "\u2014 merged", merged);
+  }
+};
+
 // workers/worker_public/src/stages/licensedLane.ts
 var sha1Hex = async (s8) => {
   const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(s8));
@@ -23181,6 +23305,7 @@ var STAGES = [
   glossary,
   conceptGraph,
   graphLane,
+  graphPpr,
   licensedLane,
   multiQuery,
   subQuery,
