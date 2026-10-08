@@ -1340,8 +1340,10 @@ function exactCacheKey(indexVersion, gen, ns, queryHash) {
 function parseAblate(body, adminToken, presentedToken, knownStages) {
   const rawStages = body?.ablate_stages;
   const noVerdict = body?.ablate_no_verdict === true;
+  const rawRoute = body?.ablate_route;
   const namesAblation = rawStages !== void 0 && rawStages !== null;
-  if (!namesAblation && !noVerdict) return { ok: true, config: null };
+  const routeAblation = rawRoute !== void 0 && rawRoute !== null && rawRoute !== "adaptive";
+  if (!namesAblation && !noVerdict && !routeAblation) return { ok: true, config: null };
   if (!adminToken || presentedToken !== adminToken) {
     return {
       ok: false,
@@ -1349,6 +1351,13 @@ function parseAblate(body, adminToken, presentedToken, knownStages) {
       code: "ablation_forbidden",
       message: "ablation fields require the admin credential (x-admin-token)"
     };
+  }
+  let route = "adaptive";
+  if (routeAblation) {
+    if (rawRoute !== "fast" && rawRoute !== "deep") {
+      return { ok: false, status: 400, code: "invalid_ablation", message: 'ablate_route must be "fast", "deep" or "adaptive"' };
+    }
+    route = rawRoute;
   }
   let stages = null;
   if (namesAblation) {
@@ -1365,7 +1374,28 @@ function parseAblate(body, adminToken, presentedToken, knownStages) {
     }
     stages = [...new Set(rawStages)];
   }
-  return { ok: true, config: { stages, noVerdict } };
+  return { ok: true, config: { stages, noVerdict, route } };
+}
+
+// workers/worker_public/src/route.ts
+var ROUTE_FAST_WORD_CAP = 10;
+var ROUTE_FAST_DROPS = ["hyde", "multi-query", "sub-query"];
+function routeFor(u, query) {
+  const features = [];
+  const words = query.trim().split(/\s+/).filter(Boolean).length;
+  if (u?.complexity === "complex") features.push("complex");
+  if ((u?.sub_queries ?? []).length > 0) features.push("sub-queries");
+  if (u?.process_intent) features.push("process-intent");
+  if (words > ROUTE_FAST_WORD_CAP) features.push("long-question");
+  if (features.length) return { route: "deep", features };
+  if (u?.doc_number) features.push("doc-scoped");
+  if (u?.term) features.push("definitional");
+  if ((u?.defined_terms ?? []).length > 0) features.push("terminology");
+  features.push("short-question");
+  return { route: "fast", features };
+}
+function fastRouteStages(registry) {
+  return registry.filter((n) => !ROUTE_FAST_DROPS.includes(n));
 }
 
 // workers/worker_public/src/operations.ts
@@ -1756,6 +1786,8 @@ async function handleAsk(env, ctx, req, tier, key) {
     scope: opMember.scope
   } : null);
   const effort = requestEffort(env, member, body?.effort);
+  const declaredEffort = body?.effort;
+  const routeEffort = (route) => route === "fast" && !declaredEffort ? "low" : effort;
   const limit = tier === "key" ? key.day_limit : tier === "member" || member ? num(env, "MEMBER_DAY_ASK", 300) : num(env, "ANON_DAY_ASK", 20);
   const bucketId = tier === "key" ? `key:${key.id}` : member ? `sub:${member.sub}` : clientIp(req);
   const quota = await checkQuota(env, "ask", bucketId, limit, effort === "low" ? 1 : 2);
@@ -2231,6 +2263,10 @@ ${summary}` }] : [],
       boundaryNote = boundaryNoteText(match, citing);
     }
   }
+  const routeMode = ablate?.route ?? "adaptive";
+  const routed = routeMode === "adaptive" ? routeFor(understanding, q.query) : { route: routeMode, features: [`forced-${routeMode}`] };
+  const routeSubset = ablate?.stages ?? (routed.route === "fast" ? fastRouteStages(STAGE_NAMES) : null);
+  if (routeSubset) console.log("route:", routed.route, routed.features.join("+"), "\u2014", STAGE_NAMES.length - routeSubset.length, "lanes dropped");
   try {
     const tR = Date.now();
     if (declaredCtx?.kind === "account") {
@@ -2269,7 +2305,7 @@ Answer account questions from these records ONLY: name the record when you use i
       standardKeys,
       lexicalBoost,
       licensedDocNumbers,
-      ...ablate?.stages ? { stageSubset: ablate.stages } : {}
+      ...routeSubset ? { stageSubset: routeSubset } : {}
     });
     stageTiming["retrieve-core"] = Date.now() - tR;
     console.log("stage: retrieve", Date.now() - tR, "ms");
@@ -2293,7 +2329,7 @@ Answer account questions from these records ONLY: name the record when you use i
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...ablate?.stages ? { stageSubset: ablate.stages } : {} });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...routeSubset ? { stageSubset: routeSubset } : {} });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second;
@@ -2306,7 +2342,7 @@ Answer account questions from these records ONLY: name the record when you use i
   const { hits } = retrieved;
   if (hits.length === 0 && !liveRecords?.length && (!boundModel || boundModel.gated)) {
     const answer2 = licenseBoundaryRefusal(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys) ?? refusalAnswer();
-    const out2 = { answer: answer2, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied, ...ablate ? { ablate } : {} };
+    const out2 = { answer: answer2, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
     telemetry(env, ctx, tier, "ask", model, true, answer2.length, out2.query_hash, q.lang, void 0, telemetryMeta());
     return json({ ...out2, quota });
   }
@@ -2396,7 +2432,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
   const queryHash = await sha256Hex(q.query);
   const cites = boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits);
   if (wantsStream) {
-    const stream = await generateStream(env, model, messages, effort);
+    const stream = await generateStream(env, model, messages, routeEffort(routed.route));
     if (stream) {
       const encoder = new TextEncoder();
       const sse = new ReadableStream({
@@ -2438,7 +2474,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
               ...messages.slice(0, -1),
               { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
               messages[messages.length - 1]
-            ], effort);
+            ], routeEffort(routed.route));
             if (regen) {
               full = "";
               try {
@@ -2507,14 +2543,14 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
     }
   }
   const tGen = Date.now();
-  let answer = await generateOnce(env, model, messages, effort);
+  let answer = await generateOnce(env, model, messages, routeEffort(routed.route));
   if (answer === null) {
     generateRetries += 1;
     const isFigureAttachMessage = (m) => Array.isArray(m.content) && m.content.some((part) => part?.type === "text" && /^The original image of figure unit /.test(part.text ?? ""));
     const flat = messages.filter((m) => !isFigureAttachMessage(m)).map(
       (m) => typeof m.content === "string" ? m : { ...m, content: m.content.filter((p) => p?.type === "text").map((p) => (p?.text ?? "").replace(/\n?\(The user attached an image with this question; interpret it directly when answering\.\)/, "")).join("\n") }
     );
-    answer = await generateOnce(env, MODELS.fallback, flat, effort);
+    answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
   if (answer) answer = canonicalRefusal(answer);
   stageTiming.generate = Date.now() - tGen;
@@ -2538,7 +2574,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
       const tableUnitId = unreferenced ? used.find((h) => h.metadata.unit_id && h.metadata.block === "table")?.metadata.unit_id : void 0;
       const note = retyped || unreferenced ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.` : ANCHOR_CORRECTION_NOTE;
       generateRetries += 1;
-      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], effort);
+      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], routeEffort(routed.route));
       if (corrected) {
         const correctedAnswer = canonicalRefusal(corrected);
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h) => h.text));
@@ -2559,11 +2595,11 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
         sealScope: declaredScoped ? docScope : null,
         datasetScope: narrowed ? corpora : null,
         standardKeys,
-        ...ablate?.stages ? { stageSubset: ablate.stages } : {}
+        ...routeSubset ? { stageSubset: routeSubset } : {}
       });
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, void 0, summary, budget);
-        const retryAnswer = await generateOnce(env, model, retryMessages, effort);
+        const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
         if (retryAnswer) {
           answer = canonicalRefusal(retryAnswer);
           used = retryUsed;
@@ -2616,7 +2652,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
       if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
     }
   }
-  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {} };
+  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
   const cacheable = !contextual && !declaredCtx && !ablate && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));

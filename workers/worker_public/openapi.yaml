@@ -1173,6 +1173,17 @@ components:
             condition-set evaluation); the answer model narrates from
             passages alone. Same admin credential and cache law as
             ablate_stages.
+        ablate_route:
+          type: string
+          enum: [fast, deep, adaptive]
+          default: adaptive
+          description: >-
+            Research-only: force the route (TODO.sota/05). fast drops the
+            candidate-expansion lanes (hyde, multi-query, sub-query) and
+            floors generation effort at low; deep keeps the full
+            registry. adaptive (the default) lets the router decide from
+            understanding's features. Same admin credential and cache
+            law as ablate_stages.
         lang:
           type: string
           description: Forces the answer language, for example en or fr.
@@ -1243,6 +1254,19 @@ components:
             intent: { type: string }
             doc: { type: string, nullable: true }
             edition: { type: string, nullable: true }
+        route:
+          type: object
+          description: >-
+            The adaptive route the ask rode (TODO.sota/05): fast (the
+            registry minus the candidate-expansion lanes, generation
+            effort floored at low) or deep (the full registry), with the
+            features that fired — the telemetry the routing-accuracy
+            analysis reads.
+          properties:
+            route: { type: string, enum: [fast, deep] }
+            features:
+              type: array
+              items: { type: string }
             term: { type: string, nullable: true }
             terms:
               type: array
