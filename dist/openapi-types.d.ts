@@ -879,6 +879,11 @@ export interface components {
              */
             ablate_no_verdict: boolean;
             /**
+             * @description Research-only (TODO.sota/02 row 2): arm speculative draft-verify — the cheap model drafts an answer per diversified subset of the window in parallel, one strong call verifies every candidate against the full passages and produces the final answer. Same admin credential and cache law as ablate_stages.
+             * @default false
+             */
+            ablate_speculative: boolean;
+            /**
              * @description Research-only: force the route (TODO.sota/05). fast drops the candidate-expansion lanes (hyde, multi-query, sub-query) and floors generation effort at low; deep keeps the full registry. adaptive (the default) lets the router decide from understanding's features. Same admin credential and cache law as ablate_stages.
              * @default adaptive
              * @enum {string}

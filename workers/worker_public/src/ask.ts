@@ -6,7 +6,7 @@
 import { LIMITS, MODELS, THRESHOLDS, num, sha256Hex, roleModel, answerEffort, requestEffort, effortBudget } from "./config";
 import { portModelRunner } from "./env.ts";
 import { refCodec } from "./codecs";
-import { buildMessages, citations, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, refusalAnswer, Hit } from "./pipeline";
+import { buildMessages, citations, fill, promptVars, retrieve, retrievalQuery, identityNote, splitHistory, listwiseRerank, refusalAnswer, Hit } from "./pipeline";
 import { sessionFrom } from "./auth";
 import { retrieveInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
@@ -37,6 +37,8 @@ import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested } from "./an
 import { parseAblate } from "./ablate";
 import { STAGE_NAMES } from "./stages/index.ts";
 import { routeFor, fastRouteStages } from "./route.ts";
+import { partitionSubsets, type Partitionable } from "./speculative.ts";
+import speculativeVerifyPrompt from "../prompts/speculative-verify.md";
 import type { Env } from "./env";
 export type { Env };
 import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
@@ -60,6 +62,57 @@ function userImageDataUrl(body: any): string | null {
   const m = img.match(/^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$/);
   if (!m || !m[2]) return null;
   return img;
+}
+
+// drafts are candidates, not the answer: half the window budget keeps
+// each draft short and keeps the parallel leg inside the single-call
+// latency it must beat
+const DRAFT_TOKEN_BUDGET = 1600;
+
+/** The verifier's passage listing: the same [n] label grammar the
+ *  answer path builds (the final answer cites against it). */
+function speculativeListing(hits: Hit[]): string {
+  return hits
+    .map((h, i) => {
+      const id = (h.metadata.docidentifier || h.metadata.doc_id || "source").replace(/\s*\(([A-Z])\)\s*$/, "").trim();
+      const edition = h.metadata.edition && !id.includes(h.metadata.edition) ? ":" + h.metadata.edition : "";
+      const anchor = h.metadata.clause_anchor ? ` §${h.metadata.clause_anchor}` : "";
+      return `[${i + 1}] ${id}${edition}${anchor} ${h.text.replace(/\s+/g, " ").slice(0, 700)}`;
+    })
+    .join("\n\n");
+}
+
+/** Speculative draft-verify: draft per diversified subset (parallel,
+ *  cheap model, contract-shaped messages), then ONE strong call
+ *  verifies every candidate against the FULL window and produces the
+ *  final answer. Null on any failure — the caller's normal generation
+ *  stands. */
+async function speculativeDraftVerify(
+  env: Env,
+  opts: { query: string; hits: Hit[]; lang?: string | null; draftModel: string; verifierModel: string },
+): Promise<{ answer: string; chosen: number; nDrafts: number } | null> {
+  const subsets = partitionSubsets(opts.hits as unknown as Partitionable[]);
+  if (!subsets) return null;
+  const draftSets = subsets.map((subset) =>
+    buildMessages(opts.query, subset as unknown as Hit[], opts.lang ?? undefined, [], undefined, undefined, DRAFT_TOKEN_BUDGET).messages,
+  );
+  const drafts = await Promise.all(
+    draftSets.map((m) => generateOnce(env, opts.draftModel, m, "low").catch(() => null)),
+  );
+  const candidates = drafts
+    .map((d) => (d ?? "").trim())
+    .filter((d) => d.length > 0);
+  if (!candidates.length) return null;
+  const candidateText = candidates
+    .map((d, i) => `<candidate ${i + 1} (prepared from a partial view)>\n${d}\n</candidate ${i + 1}>`)
+    .join("\n\n");
+  const system = fill(speculativeVerifyPrompt.trimEnd(), promptVars({}));
+  const answer = await generateOnce(env, opts.verifierModel, [
+    { role: "system", content: system },
+    { role: "user", content: `Question: ${opts.query}\n\nCandidate draft answers:\n${candidateText}\n\nFull context passages:\n${speculativeListing(opts.hits)}` },
+  ], "low").catch(() => null);
+  if (!answer || !answer.trim()) return null;
+  return { answer, chosen: candidates.length, nDrafts: drafts.length };
 }
 
 async function cacheGet(env: Env, gen: string, ns: string, query: string, lang?: string, salt?: string | null) {
@@ -1450,7 +1503,28 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   }
 
   const tGen = Date.now();
-  let answer = await generateOnce(env, model, messages, routeEffort(routed.route));
+  // ── speculative draft-verify (TODO.sota/02 row 2): when the ablation
+  // config arms it, the cheap model drafts per diversified subset in
+  // parallel and one strong call verifies against the FULL window. The
+  // seam replaces only the primary generation call — the contract
+  // checks below run on the verifier's output exactly as on any answer —
+  // and any failure falls through to the normal single-shot path.
+  let answer: string | null = null;
+  if (ablate?.speculative) {
+    const spec = await speculativeDraftVerify(env, {
+      query: q.query, hits: usedHits, lang: q.lang,
+      draftModel: MODELS.member, verifierModel: roleModel(env, "verifier"),
+    }).catch((e: unknown) => {
+      console.log("speculative: failed, falling through —", String(e).slice(0, 120));
+      return null;
+    });
+    if (spec) {
+      answer = spec.answer;
+      stageTiming.speculative = Date.now() - tGen;
+      console.log("speculative:", spec.nDrafts, "drafts,", spec.chosen, "viable — verified");
+    }
+  }
+  if (!answer) answer = await generateOnce(env, model, messages, routeEffort(routed.route));
   if (answer === null) {
     generateRetries += 1;
     // the fallback is a text-only model: image parts must be flattened

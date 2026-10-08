@@ -24,6 +24,11 @@ export const MODELS = {
   listwise: "@cf/zai-org/glm-4.7-flash",
   // deep-research loop (G10): bounded agentic iterations, members-only
   research: "@cf/zai-org/glm-5.3-flash",
+  // speculative draft-verify (TODO.sota/02 row 2): the strong verifier
+  // over the cheap drafts — the research-tier model verifies; the drafter
+  // is the standard answer model (MODELS.member). VERIFIER_MODEL swaps it
+  // live, same lever as every role.
+  verifier: "@cf/zai-org/glm-5.2",
 } as const;
 
 export const LIMITS = {

@@ -19,7 +19,7 @@ import {
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-ANUHRJ4Z.js";
+} from "./chunk-KE7SGAGA.js";
 import {
   NO_CONTEXT,
   STAGE_NAMES,
@@ -34,6 +34,7 @@ import {
   editionNote,
   estimateTokens,
   experimentalSourceLabels,
+  fill,
   graphExpand,
   identityNote,
   listwiseRerank,
@@ -44,6 +45,7 @@ import {
   opCfg,
   opTokenMember,
   parseContext,
+  promptVars,
   qualityNote,
   rawSessionToken,
   refCodec,
@@ -58,20 +60,20 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-OHD5KSAG.js";
+} from "./chunk-FN5L7TVJ.js";
 import {
   embed,
   generateOnce,
   portModelRunner,
   portStore
-} from "./chunk-KNCRYAX3.js";
+} from "./chunk-JQGY5TDF.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-DTW4UW2E.js";
+} from "./chunk-B4QL6VW4.js";
 import {
   canonicalRefusal,
   refusalAnswer
@@ -81,7 +83,7 @@ import {
   requestSalt,
   resolveRequestScope,
   standardKeysFrom
-} from "./chunk-U4ERFUOK.js";
+} from "./chunk-4OYYKRWE.js";
 import {
   LIMITS,
   MODELS,
@@ -92,7 +94,7 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-BOAITSVV.js";
+} from "./chunk-QL3GDVOS.js";
 import {
   certificateLinks,
   registerNote,
@@ -1341,9 +1343,10 @@ function parseAblate(body, adminToken, presentedToken, knownStages) {
   const rawStages = body?.ablate_stages;
   const noVerdict = body?.ablate_no_verdict === true;
   const rawRoute = body?.ablate_route;
+  const speculative = body?.ablate_speculative === true;
   const namesAblation = rawStages !== void 0 && rawStages !== null;
   const routeAblation = rawRoute !== void 0 && rawRoute !== null && rawRoute !== "adaptive";
-  if (!namesAblation && !noVerdict && !routeAblation) return { ok: true, config: null };
+  if (!namesAblation && !noVerdict && !routeAblation && !speculative) return { ok: true, config: null };
   if (!adminToken || presentedToken !== adminToken) {
     return {
       ok: false,
@@ -1374,7 +1377,7 @@ function parseAblate(body, adminToken, presentedToken, knownStages) {
     }
     stages = [...new Set(rawStages)];
   }
-  return { ok: true, config: { stages, noVerdict, route } };
+  return { ok: true, config: { stages, noVerdict, route, speculative } };
 }
 
 // workers/worker_public/src/route.ts
@@ -1397,6 +1400,27 @@ function routeFor(u, query) {
 function fastRouteStages(registry) {
   return registry.filter((n) => !ROUTE_FAST_DROPS.includes(n));
 }
+
+// workers/worker_public/src/speculative.ts
+var SPECULATIVE_SUBSETS = 3;
+function partitionSubsets(hits, k = SPECULATIVE_SUBSETS) {
+  const groups = [];
+  const byDoc = /* @__PURE__ */ new Map();
+  for (const h of hits) {
+    const key = h.metadata.docidentifier || h.metadata.doc_id || "";
+    const arr = byDoc.get(key) ?? [];
+    arr.push(h);
+    if (arr.length === 1) groups.push(arr);
+    byDoc.set(key, arr);
+  }
+  if (groups.length < 2) return null;
+  const subsets = Array.from({ length: Math.min(k, groups.length) }, () => []);
+  groups.forEach((g, i) => subsets[i % subsets.length].push(...g));
+  return subsets;
+}
+
+// workers/worker_public/prompts/speculative-verify.md
+var speculative_verify_default = "You answer questions about legal-metrology publications for {{PUBLISHER_NAME}}. Candidate draft answers were prepared in parallel, each from a PARTIAL view of the evidence (a subset of the passages); you see every candidate beside the FULL passages. Produce the final answer.\n\nRules:\n1. Compare the candidates against the full passages. Adopt the candidate best supported by the evidence as your starting point; correct every claim the full passages contradict or fail to support, and fold in anything the other candidates got right that the adopted one missed.\n2. Ground every factual claim in the numbered passages and cite them inline as [1], [2], \u2026 exactly as the passages are numbered below. Never cite a passage that is not there.\n3. Quote verbatim \u2014 with quotation marks \u2014 when a clause's exact wording matters (definitions, thresholds, requirements); a quotation must appear word-for-word in the passages.\n4. Numeric and table values come from the passages exactly; never retype a table as markdown \u2014 refer to the table and cite it.\n5. If the passages do not answer the question, say so plainly instead of guessing.\n6. Be complete but compact: answer the question, cite, stop.\n";
 
 // workers/worker_public/src/operations.ts
 function isOperationIntent(query) {
@@ -1606,6 +1630,43 @@ function userImageDataUrl(body) {
   const m = img.match(/^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$/);
   if (!m || !m[2]) return null;
   return img;
+}
+var DRAFT_TOKEN_BUDGET = 1600;
+function speculativeListing(hits) {
+  return hits.map((h, i) => {
+    const id = (h.metadata.docidentifier || h.metadata.doc_id || "source").replace(/\s*\(([A-Z])\)\s*$/, "").trim();
+    const edition = h.metadata.edition && !id.includes(h.metadata.edition) ? ":" + h.metadata.edition : "";
+    const anchor = h.metadata.clause_anchor ? ` \xA7${h.metadata.clause_anchor}` : "";
+    return `[${i + 1}] ${id}${edition}${anchor} ${h.text.replace(/\s+/g, " ").slice(0, 700)}`;
+  }).join("\n\n");
+}
+async function speculativeDraftVerify(env, opts) {
+  const subsets = partitionSubsets(opts.hits);
+  if (!subsets) return null;
+  const draftSets = subsets.map(
+    (subset) => buildMessages(opts.query, subset, opts.lang ?? void 0, [], void 0, void 0, DRAFT_TOKEN_BUDGET).messages
+  );
+  const drafts = await Promise.all(
+    draftSets.map((m) => generateOnce(env, opts.draftModel, m, "low").catch(() => null))
+  );
+  const candidates = drafts.map((d) => (d ?? "").trim()).filter((d) => d.length > 0);
+  if (!candidates.length) return null;
+  const candidateText = candidates.map((d, i) => `<candidate ${i + 1} (prepared from a partial view)>
+${d}
+</candidate ${i + 1}>`).join("\n\n");
+  const system = fill(speculative_verify_default.trimEnd(), promptVars({}));
+  const answer = await generateOnce(env, opts.verifierModel, [
+    { role: "system", content: system },
+    { role: "user", content: `Question: ${opts.query}
+
+Candidate draft answers:
+${candidateText}
+
+Full context passages:
+${speculativeListing(opts.hits)}` }
+  ], "low").catch(() => null);
+  if (!answer || !answer.trim()) return null;
+  return { answer, chosen: candidates.length, nDrafts: drafts.length };
 }
 async function cacheGet(env, gen, ns, query, lang, salt) {
   const key = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(query, lang, salt)));
@@ -2543,7 +2604,25 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
     }
   }
   const tGen = Date.now();
-  let answer = await generateOnce(env, model, messages, routeEffort(routed.route));
+  let answer = null;
+  if (ablate?.speculative) {
+    const spec = await speculativeDraftVerify(env, {
+      query: q.query,
+      hits: usedHits,
+      lang: q.lang,
+      draftModel: MODELS.member,
+      verifierModel: roleModel(env, "verifier")
+    }).catch((e) => {
+      console.log("speculative: failed, falling through \u2014", String(e).slice(0, 120));
+      return null;
+    });
+    if (spec) {
+      answer = spec.answer;
+      stageTiming.speculative = Date.now() - tGen;
+      console.log("speculative:", spec.nDrafts, "drafts,", spec.chosen, "viable \u2014 verified");
+    }
+  }
+  if (!answer) answer = await generateOnce(env, model, messages, routeEffort(routed.route));
   if (answer === null) {
     generateRetries += 1;
     const isFigureAttachMessage = (m) => Array.isArray(m.content) && m.content.some((part) => part?.type === "text" && /^The original image of figure unit /.test(part.text ?? ""));
