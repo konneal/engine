@@ -243,6 +243,7 @@ function extractChecks(content) {
     if (b) out.push(b);
   };
   push(c.check);
+  push(c.expression);
   push(c.limit?.expression);
   push(c.acceptance_criteria?.limit && !c.acceptance_criteria.limit.expression?.includes("ocl{") ? null : c.acceptance_criteria?.limit?.expression);
   const st = c.acceptance_criteria?.limit;
