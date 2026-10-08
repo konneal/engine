@@ -333,6 +333,9 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--skip-fts", action="store_true")
         sp.add_argument("--skip-graph", action="store_true")
         sp.add_argument("--docs", default=None)
+    # RAPTOR depth-2 (TODO.sota/06, catalog row 3): document summaries
+    # over the depth-1 tree's own record
+    sub.choices["sections"].add_argument("--depth2", action="store_true")
     # the model plane (TODO.ai-platform/05): derive from the smart
     # checkout's committed bundles; --check is the freshness gate (a
     # package change re-indexes); --apply loads the D1 node store.
@@ -398,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
             limit=args.limit,
             batch=args.batch,
             dry=args.dry,
+            depth2=getattr(args, "depth2", False),
         )
     elif args.cmd == "retrieval-plane":
         from .retrieval_plane import run as run_retrieval_plane

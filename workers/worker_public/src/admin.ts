@@ -6,6 +6,7 @@ import { embed } from "./ai";
 import { err, json, corsHeaders, readJson, authenticate } from "./lib/http";
 import type { Env } from "./env";
 import enrichmentPrompt from "../prompts/enrichment.md";
+import docSummaryPrompt from "../prompts/doc-summary.md";
 import sectionSummaryPrompt from "../prompts/section-summary.md";
 import relevancyPrompt from "../prompts/relevancy.md";
 import precisionPrompt from "../prompts/precision.md";
@@ -138,19 +139,26 @@ export async function handleSectionUnit(env: Env, ctx: ExecutionContext, req: Re
         return { id: u?.id ?? null, ok: false, error: "invalid unit (id, metadata.doc_id, metadata.clause_anchor, children required)" };
       }
       try {
+        // RAPTOR depth (TODO.sota/06, the catalog's row 3): level 2
+        // summarizes the LEVEL-1 summary units of one document into a
+        // document-level navigation node — the children are unit ids,
+        // and the stamp says so the descent can walk another level.
+        const level = u?.level === 2 ? 2 : 1;
         const cacheKey = `s:${u.id}`;
         let summary = body?.force === true ? null : await env.CACHE.get(cacheKey);
         const cached = !!summary;
         if (!summary) {
-          const head = `${m.docidentifier ?? m.doc_id} §${m.clause_anchor}${m.clause_title ? " — " + m.clause_title : ""}`;
+          const head = level === 2
+            ? `${m.docidentifier ?? m.doc_id} — document summary`
+            : `${m.docidentifier ?? m.doc_id} §${m.clause_anchor}${m.clause_title ? " — " + m.clause_title : ""}`;
           const listing = u.children
             .slice(0, 12)
-            .map((c: any) => `§${c.anchor ?? ""}${c.title ? " " + c.title : ""} — ${String(c.excerpt ?? "").slice(0, 260)}`)
+            .map((c: any) => (level === 2 ? `- ${c.title ?? c.anchor ?? ""} — ${String(c.excerpt ?? "").slice(0, 300)}` : `§${c.anchor ?? ""}${c.title ? " " + c.title : ""} — ${String(c.excerpt ?? "").slice(0, 260)}`))
             .join("\n");
           const res: any = await env.AI.run(model, {
             messages: [
-              { role: "system", content: sectionSummaryPrompt.trimEnd() },
-              { role: "user", content: `${head}\n\nSub-clauses:\n${listing}` },
+              { role: "system", content: (level === 2 ? docSummaryPrompt : sectionSummaryPrompt).trimEnd() },
+              { role: "user", content: `${head}\n\n${level === 2 ? "Section summaries:" : "Sub-clauses:"}\n${listing}` },
             ],
             max_tokens: 1600, // parity with the chunk-enrichment call — 900 starved ~40% of section summaries (model-card budget rule)
             reasoning_effort: "low",
@@ -172,9 +180,9 @@ export async function handleSectionUnit(env: Env, ctx: ExecutionContext, req: Re
         const vectorText = `${m.docidentifier ?? m.doc_id} §${m.clause_anchor} ${text}`.slice(0, 2000);
         const vector = await embed(portModelRunner(env), MODELS.embed, vectorText);
         await env.VECTORIZE.upsert([
-          { id: u.id, values: vector, metadata: { ...m, chunk_text: text, section_summary: "1", child_anchors: childAnchors, ctx: "1" } },
+          { id: u.id, values: vector, metadata: { ...m, chunk_text: text, section_summary: "1", ...(level === 2 ? { summary_level: "2" } : {}), child_anchors: childAnchors, ctx: "1" } },
         ]);
-        return { id: u.id, ok: true, cached, children: u.children.length };
+        return { id: u.id, ok: true, cached, level, children: u.children.length };
       } catch (e: any) {
         return { id: u.id, ok: false, error: String(e?.message ?? e).slice(0, 200) };
       }

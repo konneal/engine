@@ -23235,6 +23235,35 @@ var typedPin = {
 };
 
 // workers/worker_public/src/stages/sectionDescent.ts
+var CHUNK_COLS = "id, doc_id, docidentifier, doctype, doc_number, edition, language, clause_anchor, clause_title, status, superseded_by, corpus, tier, text, unit_id, block";
+async function sectionChildren(env, unitIds) {
+  const kids = [];
+  for (let i = 0; i < unitIds.length; i += 20) {
+    const got = await env.VECTORIZE.getByIds(unitIds.slice(i, i + 20)) ?? [];
+    for (const v of got) {
+      if (!v?.metadata?.child_anchors) continue;
+      kids.push({
+        id: v.id,
+        score: 0,
+        metadata: v.metadata,
+        text: String(v.metadata.chunk_text ?? "")
+      });
+    }
+  }
+  return kids;
+}
+async function clausesOf(env, docId, anchors, limit) {
+  const marks = anchors.map(() => "?").join(",");
+  const res = await env.DB.prepare(
+    `SELECT ${CHUNK_COLS} FROM chunks WHERE doc_id = ? AND clause_anchor IN (${marks}) LIMIT ${limit}`
+  ).bind(docId, ...anchors).all().catch(() => ({ results: [] }));
+  return (res.results ?? []).map((r) => ({
+    id: String(r.id),
+    score: 0,
+    metadata: r,
+    text: String(r.text ?? "")
+  }));
+}
 var sectionDescent = {
   name: "section-descent",
   failure: "additive",
@@ -23243,6 +23272,33 @@ var sectionDescent = {
     const sectionHit = c.finalHits.find(
       (h) => h.metadata.section_summary === "1" && h.metadata.child_anchors && h.score > 0
     );
+    if (sectionHit.metadata.summary_level === "2") {
+      const unitIds = sectionHit.metadata.child_anchors.split(",").map((s8) => s8.trim()).filter(Boolean).slice(0, 12);
+      const kids2 = await sectionChildren(c.env, unitIds);
+      const order = new Map(unitIds.map((id, i) => [id, i]));
+      kids2.sort((a, b) => (order.get(a.id) ?? 99) - (order.get(b.id) ?? 99));
+      const collected = [];
+      const consumed = [];
+      for (const kid of kids2.slice(0, 2)) {
+        const anchors = kid.metadata.child_anchors.split(",").map((s8) => s8.trim()).filter(Boolean).slice(0, 25);
+        if (!anchors.length) continue;
+        const clauses = (await clausesOf(c.env, String(kid.metadata.doc_id), anchors, 6)).filter((x) => !c.finalHits.some((h) => h.id === x.id) && !collected.some((h) => h.id === x.id)).slice(0, 2).map((x) => ({ ...x, score: sectionHit.score * THRESHOLDS.sectionDescentDiscount }));
+        if (clauses.length) {
+          collected.push(...clauses);
+          consumed.push(kid.id);
+        }
+      }
+      if (collected.length) {
+        c.finalHits = [...c.finalHits.filter((h) => h !== sectionHit), ...collected];
+        console.log(
+          "section descent (doc):",
+          sectionHit.metadata.docidentifier,
+          "\u2192",
+          collected.map((x) => "\xA7" + x.metadata.clause_anchor).join(", ")
+        );
+      }
+      return;
+    }
     const kids = sectionHit.metadata.child_anchors.split(",").map((s8) => s8.trim()).filter(Boolean).slice(0, 25);
     if (kids.length) {
       const cv = await c.env.VECTORIZE.query(c.vector, {
