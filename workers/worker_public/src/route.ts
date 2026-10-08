@@ -56,14 +56,24 @@ export function routeFor(u: RouteFeatures | null, query: string): {
   if ((u?.sub_queries ?? []).length > 0) features.push("sub-queries");
   if (u?.process_intent) features.push("process-intent");
   if (words > ROUTE_FAST_WORD_CAP) features.push("long-question");
+  // a document scope (named in the question OR declared by a context
+  // chip — the chip writes the same understanding fields) NARROWS the
+  // candidate pool structurally: the dense filter does the scoping, and
+  // the sealed/narrowed pool needs every lane feeding it (the
+  // multi-query variants are its redundancy). The 2026-10-08 gate
+  // caught this class: ctx-entity-r60, chip-declared and routed fast,
+  // refused intermittently — a starved sealed pool (the 2026-09-08
+  // diagnosis's shape). Scoped questions ride deep until the grid
+  // prices the lanes against a sealed pool.
+  if (u?.doc_number) features.push("doc-scoped");
   if (features.length) return { route: "deep", features };
 
-  // FAST — everything else: a question within the word cap rides the
-  // fast registry. The conservative direction is structural here: the
-  // long, the complex, the multi-perspective and the process-shaped all
-  // routed deep above; under-routing costs accuracy, over-routing costs
-  // only latency, and the grid prices both.
-  if (u?.doc_number) features.push("doc-scoped");
+  // FAST — everything else: an UNscoped question within the word cap
+  // rides the fast registry. The conservative direction is structural
+  // here: the long, the complex, the multi-perspective, the
+  // process-shaped and the scoped all routed deep above; under-routing
+  // costs accuracy, over-routing costs only latency, and the grid
+  // prices both.
   if (u?.term) features.push("definitional");
   if ((u?.defined_terms ?? []).length > 0) features.push("terminology");
   features.push("short-question");

@@ -1390,8 +1390,8 @@ function routeFor(u, query) {
   if ((u?.sub_queries ?? []).length > 0) features.push("sub-queries");
   if (u?.process_intent) features.push("process-intent");
   if (words > ROUTE_FAST_WORD_CAP) features.push("long-question");
-  if (features.length) return { route: "deep", features };
   if (u?.doc_number) features.push("doc-scoped");
+  if (features.length) return { route: "deep", features };
   if (u?.term) features.push("definitional");
   if ((u?.defined_terms ?? []).length > 0) features.push("terminology");
   features.push("short-question");
