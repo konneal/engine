@@ -73,7 +73,7 @@ candidate lanes → pool open → pool-level merges → refinement → window as
 | 23 | `structural-propagate` | — | blocking | REPLACES `hits` | FABLE TreeExpansion: score blends along the clause tree. |
 | 24 | `diversity` | — | blocking | `finalHits` (from `hits`) | Per-publication caps (1 overview / 2–3 clauses; global overview cap 2/6); window cut to `rerankKeep`. FIRST writer of `finalHits`. |
 | 25 | `typed-pin` | pin families resolvable | blocking (inner parent-fetch additive) | `finalHits` | Answer-contract v2: one typed unit guaranteed a slot (+ small-to-big parent fetch at `smallToBigDiscount`). |
-| 26 | `section-descent` | a ranked depth-1 summary has children | additive | `finalHits` | Summary node → top child clauses at `sectionDescentDiscount`; the summary retires when children answer. |
+| 26 | `section-descent` | a ranked summary has children | additive | `finalHits` | Summary node → child clauses at `sectionDescentDiscount`; the summary retires when children answer. Two levels (the RAPTOR extension, TODO.sota/06): a level-1 section summary's children are CLAUSE anchors found by the same-query filtered search; a level-2 DOCUMENT summary's children are LEVEL-1 UNIT ids — read by id (the ≤20 getByIds law), their clauses from the D1 corpus directly (the l6a law — the index metadata filters are dead), the two leading sections (reading order) consumed, the synthetic nodes retired. |
 | 27 | `dedup` | — | blocking | `finalHits` | FABLE ancestor-descendant same-chain collapse (≥0.5 text overlap). |
 | 28 | `window-floor` | — | blocking | filters `finalHits` | Evidence-budget cut at `windowFloorFraction` of top; typed/family/unscored exempt; never fewer than two. |
 

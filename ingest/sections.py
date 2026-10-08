@@ -118,7 +118,69 @@ def build_specs(docs: list[str] | None = None, limit: int | None = None) -> list
     return specs
 
 
-def run(docs: list[str] | None = None, limit: int | None = None, batch: int = 6, dry: bool = False) -> int:
+def build_depth2_specs() -> list[dict]:
+    """One document-level unit per document that has level-1 units in
+    UNITS_PATH (the depth-1 run's own record): the children ARE the
+    level-1 unit ids, and each child's excerpt is the level-1 summary
+    text fetched from the index through /admin/vectors (mode get) — the
+    depth-2 summary sees exactly what retrieval sees."""
+    per_doc: dict[str, list[dict]] = {}
+    with UNITS_PATH.open(encoding="utf-8") as fh:
+        for line in fh:
+            spec = json.loads(line)
+            doc = spec.get("metadata", {}).get("doc_id")
+            if doc:
+                per_doc.setdefault(doc, []).append(spec)
+    if not per_doc:
+        return []
+
+    env = {**os.environ, **_dotenv(ARTIFACTS.parent / ".env")}
+    base = env.get("RAG_BASE", "https://ai.oimlsmart.org").rstrip("/")
+    token = env.get("ADMIN_TOKEN")
+    if not token:
+        print("ADMIN_TOKEN missing (set it in .env) — the summaries' text comes from the index")
+        return []
+
+    specs: list[dict] = []
+    with httpx.Client(timeout=300) as client:
+        for doc, units in per_doc.items():
+            ordered = sorted(units, key=lambda u: _anchor_key(str(u["metadata"].get("clause_anchor", ""))))
+            ids = [u["id"] for u in ordered]
+            texts: dict[str, str] = {}
+            for i in range(0, len(ids), 20):
+                res = client.post(
+                    f"{base}/admin/vectors",
+                    headers={"authorization": f"Bearer {token}", "user-agent": "oiml-section-indexer/1.0"},
+                    json={"mode": "get", "ids": ids[i : i + 20]},
+                )
+                res.raise_for_status()
+                for v in res.json().get("vectors", []):
+                    texts[v["id"]] = str((v.get("metadata") or {}).get("chunk_text") or "")
+            if not any(texts.get(i) for i in ids):
+                print(f"  depth2 skip {doc}: no level-1 summaries found in the index")
+                continue
+            m = dict(ordered[0]["metadata"])
+            m["clause_anchor"] = "document"
+            m["clause_title"] = f"{m.get('docidentifier', doc)} — document summary"
+            specs.append({
+                "id": f"docs-{doc.replace('/', '_')}",
+                "level": 2,
+                "metadata": m,
+                "children": [
+                    {
+                        "anchor": u["id"],
+                        "title": f"§{u['metadata'].get('clause_anchor', '')} {u['metadata'].get('clause_title', '')}".strip(),
+                        "excerpt": texts.get(u["id"], ""),
+                    }
+                    for u in ordered
+                ],
+            })
+    return specs
+
+
+def run(docs: list[str] | None = None, limit: int | None = None, batch: int = 6, dry: bool = False, depth2: bool = False) -> int:
+    if depth2:
+        return run_depth2(batch=batch, dry=dry)
     env = {**os.environ, **_dotenv(ARTIFACTS.parent / ".env")}
     specs = build_specs(docs, limit)
     if not specs:
@@ -163,4 +225,49 @@ def run(docs: list[str] | None = None, limit: int | None = None, batch: int = 6,
                 print(f"  batch FAIL: {e}")
             time.sleep(1)
     print(f"[sections] DONE: {ok}/{len(specs)} upserted, {fail} failed")
+    return 0 if fail == 0 else 1
+
+
+def run_depth2(batch: int = 6, dry: bool = False) -> int:
+    env = {**os.environ, **_dotenv(ARTIFACTS.parent / ".env")}
+    specs = build_depth2_specs()
+    if not specs:
+        print("sections depth2: no document units to build (build the depth-1 tree first — UNITS_PATH is the depth-1 run's record)")
+        return 1
+    out = ARTIFACTS / "section_units_depth2.jsonl"
+    with out.open("w", encoding="utf-8") as fh:
+        for s in specs:
+            fh.write(json.dumps(s, ensure_ascii=False) + "\n")
+    print(f"sections depth2: {len(specs)} document specs → {out}")
+    if dry:
+        return 0
+
+    base = env.get("RAG_BASE", "https://ai.oimlsmart.org").rstrip("/")
+    token = env.get("ADMIN_TOKEN")
+    if not token:
+        print("ADMIN_TOKEN missing (set it in .env)")
+        return 1
+    ok = fail = 0
+    with httpx.Client(timeout=300) as client:
+        for i in range(0, len(specs), min(batch, 6)):
+            chunk = specs[i : i + min(batch, 6)]
+            try:
+                res = client.post(
+                    f"{base}/admin/section",
+                    headers={"authorization": f"Bearer {token}", "user-agent": "oiml-section-indexer/1.0"},
+                    json={"units": chunk},
+                )
+                body = res.json()
+                for u, r in zip(chunk, body.get("results", [])):
+                    if r.get("ok"):
+                        ok += 1
+                    else:
+                        fail += 1
+                        print(f"  FAIL {u['id']}: {r.get('error')}")
+                print(f"  {min(i + len(chunk), len(specs))}/{len(specs)} (ok={ok} fail={fail})", flush=True)
+            except Exception as e:  # noqa: BLE001
+                fail += len(chunk)
+                print(f"  batch FAIL: {e}")
+            time.sleep(1)
+    print(f"[sections depth2] DONE: {ok}/{len(specs)} upserted, {fail} failed")
     return 0 if fail == 0 else 1

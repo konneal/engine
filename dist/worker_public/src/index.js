@@ -4,7 +4,7 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-S7HOX7QB.js";
+} from "../../chunk-G4KBK5XZ.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
@@ -12,7 +12,7 @@ import {
 } from "../../chunk-G56TYXNN.js";
 import {
   handleSearch
-} from "../../chunk-IXS5ZDPN.js";
+} from "../../chunk-HAU5INEJ.js";
 import {
   buildMessages,
   citations,
@@ -34,7 +34,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-7M7RWQ4D.js";
+} from "../../chunk-2R7OVYAO.js";
 import {
   cfBlobs,
   embed,
@@ -347,6 +347,9 @@ async function handleGetShared(env, slug) {
 // workers/worker_public/prompts/enrichment.md
 var enrichment_default = "You write a retrieval context for a passage from {{CORPUS_KIND}}. The context is prepended to the passage before embedding so a semantic search can locate the passage even when the query uses different vocabulary than the passage itself.\n\nWrite ONE concise sentence (at most 40 words) that situates the passage: name the publication by its exact {{PUBLISHER_NAME}} identifier (including part or annex when applicable) and what the passage covers \u2014 paraphrasing the topic in words DIFFERENT from the passage's own. Do not copy the passage verbatim, do not add facts that are not derivable from the passage or its header, do not answer or explain the content. Reply with the context sentence only \u2014 no quotes, no preamble.\n";
 
+// workers/worker_public/prompts/doc-summary.md
+var doc_summary_default = "You write the document-level summary for a legal-metrology publication in {{PUBLISHER_NAME}}'s retrieval index. The section summaries below cover the publication clause by clause. Write one compact abstract, three to five sentences: what the publication regulates or provides, its scope and applicability, and the structure a reader should know (parts, annexes, where the normative core sits). Use the publication's own terms exactly. No preamble, no headings.\n";
+
 // workers/worker_public/prompts/section-summary.md
 var section_summary_default = "You summarize one numbered clause of a metrology publication for a retrieval index. You are given the publication, the clause number, and excerpts of its sub-clauses.\n\nWrite a dense summary of 3 to 5 sentences stating what the clause governs and how its sub-clauses divide the subject. Name each sub-clause number together with its topic, in document order.\n\nPlain factual prose. No preamble, no headings, no bullet list, no quotation marks around the whole text. Write in the same language as the excerpts.\n";
 
@@ -451,18 +454,19 @@ async function handleSectionUnit(env, ctx, req) {
         return { id: u?.id ?? null, ok: false, error: "invalid unit (id, metadata.doc_id, metadata.clause_anchor, children required)" };
       }
       try {
+        const level = u?.level === 2 ? 2 : 1;
         const cacheKey = `s:${u.id}`;
         let summary = body?.force === true ? null : await env.CACHE.get(cacheKey);
         const cached = !!summary;
         if (!summary) {
-          const head = `${m.docidentifier ?? m.doc_id} \xA7${m.clause_anchor}${m.clause_title ? " \u2014 " + m.clause_title : ""}`;
-          const listing = u.children.slice(0, 12).map((c) => `\xA7${c.anchor ?? ""}${c.title ? " " + c.title : ""} \u2014 ${String(c.excerpt ?? "").slice(0, 260)}`).join("\n");
+          const head = level === 2 ? `${m.docidentifier ?? m.doc_id} \u2014 document summary` : `${m.docidentifier ?? m.doc_id} \xA7${m.clause_anchor}${m.clause_title ? " \u2014 " + m.clause_title : ""}`;
+          const listing = u.children.slice(0, 12).map((c) => level === 2 ? `- ${c.title ?? c.anchor ?? ""} \u2014 ${String(c.excerpt ?? "").slice(0, 300)}` : `\xA7${c.anchor ?? ""}${c.title ? " " + c.title : ""} \u2014 ${String(c.excerpt ?? "").slice(0, 260)}`).join("\n");
           const res = await env.AI.run(model, {
             messages: [
-              { role: "system", content: section_summary_default.trimEnd() },
+              { role: "system", content: (level === 2 ? doc_summary_default : section_summary_default).trimEnd() },
               { role: "user", content: `${head}
 
-Sub-clauses:
+${level === 2 ? "Section summaries:" : "Sub-clauses:"}
 ${listing}` }
             ],
             max_tokens: 1600,
@@ -487,9 +491,9 @@ Covers: ${childAnchors}`;
         const vectorText = `${m.docidentifier ?? m.doc_id} \xA7${m.clause_anchor} ${text}`.slice(0, 2e3);
         const vector = await embed(portModelRunner(env), MODELS.embed, vectorText);
         await env.VECTORIZE.upsert([
-          { id: u.id, values: vector, metadata: { ...m, chunk_text: text, section_summary: "1", child_anchors: childAnchors, ctx: "1" } }
+          { id: u.id, values: vector, metadata: { ...m, chunk_text: text, section_summary: "1", ...level === 2 ? { summary_level: "2" } : {}, child_anchors: childAnchors, ctx: "1" } }
         ]);
-        return { id: u.id, ok: true, cached, children: u.children.length };
+        return { id: u.id, ok: true, cached, level, children: u.children.length };
       } catch (e) {
         return { id: u.id, ok: false, error: String(e?.message ?? e).slice(0, 200) };
       }
@@ -996,7 +1000,7 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-2GNDYBTM.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-TSNAMLXD.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-EAKLN77G.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-HKGN7F3O.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });
