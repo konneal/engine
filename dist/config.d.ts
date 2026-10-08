@@ -38,6 +38,11 @@ export declare const THRESHOLDS: {
      *  pool below the primary dense lane; they must earn their window
      *  slot under the cross-encoder, not by graph membership alone. */
     readonly graphLaneDiscount: 0.75;
+    /** The PPR lane's merge discount (TODO.sota/06, catalog row 4): graph-
+     *  propagated candidates arrive at the same half-discount the narrowed
+     *  graph lane pays (rag#137's law — flooding dilutes the pool), and
+     *  only the cross-encoder's preference survives the cut. */
+    readonly pprDiscount: 0.375;
     readonly licensedLaneScore: 0.5;
     /** The entailment gate (TODO.new-era/10): the faithfulness scorer
      *  promoted from eval-only onto the serving path. The confidence line
