@@ -24756,7 +24756,14 @@ async function editionNote(env, u) {
     ).bind(`% ${u.doc_number}:%`).all();
     const actives = (rows.results ?? []).map((r) => r.docidentifier);
     if (!actives.length) return void 0;
-    return `Publication registry (authoritative): the ACTIVE edition(s) for this publication are ${actives.join(", ")}. Passages from other editions are superseded \u2014 use them only for historical comparison and say so.`;
+    const famRow = await env.DB.prepare("SELECT family FROM documents WHERE docidentifier LIKE ?1 || '%:%' LIMIT 1").bind(`% ${u.doc_number}:%`).first().catch(() => null);
+    let summary = "";
+    if (famRow?.family && env.CACHE) {
+      summary = await env.CACHE.get(`famsum:${famRow.family}`).catch(() => "") ?? "";
+    }
+    const registry = `Publication registry (authoritative): the ACTIVE edition(s) for this publication are ${actives.join(", ")}. Passages from other editions are superseded \u2014 use them only for historical comparison and say so.`;
+    return summary ? `${registry}
+Family summary (precomputed from the registry and the successor graph): ${summary}` : registry;
   } catch {
     return void 0;
   }

@@ -613,6 +613,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/family-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write a family's community summary
+         * @description Generates the precomputed answer to "what is this family and what changed between editions" from the registry rows and the successor graph, and stores it in KV; editionNote serves it beside the deterministic registry line on doc-scoped answers. Families need at least two editions. force regenerates.
+         */
+        post: operations["adminFamilySummary"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/section": {
         parameters: {
             query?: never;
@@ -627,6 +647,26 @@ export interface paths {
          * @description The operational alias of /v1/admin/section; the behaviour and the credential are identical.
          */
         post: operations["adminSectionAlias"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/family-summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write a family's community summary (the operational path)
+         * @description The operational alias of /v1/admin/family-summary; the behaviour and the credential are identical.
+         */
+        post: operations["adminFamilySummaryAlias"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1932,6 +1972,33 @@ export interface operations {
             };
         };
     };
+    adminFamilySummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The family key, for example R-60. */
+                    family: string;
+                    /** @default false */
+                    force?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The stored summary with its provenance counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     adminSectionAlias: {
         parameters: {
             query?: never;
@@ -1948,6 +2015,30 @@ export interface operations {
         };
         responses: {
             /** @description The written units with their usage. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    adminFamilySummaryAlias: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    family: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The stored summary. */
             200: {
                 headers: {
                     [name: string]: unknown;

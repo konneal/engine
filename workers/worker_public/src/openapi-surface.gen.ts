@@ -46,7 +46,9 @@ export type OpenApiOperationId =
   | "adminEnrich"
   | "adminEnrichAlias"
   | "adminSection"
+  | "adminFamilySummary"
   | "adminSectionAlias"
+  | "adminFamilySummaryAlias"
   | "adminVectors"
   | "adminCaption"
   | "adminJudge"
@@ -259,8 +261,18 @@ export const OPENAPI_SURFACE: readonly (Omit<OpenApiRoute, "operationId"> & { op
   },
   {
     "method": "POST",
+    "pattern": "/v1/admin/family-summary",
+    "operationId": "adminFamilySummary"
+  },
+  {
+    "method": "POST",
     "pattern": "/admin/section",
     "operationId": "adminSectionAlias"
+  },
+  {
+    "method": "POST",
+    "pattern": "/admin/family-summary",
+    "operationId": "adminFamilySummaryAlias"
   },
   {
     "method": "POST",

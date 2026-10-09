@@ -866,6 +866,35 @@ paths:
       responses:
         '200':
           description: The written units with their usage.
+  /v1/admin/family-summary:
+    post:
+      tags: [Administration]
+      summary: Write a family's community summary
+      description: >-
+        Generates the precomputed answer to "what is this family and
+        what changed between editions" from the registry rows and the
+        successor graph, and stores it in KV; editionNote serves it
+        beside the deterministic registry line on doc-scoped answers.
+        Families need at least two editions. force regenerates.
+      operationId: adminFamilySummary
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [family]
+              properties:
+                family:
+                  type: string
+                  description: The family key, for example R-60.
+                force:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: The stored summary with its provenance counts.
   /admin/section:
     post:
       tags: [Administration]
@@ -887,6 +916,27 @@ paths:
       responses:
         '200':
           description: The written units with their usage.
+  /admin/family-summary:
+    post:
+      tags: [Administration]
+      summary: Write a family's community summary (the operational path)
+      description: >-
+        The operational alias of /v1/admin/family-summary; the behaviour
+        and the credential are identical.
+      operationId: adminFamilySummaryAlias
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [family]
+              properties:
+                family: { type: string }
+      responses:
+        '200':
+          description: The stored summary.
   /admin/vectors:
     post:
       tags: [Administration]

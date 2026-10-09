@@ -7,6 +7,7 @@ import { err, json, corsHeaders, readJson, authenticate } from "./lib/http";
 import type { Env } from "./env";
 import enrichmentPrompt from "../prompts/enrichment.md";
 import docSummaryPrompt from "../prompts/doc-summary.md";
+import familySummaryPrompt from "../prompts/family-summary.md";
 import sectionSummaryPrompt from "../prompts/section-summary.md";
 import relevancyPrompt from "../prompts/relevancy.md";
 import precisionPrompt from "../prompts/precision.md";
@@ -200,6 +201,55 @@ export async function handleSectionUnit(env: Env, ctx: ExecutionContext, req: Re
     );
   }
   return json({ results, usage });
+}
+
+/** Family community summaries (TODO.sota/06 item 2): one precomputed
+ *  answer per publication family to "what is this family and what
+ *  changed between editions" — generated from the registry rows and
+ *  the successor graph (the family IS the corpus's natural community),
+ *  stored in KV under famsum:<family>, served by editionNote beside
+ *  the deterministic registry line. Admin-gated; idempotent (force
+ *  regenerates); the quality-first lane pays once. */
+export async function handleFamilySummary(env: Env, req: Request): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const family = typeof body?.family === "string" ? body.family.trim().slice(0, 24) : "";
+  if (!/^[A-Z]+-\d+$/.test(family)) return err(400, "invalid_input", "family must look like R-60 (type-number)");
+  try {
+    const docs = await env.DB.prepare(
+      "SELECT docidentifier, edition, status, active, superseded_by, title FROM documents WHERE family = ?1 ORDER BY edition",
+    ).bind(family).all<any>();
+    const rows = docs.results ?? [];
+    if (rows.length < 2) return json({ family, ok: false, note: "fewer than two editions — no lineage to summarize" });
+    // the family's docs through the part_of edges (publisher-pure: no
+    // identifier literal — the family node is the join key)
+    const succ = await env.DB.prepare(
+      "SELECT e.src AS src, e.dst AS dst FROM graph_edges e WHERE e.kind = 'successor' AND (e.src IN (SELECT src FROM graph_edges WHERE kind = 'part_of' AND dst = ?2) OR e.dst IN (SELECT src FROM graph_edges WHERE kind = 'part_of' AND dst = ?2)) LIMIT 40",
+    ).bind(family, `family:${family}`).all<any>();
+    const key = `famsum:${family}`;
+    const cached = body?.force === true ? null : await env.CACHE.get(key);
+    if (cached) return json({ family, ok: true, cached: true, summary: cached });
+    const listing = rows.map((r: any) => `- ${r.docidentifier} — ${r.status}${r.active ? " (ACTIVE)" : ""}${r.title ? ` — ${String(r.title).slice(0, 120)}` : ""}`).join("\n");
+    const chain = ((succ.results ?? []) as any[]).map((r: any) => `${String(r.src).replace("doc:", "")} → superseded by → ${String(r.dst).replace("doc:", "")}`).join("\n");
+    const model = typeof env.ENRICH_MODEL === "string" && env.ENRICH_MODEL ? env.ENRICH_MODEL : MODELS.enrich;
+    const res: any = await env.AI.run(model, {
+      messages: [
+        { role: "system", content: familySummaryPrompt.trimEnd() },
+        { role: "user", content: `Family ${family}\n\nRegistry rows:\n${listing}\n\nSuccessor chain:\n${chain || "(no successor edges recorded)"}` },
+      ],
+      max_tokens: 1600,
+      reasoning_effort: "low",
+    });
+    const raw = typeof res?.response === "string" && res.response.trim() ? res.response : res?.choices?.[0]?.message?.content;
+    const summary = typeof raw === "string" ? raw.trim().replace(/^["']|["']$/g, "").slice(0, 1200) : "";
+    if (!summary) return json({ family, ok: false, error: "empty summary" });
+    await env.CACHE.put(key, summary);
+    return json({ family, ok: true, cached: false, summary, editions: rows.length, successors: (succ.results ?? []).length });
+  } catch (e: any) {
+    return err(502, "family_summary_failed", String(e?.message ?? e).slice(0, 200));
+  }
 }
 
 /** Ops access to the Vectorize binding (get/upsert by id) for offline
