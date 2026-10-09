@@ -55,7 +55,20 @@ export async function editionNote(env: Env, u: { doc_number?: string | null } | 
       .all<{ docidentifier: string }>();
     const actives = (rows.results ?? []).map((r) => r.docidentifier);
     if (!actives.length) return undefined;
-    return `Publication registry (authoritative): the ACTIVE edition(s) for this publication are ${actives.join(", ")}. Passages from other editions are superseded — use them only for historical comparison and say so.`;
+    // the family's community summary (TODO.sota/06): the precomputed
+    // what-changed-between-editions answer rides beside the
+    // deterministic registry line — provenance-carrying (generated from
+    // the registry and the successor graph, never free narration)
+    const famRow = await env.DB.prepare("SELECT family FROM documents WHERE docidentifier LIKE ?1 || '%:%' LIMIT 1")
+      .bind(`% ${u.doc_number}:%`)
+      .first<{ family: string }>()
+      .catch(() => null);
+    let summary = "";
+    if (famRow?.family && env.CACHE) {
+      summary = ((await env.CACHE.get(`famsum:${famRow.family}`).catch(() => "")) ?? "");
+    }
+    const registry = `Publication registry (authoritative): the ACTIVE edition(s) for this publication are ${actives.join(", ")}. Passages from other editions are superseded — use them only for historical comparison and say so.`;
+    return summary ? `${registry}\nFamily summary (precomputed from the registry and the successor graph): ${summary}` : registry;
   } catch {
     return undefined;
   }

@@ -13,6 +13,14 @@ export declare function handleEnrich(env: Env, ctx: ExecutionContext, req: Reque
  *  descends from it to quotable leaf clauses (pipeline.ts section
  *  descent). Credential, batching and ledger mirror /admin/enrich. */
 export declare function handleSectionUnit(env: Env, ctx: ExecutionContext, req: Request): Promise<Response>;
+/** Family community summaries (TODO.sota/06 item 2): one precomputed
+ *  answer per publication family to "what is this family and what
+ *  changed between editions" — generated from the registry rows and
+ *  the successor graph (the family IS the corpus's natural community),
+ *  stored in KV under famsum:<family>, served by editionNote beside
+ *  the deterministic registry line. Admin-gated; idempotent (force
+ *  regenerates); the quality-first lane pays once. */
+export declare function handleFamilySummary(env: Env, req: Request): Promise<Response>;
 /** Ops access to the Vectorize binding (get/upsert by id) for offline
  *  passes like embedding smoothing (G-ETSI-4) — the binding is the
  *  credential, admin-token gated exactly like /admin/enrich. */

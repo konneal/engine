@@ -4,7 +4,7 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-UBQCQ4UQ.js";
+} from "../../chunk-EGFTNES5.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
@@ -12,7 +12,7 @@ import {
 } from "../../chunk-32UDKBA2.js";
 import {
   handleSearch
-} from "../../chunk-YNQ5BKQW.js";
+} from "../../chunk-C5L55VI7.js";
 import {
   buildMessages,
   citations,
@@ -34,7 +34,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-NUHZMAII.js";
+} from "../../chunk-IIQWESHC.js";
 import {
   cfBlobs,
   embed,
@@ -350,6 +350,10 @@ var enrichment_default = "You write a retrieval context for a passage from {{COR
 // workers/worker_public/prompts/doc-summary.md
 var doc_summary_default = "You write the document-level summary for a legal-metrology publication in {{PUBLISHER_NAME}}'s retrieval index. The section summaries below cover the publication clause by clause. Write one compact abstract, three to five sentences: what the publication regulates or provides, its scope and applicability, and the structure a reader should know (parts, annexes, where the normative core sits). Use the publication's own terms exactly. No preamble, no headings.\n";
 
+// workers/worker_public/prompts/family-summary.md
+var family_summary_default = `You write the community summary of one publication family for {{PUBLISHER_NAME}}'s retrieval index \u2014 the precomputed answer to "what is this family and what changed between editions". The registry rows and the successor graph below are your ONLY facts. Write three to five sentences: what the family regulates or provides, its structure (parts, annexes), and the edition lineage \u2014 which editions are active, which are superseded, and what the successor chain says changed. Never invent a change the lineage does not show; when the chain only says one edition replaced another, say exactly that. Name editions exactly as the registry does. No preamble.
+`;
+
 // workers/worker_public/prompts/section-summary.md
 var section_summary_default = "You summarize one numbered clause of a metrology publication for a retrieval index. You are given the publication, the clause number, and excerpts of its sub-clauses.\n\nWrite a dense summary of 3 to 5 sentences stating what the clause governs and how its sub-clauses divide the subject. Name each sub-clause number together with its topic, in document order.\n\nPlain factual prose. No preamble, no headings, no bullet list, no quotation marks around the whole text. Write in the same language as the excerpts.\n";
 
@@ -509,6 +513,51 @@ Covers: ${childAnchors}`;
     );
   }
   return json({ results, usage });
+}
+async function handleFamilySummary(env, req) {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const family = typeof body?.family === "string" ? body.family.trim().slice(0, 24) : "";
+  if (!/^[A-Z]+-\d+$/.test(family)) return err(400, "invalid_input", "family must look like R-60 (type-number)");
+  try {
+    const docs = await env.DB.prepare(
+      "SELECT docidentifier, edition, status, active, superseded_by, title FROM documents WHERE family = ?1 ORDER BY edition"
+    ).bind(family).all();
+    const rows = docs.results ?? [];
+    if (rows.length < 2) return json({ family, ok: false, note: "fewer than two editions \u2014 no lineage to summarize" });
+    const succ = await env.DB.prepare(
+      "SELECT e.src AS src, e.dst AS dst FROM graph_edges e WHERE e.kind = 'successor' AND (e.src IN (SELECT src FROM graph_edges WHERE kind = 'part_of' AND dst = ?2) OR e.dst IN (SELECT src FROM graph_edges WHERE kind = 'part_of' AND dst = ?2)) LIMIT 40"
+    ).bind(family, `family:${family}`).all();
+    const key = `famsum:${family}`;
+    const cached = body?.force === true ? null : await env.CACHE.get(key);
+    if (cached) return json({ family, ok: true, cached: true, summary: cached });
+    const listing = rows.map((r) => `- ${r.docidentifier} \u2014 ${r.status}${r.active ? " (ACTIVE)" : ""}${r.title ? ` \u2014 ${String(r.title).slice(0, 120)}` : ""}`).join("\n");
+    const chain = (succ.results ?? []).map((r) => `${String(r.src).replace("doc:", "")} \u2192 superseded by \u2192 ${String(r.dst).replace("doc:", "")}`).join("\n");
+    const model = typeof env.ENRICH_MODEL === "string" && env.ENRICH_MODEL ? env.ENRICH_MODEL : MODELS.enrich;
+    const res = await env.AI.run(model, {
+      messages: [
+        { role: "system", content: family_summary_default.trimEnd() },
+        { role: "user", content: `Family ${family}
+
+Registry rows:
+${listing}
+
+Successor chain:
+${chain || "(no successor edges recorded)"}` }
+      ],
+      max_tokens: 1600,
+      reasoning_effort: "low"
+    });
+    const raw = typeof res?.response === "string" && res.response.trim() ? res.response : res?.choices?.[0]?.message?.content;
+    const summary = typeof raw === "string" ? raw.trim().replace(/^["']|["']$/g, "").slice(0, 1200) : "";
+    if (!summary) return json({ family, ok: false, error: "empty summary" });
+    await env.CACHE.put(key, summary);
+    return json({ family, ok: true, cached: false, summary, editions: rows.length, successors: (succ.results ?? []).length });
+  } catch (e) {
+    return err(502, "family_summary_failed", String(e?.message ?? e).slice(0, 200));
+  }
 }
 async function handleCaption(env, req) {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
@@ -1000,7 +1049,7 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-ZZT67FEB.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-3PBQSMO4.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-YVBM6IEV.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-JDSQPI3A.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });
@@ -1234,8 +1283,18 @@ var OPENAPI_SURFACE = [
   },
   {
     "method": "POST",
+    "pattern": "/v1/admin/family-summary",
+    "operationId": "adminFamilySummary"
+  },
+  {
+    "method": "POST",
     "pattern": "/admin/section",
     "operationId": "adminSectionAlias"
+  },
+  {
+    "method": "POST",
+    "pattern": "/admin/family-summary",
+    "operationId": "adminFamilySummaryAlias"
   },
   {
     "method": "POST",
@@ -1772,6 +1831,8 @@ var OPENAPI_HANDLERS = {
   adminEnrich: (c) => handleEnrich(c.env, c.ctx, c.req),
   adminEnrichAlias: (c) => handleEnrich(c.env, c.ctx, c.req),
   adminSection: (c) => handleSectionUnit(c.env, c.ctx, c.req),
+  adminFamilySummary: (c) => handleFamilySummary(c.env, c.req),
+  adminFamilySummaryAlias: (c) => handleFamilySummary(c.env, c.req),
   adminSectionAlias: (c) => handleSectionUnit(c.env, c.ctx, c.req),
   adminVectors: (c) => handleVectors(c.env, c.req),
   adminCaption: (c) => handleCaption(c.env, c.req),
