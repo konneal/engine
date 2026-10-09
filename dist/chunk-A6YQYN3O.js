@@ -23474,7 +23474,7 @@ async function retrieve(env, query, opts = {}) {
   const filter = filters ? toVectorizeFilter(filters) : null;
   const folded = retrievalQuery(query, opts.prev);
   let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || folded;
-  if (u?.process_intent) rq += processExpansion();
+  if (u?.process_intent && !opts.sealScope) rq += processExpansion();
   const vectorP = rq === folded && opts.optimisticVec ? Promise.resolve(opts.optimisticVec) : rq === folded && opts.warmEmbed ? opts.warmEmbed.then((w) => w ?? embed(portModelRunner(env), MODELS.embed, rq)) : embed(portModelRunner(env), MODELS.embed, rq);
   const lexicalP = lexicalPrefilter(env, opts.lexicalBoost ? `${rq} ${opts.lexicalBoost}` : rq).catch(() => []);
   const [vector, lexicalHits0] = await Promise.all([vectorP, lexicalP]);
