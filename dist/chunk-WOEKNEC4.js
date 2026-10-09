@@ -22694,15 +22694,34 @@ var federate = {
 };
 
 // workers/worker_public/src/stages/seal.ts
+async function familyChunks(env, familyNumber, query, keep) {
+  const rows = await env.DB.prepare(
+    "SELECT id, doc_id, docidentifier, doctype, doc_number, edition, language, clause_anchor, clause_title, status, superseded_by, corpus, tier, text, unit_id, block, bm25(chunks_fts) AS rank FROM chunks_fts JOIN chunks c ON c.rowid = chunks_fts.rowid WHERE chunks_fts MATCH ?1 AND c.doc_number = ?2 ORDER BY rank LIMIT ?3"
+  ).bind(query.replace(/["'^]/g, " ").trim() || familyNumber, familyNumber, keep).all().catch(() => ({ results: [] }));
+  return (rows.results ?? []).map((r) => ({
+    id: String(r.id),
+    score: 0,
+    metadata: r,
+    text: String(r.text ?? "")
+  }));
+}
 var seal = {
   name: "seal",
   when: (c) => !!c.opts.sealScope || !!c.opts.editionSteer || !!c.opts.editionExclude,
-  run: (c) => {
+  run: async (c) => {
     const before = c.hits.length;
     const scope = c.opts.sealScope;
     if (scope) {
       c.hits = c.hits.filter((h) => matchesDocScope(h.metadata, scope.doc_number) && (!scope.edition || h.metadata.edition === scope.edition));
       console.log("context seal:", before, "\u2192", c.hits.length, "candidates within", `doc#${scope.doc_number}${scope.edition ? "@" + scope.edition : ""}`);
+      if (c.hits.length === 0) {
+        const familyNumber = scope.doc_number.includes("-") ? scope.doc_number.split("-")[0] : scope.doc_number;
+        const pulled = (await familyChunks(c.env, familyNumber, c.rq || c.query, 12)).filter((h) => matchesDocScope(h.metadata, scope.doc_number) && (!scope.edition || h.metadata.edition === scope.edition)).slice(0, 8).map((h) => ({ ...h, score: 0.5 }));
+        if (pulled.length) {
+          c.hits = pulled;
+          console.log("context seal: pool empty \u2014 pulled", pulled.length, "family chunks from the corpus for", `doc#${scope.doc_number}`);
+        }
+      }
       return;
     }
     const exclude = c.opts.editionExclude;
