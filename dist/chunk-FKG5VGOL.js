@@ -268,27 +268,47 @@ function parseNumber(raw) {
   s = s.replace(/\.(\d{3})$/, "$1");
   return Number(s.replace(/,(?=\d{3}\b)/g, ""));
 }
-function extractParams(query, symbols) {
-  const params = {};
+function extractParamsWithUnits(query, symbols) {
+  const values = {};
+  const units = {};
   for (const sym of symbols) {
     const leaf = sym.split(".").pop() ?? sym;
     const esc = leaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`\\b${esc}\\b\\D{0,14}?([0-9][0-9 ,.]*[0-9])`, "iu");
+    const re = new RegExp(`\\b${esc}\\b\\D{0,14}?([0-9][0-9 ,.]*[0-9])\\s*(%|\\u00b0?[A-Za-z\\u00b5\\u03a9]{0,6})?`, "iu");
     const m = query.match(re);
     if (m) {
       const v = parseNumber(m[1]);
-      if (Number.isFinite(v)) params[sym] = v;
+      if (Number.isFinite(v)) {
+        values[sym] = v;
+        const u = (m[2] ?? "").trim();
+        if (u) units[sym] = u;
+      }
     }
   }
-  return params;
+  return { values, units };
 }
-function evaluate(content, query) {
+function dimensionMismatch(check, units, dimensions) {
+  const dims = /* @__PURE__ */ new Map();
+  for (const [sym, unit] of Object.entries(units)) {
+    const leaf = sym.split(".").pop();
+    if (!leaf || !new RegExp(`\\b${leaf}\\b`, "i").test(check)) continue;
+    const dim = dimensions[unit.toLowerCase()];
+    if (dim) dims.set(sym, dim);
+  }
+  const distinct = [...new Set(dims.values())];
+  if (distinct.length <= 1) return null;
+  const parts = [...dims.entries()].map(([sym, dim]) => `${sym} is in ${dim}`);
+  return `the stated quantities mix dimensions: ${parts.join(" while ")}`;
+}
+function evaluate(content, query, opts) {
   const c = content && typeof content === "object" ? content : {};
   const checks = extractChecks(content);
   if (!checks.length) return null;
   const symbols = symbolsIn(checks);
-  const params = extractParams(query, symbols);
+  const bound = extractParamsWithUnits(query, symbols);
+  const params = bound.values;
   const missing = symbols.filter((s) => params[s] === void 0);
+  let voidReason = null;
   const machine = checks.map((expression) => {
     const values = {};
     try {
@@ -297,10 +317,15 @@ function evaluate(content, query) {
     }
     let result = null;
     if (missing.length === 0) {
-      try {
-        result = !!parseAndEval(expression, params);
-      } catch {
-        result = null;
+      const mismatch = opts?.dimensions ? dimensionMismatch(expression, bound.units, opts.dimensions) : null;
+      if (mismatch) {
+        voidReason = voidReason ?? mismatch;
+      } else {
+        try {
+          result = !!parseAndEval(expression, params);
+        } catch {
+          result = null;
+        }
       }
     }
     return { expression, symbolic: expression, values, result };
@@ -310,7 +335,10 @@ function evaluate(content, query) {
   }
   const failed = machine.some((m) => m.result === false);
   const evaluable = machine.some((m) => m.result !== null);
-  if (!evaluable) return null;
+  if (!evaluable) {
+    if (voidReason) return { verdict: "void", missing: [], void_reason: voidReason, checks: machine };
+    return null;
+  }
   return {
     verdict: failed ? "fail" : "pass",
     on_violation: failed ? String(c.on_violation ?? "invalid") : void 0,
@@ -328,7 +356,7 @@ function verdictNote(v, node) {
     lines.push(`- ${c.expression}${vals ? `  [${vals}]` : ""} \u2192 ${c.result === null ? "not evaluated" : c.result ? "holds" : "VIOLATED"}`);
   }
   if (v.verdict === "void") {
-    lines.push(`VERDICT: VOID \u2014 the question does not state: ${v.missing.join(", ")}. Say exactly what is missing; never assume values.`);
+    lines.push(v.void_reason ? `VERDICT: VOID \u2014 ${v.void_reason}. State the mismatch plainly; the question cannot be decided as stated.` : `VERDICT: VOID \u2014 the question does not state: ${v.missing.join(", ")}. Say exactly what is missing; never assume values.`);
   } else if (v.verdict === "pass") {
     lines.push(`VERDICT: PASS \u2014 every machine check holds at the stated values. Present this verdict, the arithmetic above, and cite the node's clause.`);
   } else {
@@ -1179,6 +1207,9 @@ ${r.output}`;
 }
 
 export {
+  extractChecks,
+  symbolsIn,
+  extractParamsWithUnits,
   evaluate,
   verdictNote,
   standardForDocNumber,

@@ -5,6 +5,8 @@ import {
   contractV2,
   evaluate,
   evaluateConditionSets,
+  extractChecks,
+  extractParamsWithUnits,
   licenseBoundaryNote,
   licenseBoundaryRefusal,
   licensedEntryForPackage,
@@ -16,10 +18,11 @@ import {
   resolveBlocks,
   runTool,
   standardForDocNumber,
+  symbolsIn,
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-32UDKBA2.js";
+} from "./chunk-FKG5VGOL.js";
 import {
   NO_CONTEXT,
   STAGE_NAMES,
@@ -2195,7 +2198,22 @@ ${summary}` }] : [],
     console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause", boundModel.gated ? "(gated: license)" : "");
   }
   const modelNote = boundModel && !boundModel.gated ? modelGroundingBlock(boundModel) : void 0;
-  const machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? evaluate(boundModel.content, q.query) : null;
+  let machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? evaluate(boundModel.content, q.query) : null;
+  if (machineVerdict === null && boundModel && !boundModel.gated) {
+    try {
+      const unitTokens = [...new Set(Object.values(extractParamsWithUnits(q.query, symbolsIn(extractChecks(boundModel.content))).units).map((u) => u.toLowerCase()))];
+      if (unitTokens.length) {
+        const marks = unitTokens.map(() => "?").join(",");
+        const rows = await env.DB.prepare(
+          `SELECT lower(coalesce(json_extract(symbols, '$.ascii'), json_extract(symbols, '$.unicode'))) AS sym, dimension_ascii FROM units_db WHERE lower(coalesce(json_extract(symbols, '$.ascii'), json_extract(symbols, '$.unicode'))) IN (${marks})`
+        ).bind(...unitTokens).all().catch(() => ({ results: [] }));
+        const dimensions = {};
+        for (const r of rows.results ?? []) dimensions[String(r.sym)] = String(r.dimension_ascii ?? "");
+        machineVerdict = evaluate(boundModel.content, q.query, { dimensions });
+      }
+    } catch {
+    }
+  }
   const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : void 0;
   const modelNodeRows = async (kind, docNum) => {
     const attempt = (num3) => {

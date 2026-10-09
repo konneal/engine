@@ -2,7 +2,7 @@
 // node --test tests/verdict.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evaluate, extractChecks, symbolsIn, extractParams, verdictNote } from "../workers/worker_public/src/verdict.ts";
+import { evaluate, extractChecks, symbolsIn, extractParams, verdictNote, extractParamsWithUnits} from "../workers/worker_public/src/verdict.ts";
 
 const deadLoad = {
   check: "ocl{model.parameters.d_max >= 0.9 * model.parameters.e_max and model.parameters.d_max <= model.parameters.e_max}",
@@ -65,6 +65,41 @@ test("note narrates the arithmetic without recomputing", () => {
 
 test("no machine checks → null (node not evaluable)", () => {
   assert.equal(evaluate({ statement: "prose only" }, "any question"), null);
+});
+
+test("unit semantics: a comparison mixing dimensions voids with its reason", () => {
+  const dims = { v: "L^2·M·T^-3·I^-1", m: "L" };
+  const v = evaluate(deadLoad, "E_max 30000 v, D_max 26000 m", { dimensions: dims })!;
+  assert.equal(v.verdict, "void");
+  assert.equal(v.missing.length, 0);
+  assert.match(v.void_reason ?? "", /mix dimensions/);
+  assert.match(v.void_reason ?? "", /e_max is in/);
+  assert.match(v.void_reason ?? "", /d_max is in/);
+});
+
+test("unit semantics: same-dimension units evaluate normally", () => {
+  const dims = { v: "L^2·M·T^-3·I^-1", mv: "L^2·M·T^-3·I^-1" };
+  const v = evaluate(deadLoad, "E_max 30000 V, D_max 26000 mV", { dimensions: dims })!;
+  assert.equal(v.verdict, "fail"); // 26000 < 0.9 × 30000, same family
+});
+
+test("unit semantics: unknown units fail open — the plain evaluation stands", () => {
+  const v = evaluate(deadLoad, "E_max 30000 v, D_max 26000 v", { dimensions: { kg: "M" } })!;
+  assert.equal(v.verdict, "fail");
+});
+
+test("the extraction captures stated unit tokens", () => {
+  const b = extractParamsWithUnits("with E_max 30000 v, is testing to D_max 26 000 m valid?", ["model.parameters.e_max", "model.parameters.d_max"]);
+  assert.equal(b.units["model.parameters.e_max"], "v");
+  assert.equal(b.units["model.parameters.d_max"], "m");
+  assert.equal(b.values["model.parameters.e_max"], 30000);
+});
+
+test("the void note narrates the dimension mismatch, not a missing-parameter gap", () => {
+  const v = evaluate(deadLoad, "E_max 30000 v, D_max 26000 m", { dimensions: { v: "VOLTAGE", m: "LENGTH" } })!;
+  const note = verdictNote(v, { node_id: "/constraint/dead_load_max_geometry" });
+  assert.match(note, /VERDICT: VOID — the stated quantities mix dimensions/);
+  assert.doesNotMatch(note, /does not state/);
 });
 
 test("the plain oiml-r60 projection carries the OCL under `expression` — it evaluates", () => {

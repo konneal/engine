@@ -23,7 +23,7 @@ import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
 import { liveDataConfig, liveTokenFor, opCfg, opTokenMember, resolveLiveAccount, type LiveRecord } from "./livedata";
 import { bindModelNode, bindConstraintByQuantities, licenseBoundaryNote, licenseBoundaryRefusal, licensedEntryForPackage, modelCitation, modelEcho, modelGroundingBlock, standardForDocNumber } from "./modelplane";
-import { evaluate as machineEvaluate, verdictNote } from "./verdict";
+import { evaluate as machineEvaluate, extractChecks, extractParamsWithUnits, symbolsIn, verdictNote } from "./verdict";
 import { evaluateConditionSets, quantitiesIn, type ConditionVerdict } from "./conditions";
 import { evaluateAggregation, type AggregationVerdict } from "./aggregation";
 import { matchLicensedTopic, boundaryNoteText } from "./boundary";
@@ -946,7 +946,29 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // the worker EXECUTES the bound node's machine checks against the
   // question's stated values; the model narrates the computed verdict
   // and the verdict BLOCK is server-built — data, never generated prose
-  const machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? machineEvaluate(boundModel.content, q.query) : null;
+  let machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? machineEvaluate(boundModel.content, q.query) : null;
+  if (machineVerdict === null && boundModel && !boundModel.gated) {
+    // unit semantics (TODO.sota/04): the stated values' units reach the
+    // units register for their dimensions; a comparison mixing
+    // dimensions voids with the reason instead of answering a number
+    try {
+      const unitTokens = [...new Set(Object.values(extractParamsWithUnits(q.query, symbolsIn(extractChecks(boundModel.content))).units).map((u) => u.toLowerCase()))];
+      if (unitTokens.length) {
+        const marks = unitTokens.map(() => "?").join(",");
+        // the register keys symbols in the symbols JSON (ascii/unicode),
+        // not in `short` (full names) — D1's json_extract reads them
+        const rows = await env.DB.prepare(
+          `SELECT lower(coalesce(json_extract(symbols, '$.ascii'), json_extract(symbols, '$.unicode'))) AS sym, dimension_ascii FROM units_db WHERE lower(coalesce(json_extract(symbols, '$.ascii'), json_extract(symbols, '$.unicode'))) IN (${marks})`,
+        )
+          .bind(...unitTokens).all().catch(() => ({ results: [] }));
+        const dimensions: Record<string, string> = {};
+        for (const r of (rows.results ?? []) as any[]) dimensions[String(r.sym)] = String(r.dimension_ascii ?? "");
+        machineVerdict = machineEvaluate(boundModel.content, q.query, { dimensions });
+      }
+    } catch {
+      // the plain evaluation above already ran; nothing to salvage
+    }
+  }
   const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : undefined;
   // ── condition-set membership (konneal/engine#90): the test-method
   // packages' severity menus as machine-verifiable membership. Fires
