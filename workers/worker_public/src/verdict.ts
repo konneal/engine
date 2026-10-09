@@ -20,6 +20,9 @@ export interface Verdict {
   on_violation?: string;
   violation_meaning?: string;
   missing: string[];
+  /** why a fully-stated question still cannot evaluate (TODO.sota/04):
+   *  the stated quantities' units carry conflicting dimensions */
+  void_reason?: string;
   checks: MachineCheck[];
 }
 
@@ -190,29 +193,72 @@ function parseNumber(raw: string): number {
 }
 
 export function extractParams(query: string, symbols: string[]): Record<string, number> {
-  const params: Record<string, number> = {};
+  return extractParamsWithUnits(query, symbols).values;
+}
+
+/** The stated values WITH their unit tokens (TODO.sota/04's unit
+ *  semantics): "E_max 30000 v" binds e_max=30000 and the unit "v" —
+ *  the dimension check needs both. */
+export function extractParamsWithUnits(
+  query: string,
+  symbols: string[],
+): { values: Record<string, number>; units: Record<string, string> } {
+  const values: Record<string, number> = {};
+  const units: Record<string, string> = {};
   for (const sym of symbols) {
     const leaf = sym.split(".").pop() ?? sym;
     const esc = leaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     // symbol, a short non-numeric gap (words like "were"/"of" allowed),
-    // then the number
-    const re = new RegExp(`\\b${esc}\\b\\D{0,14}?([0-9][0-9 ,.]*[0-9])`, "iu");
+    // then the number, then an optional unit token directly after
+    const re = new RegExp(`\\b${esc}\\b\\D{0,14}?([0-9][0-9 ,.]*[0-9])\\s*(%|\\u00b0?[A-Za-z\\u00b5\\u03a9]{0,6})?`, "iu");
     const m = query.match(re);
     if (m) {
       const v = parseNumber(m[1]!);
-      if (Number.isFinite(v)) params[sym] = v;
+      if (Number.isFinite(v)) {
+        values[sym] = v;
+        const u = (m[2] ?? "").trim();
+        if (u) units[sym] = u;
+      }
     }
   }
-  return params;
+  return { values, units };
 }
 
-export function evaluate(content: unknown, query: string): Verdict | null {
+/** Dimension coherence (TODO.sota/04 item 2): the units plane gives
+ *  each unit token a dimension; a parameter set whose bound symbols
+ *  carry CONFLICTING known dimensions is incoherent — the check
+ *  compares quantities that are not comparable. Pure: the dimensions
+ *  map arrives from the caller (the units register at load). */
+export function dimensionMismatch(
+  check: string,
+  units: Record<string, string>,
+  dimensions: Record<string, string>,
+): string | null {
+  // the symbols THIS check compares, each mapped through its stated
+  // unit's dimension; more than one distinct dimension in one
+  // comparison is incoherent (a length is not a voltage)
+  const dims = new Map<string, string>();
+  for (const [sym, unit] of Object.entries(units)) {
+    const leaf = sym.split(".").pop();
+    if (!leaf || !new RegExp(`\\b${leaf}\\b`, "i").test(check)) continue;
+    const dim = dimensions[unit.toLowerCase()];
+    if (dim) dims.set(sym, dim);
+  }
+  const distinct = [...new Set(dims.values())];
+  if (distinct.length <= 1) return null;
+  const parts = [...dims.entries()].map(([sym, dim]) => `${sym} is in ${dim}`);
+  return `the stated quantities mix dimensions: ${parts.join(" while ")}`;
+}
+
+export function evaluate(content: unknown, query: string, opts?: { dimensions?: Record<string, string> }): Verdict | null {
   const c = (content && typeof content === "object" ? content : {}) as Record<string, any>;
   const checks = extractChecks(content);
   if (!checks.length) return null;
   const symbols = symbolsIn(checks);
-  const params = extractParams(query, symbols);
+  const bound = extractParamsWithUnits(query, symbols);
+  const params = bound.values;
   const missing = symbols.filter((s) => params[s] === undefined);
+  let voidReason: string | null = null;
   const machine: MachineCheck[] = checks.map((expression) => {
     const values: Record<string, number> = {};
     try {
@@ -220,7 +266,14 @@ export function evaluate(content: unknown, query: string): Verdict | null {
     } catch { /* values stay partial */ }
     let result: boolean | null = null;
     if (missing.length === 0) {
-      try { result = !!parseAndEval(expression, params); } catch { result = null; }
+      // unit semantics (TODO.sota/04): a comparison mixing dimensions
+      // cannot evaluate — void with the reason, never a number answer
+      const mismatch = opts?.dimensions ? dimensionMismatch(expression, bound.units, opts.dimensions) : null;
+      if (mismatch) {
+        voidReason = voidReason ?? mismatch;
+      } else {
+        try { result = !!parseAndEval(expression, params); } catch { result = null; }
+      }
     }
     return { expression, symbolic: expression, values, result };
   });
@@ -229,7 +282,10 @@ export function evaluate(content: unknown, query: string): Verdict | null {
   }
   const failed = machine.some((m) => m.result === false);
   const evaluable = machine.some((m) => m.result !== null);
-  if (!evaluable) return null;
+  if (!evaluable) {
+    if (voidReason) return { verdict: "void", missing: [], void_reason: voidReason, checks: machine };
+    return null;
+  }
   return {
     verdict: failed ? "fail" : "pass",
     on_violation: failed ? String(c.on_violation ?? "invalid") : undefined,
@@ -249,7 +305,9 @@ export function verdictNote(v: Verdict, node: { node_id: string; clause?: { urn?
     lines.push(`- ${c.expression}${vals ? `  [${vals}]` : ""} → ${c.result === null ? "not evaluated" : c.result ? "holds" : "VIOLATED"}`);
   }
   if (v.verdict === "void") {
-    lines.push(`VERDICT: VOID — the question does not state: ${v.missing.join(", ")}. Say exactly what is missing; never assume values.`);
+    lines.push(v.void_reason
+      ? `VERDICT: VOID — ${v.void_reason}. State the mismatch plainly; the question cannot be decided as stated.`
+      : `VERDICT: VOID — the question does not state: ${v.missing.join(", ")}. Say exactly what is missing; never assume values.`);
   } else if (v.verdict === "pass") {
     lines.push(`VERDICT: PASS — every machine check holds at the stated values. Present this verdict, the arithmetic above, and cite the node's clause.`);
   } else {
