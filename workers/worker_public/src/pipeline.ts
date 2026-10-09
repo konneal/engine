@@ -109,7 +109,11 @@ export async function retrieve(
   const filter = filters ? toVectorizeFilter(filters) : null;
   const folded = retrievalQuery(query, opts.prev);
   let rq = opts.queryOverride?.trim() || u?.standalone_query?.trim() || folded;
-  if (u?.process_intent) rq += processExpansion();
+  // the process expansion widens an UNSCOPED question toward the
+  // certification corpus; under a declared seal it poisons the query
+  // against the sealed family instead (the pool empties, the refusal
+  // follows) — the chip's context note already scopes the ANSWER
+  if (u?.process_intent && !opts.sealScope) rq += processExpansion();
   // Dense embed + full-corpus BM25 prefilter in parallel (G-ETSI-1 /
   // arXiv:2604.09868 §II-B5). Lexical must scan the whole corpus — the
   // old keywordRank only re-ordered dense hits and could not recover
