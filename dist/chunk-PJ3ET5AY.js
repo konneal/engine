@@ -22695,7 +22695,7 @@ var federate = {
 
 // workers/worker_public/src/stages/seal.ts
 async function familyChunks(env, familyNumber, query, keep) {
-  const rows = await env.DB.prepare(
+  const rows = await portStore(env).prepare(
     "SELECT id, doc_id, docidentifier, doctype, doc_number, edition, language, clause_anchor, clause_title, status, superseded_by, corpus, tier, text, unit_id, block, bm25(chunks_fts) AS rank FROM chunks_fts JOIN chunks c ON c.rowid = chunks_fts.rowid WHERE chunks_fts MATCH ?1 AND c.doc_number = ?2 ORDER BY rank LIMIT ?3"
   ).bind(query.replace(/["'^]/g, " ").trim() || familyNumber, familyNumber, keep).all().catch(() => ({ results: [] }));
   return (rows.results ?? []).map((r) => ({

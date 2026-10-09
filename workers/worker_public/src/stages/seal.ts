@@ -3,6 +3,7 @@
 // outside the declared family competes for the window; everything
 // inside it does.
 import { matchesDocScope } from "../context.ts";
+import { portStore } from "../env.ts";
 import type { ChunkMeta, Hit } from "../../../shared/chunk";
 import type { Stage } from "./types.ts";
 
@@ -11,7 +12,7 @@ import type { Stage } from "./types.ts";
  *  answer — a generic question's global ranking need not contain the
  *  family at all, so an emptied pool pulls the family's own text. */
 async function familyChunks(env: any, familyNumber: string, query: string, keep: number): Promise<Hit[]> {
-  const rows = await env.DB.prepare(
+  const rows = await portStore(env).prepare(
     "SELECT id, doc_id, docidentifier, doctype, doc_number, edition, language, clause_anchor, clause_title, status, superseded_by, corpus, tier, text, unit_id, block, bm25(chunks_fts) AS rank FROM chunks_fts JOIN chunks c ON c.rowid = chunks_fts.rowid WHERE chunks_fts MATCH ?1 AND c.doc_number = ?2 ORDER BY rank LIMIT ?3",
   )
     .bind(query.replace(/["'^]/g, " ").trim() || familyNumber, familyNumber, keep)
