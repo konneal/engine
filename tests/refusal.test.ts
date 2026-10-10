@@ -4,7 +4,7 @@
 // stripping, no build step): node --test tests/refusal.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canonicalRefusal, refusalAnswer } from "../workers/worker_public/src/refusal.ts";
+import { canonicalRefusal, exciseMisplacedPin, refusalAnswer } from "../workers/worker_public/src/refusal.ts";
 import { setProfile } from "../workers/worker_public/src/profile.ts";
 import { PROFILE } from "../workers/worker_public/src/profile.gen.ts";
 
@@ -81,3 +81,30 @@ test("drift: 'metrology documents' naming — the 2026-09-14 smoke shape — can
   assert.ok(!out.includes("can't help"), "the drift sentence must be replaced");
 });
 
+
+
+// ── the walls (2026-10-10): trivia-drift canonicalization + the
+//    misplaced-pin excision on cited answers ──
+
+test("trivia refusals in the model's own words canonicalize to the pin", () => {
+  const t = canonicalRefusal("I don't have information on the Eiffel Tower's height — that's general knowledge, not covered by legal metrology. I can answer questions about the indexed publications.");
+  assert.ok(t.startsWith(refusalAnswer()));
+});
+
+test("a cited answer never carries the pinned sentence — the wall excises it", () => {
+  const cited = `The requirements are set by R 60 [1]. ${refusalAnswer()} The limit depends on p_LC [2].`;
+  const out = exciseMisplacedPin(cited, true);
+  assert.ok(!out.includes(refusalAnswer()));
+  assert.ok(out.includes("R 60 [1]"));
+  assert.ok(out.includes("p_LC [2]"));
+});
+
+test("an uncited answer keeps its pin — the wall never touches true refusals", () => {
+  const pure = `${refusalAnswer()} I can answer questions about the indexed publications instead.`;
+  assert.equal(exciseMisplacedPin(pure, false), pure);
+});
+
+test("a scope DISCUSSION inside a real answer is never excised", () => {
+  const real = "This exemption falls outside the scope of R 60's metrological requirements [1], so the verifying authority may apply national rules.";
+  assert.equal(exciseMisplacedPin(real, true), real);
+});

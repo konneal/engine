@@ -79,8 +79,9 @@ import {
 } from "./chunk-DJ65EF5G.js";
 import {
   canonicalRefusal,
+  exciseMisplacedPin,
   refusalAnswer
-} from "./chunk-A3QHHUN5.js";
+} from "./chunk-A4A26BCV.js";
 import {
   entitlementScope,
   requestSalt,
@@ -2565,7 +2566,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
               }
             }
           }
-          const canonical0 = canonicalRefusal(full);
+          const canonical0 = usedHits.length > 0 ? exciseMisplacedPin(canonicalRefusal(full), true) : canonicalRefusal(full);
           const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
           send({
             type: "done",
@@ -2650,6 +2651,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
     answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
   if (answer) answer = canonicalRefusal(answer);
+  if (answer && usedHits.length > 0) answer = exciseMisplacedPin(answer, true);
   stageTiming.generate = Date.now() - tGen;
   let used = usedHits;
   if (answer && !answer.includes(refusalAnswer())) {
