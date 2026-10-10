@@ -22901,9 +22901,11 @@ var rerankStage = {
       c.hits.forEach((h, i) => h.rerank_score = scores[i]);
       c.hits.sort((a, b) => (b.rerank_score ?? -Infinity) - (a.rerank_score ?? -Infinity));
       if (c.filter?.doc_number) {
-        const families = c.hits.filter((h) => h.metadata.clause_anchor === "family");
-        if (families.length) {
-          c.hits = [...families, ...c.hits.filter((h) => h.metadata.clause_anchor !== "family")];
+        const families = c.hits.filter((h) => h.metadata.clause_anchor === "family" && String(h.metadata.doc_number ?? "").split("-")[0] === String(c.filter.doc_number).split("-")[0]);
+        const own = families.length ? families : c.hits.filter((h) => String(h.metadata.doc_number ?? "") === String(c.filter.doc_number).split("-")[0] && /^(overview|)$/i.test(String(h.metadata.clause_anchor ?? "")));
+        if (own.length) {
+          const ownIds = new Set(own.map((h) => h.id));
+          c.hits = [...own, ...c.hits.filter((h) => !ownIds.has(h.id))];
         }
       }
     }
