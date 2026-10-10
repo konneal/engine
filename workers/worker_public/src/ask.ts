@@ -17,7 +17,7 @@ import { reflect } from "./reflect";
 import { scoreFaithfulness } from "./faithfulness";
 import { entailmentVerdict } from "./entailment";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
-import { canonicalRefusal } from "./refusal";
+import { canonicalRefusal, exciseMisplacedPin } from "./refusal";
 import { contractV2, tableRetyped } from "./refs";
 import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
@@ -1464,7 +1464,9 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
               } catch { /* deliver what we have */ }
             }
           }
-          const canonical0 = canonicalRefusal(full);
+          // the misplaced-pin wall rides the streamed path too: a
+          // CITED stream is not a refusal
+          const canonical0 = usedHits.length > 0 ? exciseMisplacedPin(canonicalRefusal(full), true) : canonicalRefusal(full);
           // answer contract v2: validate [[u:]] refs, resolve typed blocks
           const c2 = canonical0.includes(refusalAnswer())
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
@@ -1569,6 +1571,11 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
   if (answer) answer = canonicalRefusal(answer);
+  // the misplaced-pin wall: a CITED answer is not a refusal — excise
+  // the pinned sentence if the model dropped it in as a disclaimer
+  // (measured on chip-scoped asks: correct cited answers carrying the
+  // pin mid-text, read by users and graders as total refusals)
+  if (answer && usedHits.length > 0) answer = exciseMisplacedPin(answer, true);
   stageTiming.generate = Date.now() - tGen;
 
   // ── Deterministic quote-anchor + table-retyping check ──
