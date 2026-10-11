@@ -58,7 +58,7 @@ function redirectOfferSentences(answer) {
   while (i < answer.length) {
     const end = sentenceEnd(answer, i);
     const s = answer.slice(i, end);
-    if (/\bI\b[^.!?]{0,120}\b(?:answer|help|assist)\b/i.test(s) && /\b(?:questions? about|instead)\b/i.test(s)) out.push([i, end]);
+    if (/\bI\b[^.!?]{0,160}?\bquestions? about\b/i.test(s) || /\bI\b[^.!?]{0,160}?\binstead\b/i.test(s) && !/[§\[\d]/.test(s)) out.push([i, end]);
     i = end;
     while (i < answer.length && /\s/.test(answer[i] ?? "")) i++;
   }

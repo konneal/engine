@@ -156,6 +156,16 @@ test("loose control: a cited answer's offer sentence is content — untouched", 
   assert.equal(canonicalRefusal(answer, { cited: true, conversational: false }), answer);
 });
 
+test("loose: the 'I'm here for questions about' shape (the fourth, ops 0.2.133 deploy) canonicalizes", () => {
+  const answer = "I'm here for questions about OIML publications, certification workflows and the OIML-CS — not recipes.";
+  assert.equal(canonicalRefusal(answer, { cited: false, conversational: false }), REFUSAL_ANSWER);
+});
+
+test("loose control: 'instead' in a sentence with citation apparatus is content — untouched", () => {
+  const answer = "I recommend calibrating the instrument to §4.2 of R 60 instead.";
+  assert.equal(canonicalRefusal(answer, { cited: false, conversational: false }), answer);
+});
+
 test("loose: multi-sentence drift — the offer sentence swaps, surrounding text survives", () => {
   const answer = "I'm a metrology assistant. I can answer questions about OIML legal-metrology publications instead.";
   assert.equal(
