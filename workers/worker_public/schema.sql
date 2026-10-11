@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   name       TEXT NOT NULL,
   key_hash   TEXT NOT NULL UNIQUE,
   day_limit  INTEGER NOT NULL DEFAULT 2000,
+  owner_sub  TEXT,
   created_at TEXT NOT NULL,
   revoked    INTEGER NOT NULL DEFAULT 0
 );

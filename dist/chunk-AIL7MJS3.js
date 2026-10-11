@@ -65,7 +65,7 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-JWUSPOQ3.js";
+} from "./chunk-7AXXR7GD.js";
 import {
   embed,
   generateOnce,
@@ -78,7 +78,7 @@ import {
   json,
   readJson,
   validateQuery
-} from "./chunk-DJ65EF5G.js";
+} from "./chunk-W7J5SFXJ.js";
 import {
   canonicalRefusal,
   exciseMisplacedPin,
@@ -1860,8 +1860,9 @@ async function handleAsk(env, ctx, req, tier, key) {
   const effort = requestEffort(env, member, body?.effort);
   const declaredEffort = body?.effort;
   const routeEffort = (route) => route === "fast" && !declaredEffort ? "low" : effort;
-  const limit = tier === "key" ? key.day_limit : tier === "member" || member ? num(env, "MEMBER_DAY_ASK", 300) : num(env, "ANON_DAY_ASK", 20);
-  const bucketId = tier === "key" ? `key:${key.id}` : member ? `sub:${member.sub}` : clientIp(req);
+  const memberKey = tier === "key" ? key?.owner_sub ?? null : null;
+  const limit = memberKey ? num(env, "MEMBER_DAY_ASK", 300) : tier === "key" ? key.day_limit : tier === "member" || member ? num(env, "MEMBER_DAY_ASK", 300) : num(env, "ANON_DAY_ASK", 20);
+  const bucketId = memberKey ? `sub:${memberKey}` : tier === "key" ? `key:${key.id}` : member ? `sub:${member.sub}` : clientIp(req);
   const quota = await checkQuota(env, "ask", bucketId, limit, effort === "low" ? 1 : 2);
   const creditPreview = creditEstimate({ effort, toolTurns: body?.multi_turn !== false ? 3 : 0, image: false });
   if (!quota.ok) {

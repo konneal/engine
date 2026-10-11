@@ -4,7 +4,7 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-564CJGLY.js";
+} from "../../chunk-AIL7MJS3.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
@@ -12,7 +12,7 @@ import {
 } from "../../chunk-J6LBR6GI.js";
 import {
   handleSearch
-} from "../../chunk-IO5543I3.js";
+} from "../../chunk-MWOY24B6.js";
 import {
   buildMessages,
   citations,
@@ -34,7 +34,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-JWUSPOQ3.js";
+} from "../../chunk-7AXXR7GD.js";
 import {
   cfBlobs,
   embed,
@@ -49,7 +49,7 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-DJ65EF5G.js";
+} from "../../chunk-W7J5SFXJ.js";
 import {
   canonicalRefusal
 } from "../../chunk-A4A26BCV.js";
@@ -710,20 +710,21 @@ async function handleCreateKey(env, req) {
   const body = await readJson(req);
   if (!body?.name || typeof body.name !== "string") return err(400, "invalid_input", "name is required");
   const dayLimit = Number.isFinite(Number(body.day_limit)) && Number(body.day_limit) > 0 ? Number(body.day_limit) : num(env, "KEY_DAY_ASK_DEFAULT", 2e3);
+  const memberSub = typeof body?.member_sub === "string" && body.member_sub.trim() ? body.member_sub.trim().slice(0, 64) : null;
   const raw = `${P().publisher.id}_${[...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
   const id = crypto.randomUUID();
   const keyHash = await sha256Hex(raw);
   await env.DB.prepare(
-    "INSERT INTO api_keys (id, name, key_hash, day_limit, created_at, revoked) VALUES (?1,?2,?3,?4,?5,0)"
-  ).bind(id, body.name, keyHash, dayLimit, (/* @__PURE__ */ new Date()).toISOString()).run();
-  return json({ id, name: body.name, day_limit: dayLimit, key: raw, note: "Store this key now \u2014 it is not retrievable again." });
+    "INSERT INTO api_keys (id, name, key_hash, day_limit, owner_sub, created_at, revoked) VALUES (?1,?2,?3,?4,?5,?6,0)"
+  ).bind(id, body.name, keyHash, dayLimit, memberSub, (/* @__PURE__ */ new Date()).toISOString()).run();
+  return json({ id, name: body.name, day_limit: dayLimit, ...memberSub ? { member_sub: memberSub } : {}, key: raw, note: "Store this key now \u2014 it is not retrievable again." + (memberSub ? " This key draws from its member's shared daily credit cap." : "") });
 }
 async function handleListKeys(env, req) {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
   if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
   const rows = await env.DB.prepare(
-    "SELECT id, name, day_limit, created_at, revoked FROM api_keys ORDER BY created_at DESC"
+    "SELECT id, name, day_limit, owner_sub, created_at, revoked FROM api_keys ORDER BY created_at DESC"
   ).all();
   return json({ keys: rows.results, ...corsHeaders(req) });
 }
@@ -1049,7 +1050,7 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-NP2XKTIL.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-7JNTDHXJ.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-5D2TYRXH.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-6LP755Q7.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });

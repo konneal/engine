@@ -123,7 +123,7 @@ async function authenticate(env, req) {
   if (!m) return null;
   const keyHash = await sha256Hex(m[1].trim());
   const row = await env.DB.prepare(
-    "SELECT id, name, day_limit FROM api_keys WHERE key_hash = ?1 AND revoked = 0"
+    "SELECT id, name, day_limit, owner_sub FROM api_keys WHERE key_hash = ?1 AND revoked = 0"
   ).bind(keyHash).first();
   return row ?? null;
 }
