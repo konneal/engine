@@ -16,6 +16,8 @@ import {
 import {
   buildMessages,
   citations,
+  clientIp,
+  creditBudget,
   editionNote,
   fill,
   ftsMatchQuery,
@@ -1511,7 +1513,7 @@ async function creditsRoute(c) {
   if (t instanceof Response) return t;
   const key = t.key;
   const memberKey = t.tier === "key" ? key?.owner_sub ?? null : null;
-  const bucketId = memberKey ? `sub:${memberKey}` : t.tier === "key" ? `key:${key.id}` : t.tier === "member" ? `sub:${c.member?.sub ?? "member"}` : clientIp(c.req);
+  const bucketId = memberKey ? `sub:${memberKey}` : t.tier === "key" ? `key:${key.id}` : clientIp(c.req);
   const cb = await creditBudget(c.env, bucketId);
   return withCors(json({ credits: cb }), corsHeaders(c.req));
 }
