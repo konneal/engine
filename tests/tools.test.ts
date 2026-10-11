@@ -22,7 +22,8 @@ test("the injected note attributes the result to the tool and the string", () =>
 
 test("the declaration demands the visible string and the attributed phrasing", () => {
   assert.match(TOOL_DECLARATION, /TOOL certificates.search/);
-  assert.match(TOOL_DECLARATION, /searched string visible in your answer/);
+  assert.match(TOOL_DECLARATION, /attributed/);
+  assert.match(TOOL_DECLARATION, /your query visible in the answer/);
 });
 
 test("the family normalizes to the column's digits-only form", async () => {

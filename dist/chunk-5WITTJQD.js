@@ -6,10 +6,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "./chunk-7AXXR7GD.js";
-import {
-  portModelRunner
-} from "./chunk-TH5XGPD5.js";
+} from "./chunk-XH5QGX2O.js";
 import {
   corsHeaders,
   err,
@@ -27,6 +24,9 @@ import {
   num,
   sha256Hex
 } from "./chunk-VT7DR6NQ.js";
+import {
+  portModelRunner
+} from "./chunk-LSZTJI7V.js";
 
 // workers/worker_public/src/search.ts
 async function handleSearch(env, ctx, req, tier, key) {

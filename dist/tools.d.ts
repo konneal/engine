@@ -7,9 +7,10 @@ export interface ToolResult {
     query: string;
     output: string;
 }
-/** The strict protocol: a line `TOOL certificates.search {"query": "…"}`.
- *  Plain regex parse — no JSON mode needed, tolerant of surrounding
- *  prose (the model may talk around the call). */
+/** The strict protocol: a line `TOOL <name> {…json…}`. Line-anchored,
+ *  case-sensitive (prose never trips it); the args are the WHOLE rest
+ *  of the line parsed as JSON — nested objects (db.find predicates)
+ *  are legal, and a malformed or unterminated object is not a call. */
 export declare function parseToolCall(text: string): ToolCall | null;
 export interface ToolSpec {
     /** canonical on every surface */

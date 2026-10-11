@@ -1,4 +1,14 @@
 import {
+  aggregateBlock,
+  aggregateNote,
+  certificateLinks,
+  queryFamily,
+  registerAggregate,
+  registerAggregateIntent,
+  registerNote,
+  searchRegister
+} from "./chunk-GBGRHXRU.js";
+import {
   TOOL_DECLARATION,
   bindConstraintByQuantities,
   bindModelNode,
@@ -22,7 +32,7 @@ import {
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-J6LBR6GI.js";
+} from "./chunk-RKNN3WAV.js";
 import {
   NO_CONTEXT,
   STAGE_NAMES,
@@ -65,13 +75,11 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-7AXXR7GD.js";
+} from "./chunk-XH5QGX2O.js";
 import {
   embed,
-  generateOnce,
-  portModelRunner,
-  portStore
-} from "./chunk-TH5XGPD5.js";
+  generateOnce
+} from "./chunk-NI4CIK6W.js";
 import {
   corsHeaders,
   err,
@@ -103,18 +111,12 @@ import {
   sha256Hex
 } from "./chunk-VT7DR6NQ.js";
 import {
-  aggregateBlock,
-  aggregateNote,
-  certificateLinks,
-  queryFamily,
-  registerAggregate,
-  registerAggregateIntent,
-  registerNote,
-  searchRegister
-} from "./chunk-GBGRHXRU.js";
-import {
   P
 } from "./chunk-3FYJM7LH.js";
+import {
+  portModelRunner,
+  portStore
+} from "./chunk-LSZTJI7V.js";
 
 // workers/worker_public/src/internal_gateway.ts
 async function retrieveInternal(service, auth, query) {
@@ -2523,32 +2525,40 @@ Answer account questions from these records ONLY: name the record when you use i
   await attachFigureImages(env, messages, usedHits, q.query);
   const pendingTools = [];
   let probeTokensUsed = 0;
-  if (multiTurn && /certificate|certified|certification/i.test(q.query) && env.DB) {
+  if (multiTurn && env.DB) {
     try {
       const imageTurn = typeof withImage === "string";
       if (imageTurn) mark("Reading the photograph to identify the instrument");
-      const probeMessages = [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}
-
-${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query \u2014 never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : ""}
-
-${q.query}`.replace("\n\n\n\n", "\n\n") }];
-      if (imageTurn) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
-      const probe = await env.AI.run(model, {
-        messages: probeMessages,
-        max_tokens: 600,
-        reasoning_effort: imageTurn ? "high" : "low"
-      });
-      const probeText = typeof probe?.response === "string" ? probe.response : probe?.choices?.[0]?.message?.content ?? "";
-      probeTokensUsed += usageTotal(probe?.usage) ?? 0;
-      const call = parseToolCall(probeText);
-      if (call) {
-        mark(`Searching the certificate register for \u201C${String(call.args?.query ?? "")}\u201D`);
+      for (let round = 0; round < 3; round++) {
+        const imageNote = imageTurn && round === 0 ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query \u2014 never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : "";
+        const continueNote = round > 0 ? "The tool results above are in hand. Answer now without a TOOL line, or issue exactly one more TOOL line if one more query is genuinely needed." : "";
+        const probeMessages = [...messages.slice(0, -1), { role: "user", content: [TOOL_DECLARATION, imageNote, continueNote, q.query].filter(Boolean).join("\n\n") }];
+        if (imageTurn && round === 0) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
+        const probe = await env.AI.run(model, {
+          messages: probeMessages,
+          max_tokens: 700,
+          reasoning_effort: imageTurn && round === 0 ? "high" : "low"
+        });
+        const probeText = typeof probe?.response === "string" ? probe?.response : probe?.choices?.[0]?.message?.content ?? "";
+        probeTokensUsed += usageTotal(probe?.usage) ?? 0;
+        const nativeCall = Array.isArray(probe?.tool_calls) ? probe.tool_calls[0]?.function : null;
+        const call = nativeCall ? {
+          name: String(nativeCall.name ?? ""),
+          args: (() => {
+            try {
+              return typeof nativeCall.arguments === "string" ? JSON.parse(nativeCall.arguments) : nativeCall.arguments ?? {};
+            } catch {
+              return {};
+            }
+          })()
+        } : parseToolCall(probeText);
+        if (!call || !call.name) break;
         const result = await runTool(env, call);
-        if (result) {
-          messages.push({ role: "system", content: toolNote(result) });
-          pendingTools.push(result);
-          console.log("agent-tool:", result.name, JSON.stringify(result.query), "->", result.output.slice(0, 80));
-        }
+        if (!result) break;
+        mark(`${result.name} \u2014 ${result.query}`.slice(0, 140));
+        messages.push({ role: "system", content: toolNote(result) });
+        pendingTools.push(result);
+        console.log("agent-tool:", result.name, JSON.stringify(result.query), "->", result.output.slice(0, 80));
       }
     } catch {
     }

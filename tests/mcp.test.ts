@@ -19,11 +19,11 @@ test("tools/list exposes ask, retrieve and the registry's MCP tools with schemas
   const b = (await call({ jsonrpc: "2.0", id: 2, method: "tools/list" })) as any;
   assert.deepEqual(
     (b.result.tools as typeof TOOLS).map((t) => t.name),
-    ["ask", "retrieve", "certificates.search", "units.get", "graph.cites", "docs.section", "glossary.lookup", "documents.family", "licensed.section", "verdict.evaluate", "conditions.check", "bib.entry", "units.lookup", "units.convert"],
+    ["ask", "retrieve", "db.schema", "db.find", "certificates.search", "units.get", "graph.cites", "docs.section", "glossary.lookup", "documents.family", "licensed.section", "verdict.evaluate", "conditions.check", "bib.entry", "units.lookup", "units.convert"],
   );
   for (const t of TOOLS) {
     assert.equal(t.inputSchema.type, "object");
-    assert.ok(t.inputSchema.required.length > 0, "every tool declares at least one required param");
+    assert.ok(Object.keys(t.inputSchema.properties as Record<string, unknown>).length > 0, "every tool declares its params");
     for (const r of t.inputSchema.required) {
       assert.ok(r in (t.inputSchema.properties as Record<string, unknown>), `required param ${r} is declared`);
     }
