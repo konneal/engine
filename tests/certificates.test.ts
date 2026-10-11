@@ -70,3 +70,48 @@ test("the question's family scopes the register search", () => {
   assert.equal(queryFamily("Is the Acme D 31 meter certified?"), "D31");
   assert.equal(queryFamily("Is the Acme meter certified?"), null);
 });
+
+
+// ── the aggregate register lane (2026-10-11): count/latest intents are
+//    deterministic computation, editions never poison the tokens ──
+
+test("aggregate intents parse", async () => {
+  const { registerAggregateIntent } = await import("../workers/worker_public/src/certificates.ts");
+  assert.equal(registerAggregateIntent("How many certificates are issued for R 60:2021?"), "count");
+  assert.equal(registerAggregateIntent("What is the latest certificate issued for R 60?"), "latest");
+  assert.equal(registerAggregateIntent("Total certificates under R 76?"), "count");
+  assert.equal(registerAggregateIntent("Is the Utilcell certificate still valid?"), null);
+});
+
+test("edition years strip from register tokens", async () => {
+  const { registerTokens } = await import("../workers/worker_public/src/certificates.ts");
+  const t = registerTokens("How many certificates are issued for R 60:2021?");
+  assert.ok(!t.includes("2021"), "the edition year must not reach the token arms");
+});
+
+test("the aggregate computes in SQL and renders its note with the edition disclaimer", async () => {
+  const { registerAggregate, aggregateNote, aggregateBlock } = await import("../workers/worker_public/src/certificates.ts");
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind(..._a: unknown[]) {
+          if (sql.includes("COUNT(*)")) {
+            return { first: async () => ({ n: 1624, valid: 1624, suspended: 0 }) };
+          }
+          return { all: async () => ({ results: [{ num: "R60/2021-A-NL1-26.12 Rev. 0", family: "60", holder: "TEA", model: "C16A", year: "2026", status: "Valid", pdf_key: "R60/2021/x.pdf" }] }) };
+        },
+      };
+    },
+  };
+  const agg = await registerAggregate(db, "R60");
+  assert.equal(agg!.count, 1624);
+  assert.equal(agg!.latest!.num, "R60/2021-A-NL1-26.12 Rev. 0");
+  const note = aggregateNote(agg!);
+  assert.ok(note.includes("1624"));
+  assert.ok(note.includes("no edition dimension"));
+  assert.ok(note.includes("/cert-pdf/R60/2021/x.pdf"));
+  const block = aggregateBlock(agg!);
+  assert.equal(block.type, "register");
+  assert.equal(block.payload.count, 1624);
+  assert.equal(block.payload.latest.url, "/cert-pdf/R60/2021/x.pdf");
+});

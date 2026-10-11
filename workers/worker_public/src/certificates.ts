@@ -26,6 +26,101 @@ export function isRegisterShaped(query: string): boolean {
   return /\bcertif(ied|icates?|ication)s?\b/i.test(query) && /\b(is|are|still|currently|valid|status|suspended|revoked|was|were|have|has|hold|holds|possess|carry|got)\b/i.test(query);
 }
 
+/** An AGGREGATE register question — "how many certificates are issued
+ *  for R 60:2021?", "what is the latest certificate issued for R 60" —
+ *  is served by DETERMINISTIC computation (COUNT, ORDER BY), never by
+ *  the model counting the rows a note happens to carry. The register
+ *  lane's own philosophy: the note answers the structure, the model
+ *  narrates it (TODO.sota/04's machine-checkable ground truth, applied
+ *  to the register plane 2026-10-11). */
+export function registerAggregateIntent(query: string): "count" | "latest" | null {
+  if (!/\bcertif(ied|icates?|ication)s?\b/i.test(query)) return null;
+  if (/\b(latest|most recent|newest|last)\b/i.test(query)) return "latest";
+  if (/\b(how many|count|number of|total|how much)\b/i.test(query)) return "count";
+  return null;
+}
+
+export interface RegisterAggregate {
+  family: string;
+  count: number;
+  valid: number;
+  suspended: number;
+  latest: RegisterRow | null;
+}
+
+/** The family's aggregate, computed in SQL (the register is the ground
+ *  truth; editions do not appear in it — certificates are issued per
+ *  family). The latest row ranks by year then the sequence number's
+ *  tail (the -YY.NN suffix carries the actual issue ordering). */
+export async function registerAggregate(db: any, family: string): Promise<RegisterAggregate | null> {
+  try {
+    const digits = family.replace(/^[A-Za-z]+/, "");
+    const rows = await db
+      .prepare(
+        "SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE family = ?1 ORDER BY CAST(year AS INTEGER) DESC, num DESC LIMIT 1",
+      )
+      .bind(digits)
+      .all();
+    const totals = await db
+      .prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN status = 'Valid' THEN 1 ELSE 0 END) AS valid, SUM(CASE WHEN status = 'Suspended' THEN 1 ELSE 0 END) AS suspended FROM certificates WHERE family = ?1")
+      .bind(digits)
+      .first();
+    if (!totals || !totals.n) return null;
+    return {
+      family: digits,
+      count: Number(totals.n),
+      valid: Number(totals.valid ?? 0),
+      suspended: Number(totals.suspended ?? 0),
+      latest: ((rows.results ?? [])[0] as RegisterRow) ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** The aggregate's authoritative note: the numbers are DATA — the
+ *  model narrates, never recomputes. The edition disclaimer rides every
+ *  family-scoped answer (the register has no edition dimension). */
+export function aggregateNote(agg: RegisterAggregate): string {
+  const latest = agg.latest
+    ? `The latest certificate in the snapshot is ${agg.latest.num} (holder ${agg.latest.holder}, model "${agg.latest.model}"${agg.latest.year ? `, issued ${agg.latest.year}` : ""}, status ${agg.latest.status}).`
+    : "No certificate rows are present in the snapshot.";
+  const link = agg.latest?.pdf_key
+    ? ` Its document: https://www.oimlsmart.org/cert-pdf/${agg.latest.pdf_key}`
+    : "";
+  return [
+    `Certificate register (authoritative computation over the snapshot): the ${agg.family} family holds ${agg.count} certificate${agg.count === 1 ? "" : "s"} (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).`,
+    latest + link,
+    "Certificates are issued per RECOMMENDATION FAMILY — the register carries no edition dimension, so an edition named in the question (e.g. 2021) does not narrow it. State the family total, qualify that the register is a snapshot, and cite these numbers verbatim.",
+  ].join("\n");
+}
+
+/** A typed block for aggregate answers — the UI renders the count and
+ *  the latest row's link as data, never from prose. */
+export function aggregateBlock(agg: RegisterAggregate) {
+  return {
+    type: "register",
+    payload: {
+      family: agg.family,
+      count: agg.count,
+      valid: agg.valid,
+      ...(agg.suspended ? { suspended: agg.suspended } : {}),
+      ...(agg.latest
+        ? {
+            latest: {
+              num: agg.latest.num,
+              holder: agg.latest.holder,
+              model: agg.latest.model,
+              year: agg.latest.year,
+              status: agg.latest.status,
+              ...(agg.latest.pdf_key ? { url: `/cert-pdf/${agg.latest.pdf_key}` } : {}),
+            },
+          }
+        : {}),
+    },
+  };
+}
+
 /** Search tokens: words that can identify a holder or a model — words of
  *  2+ characters that are not register question words, plus bare model
  *  numbers ("190", "HM14H1"). Upper-cased tokens match case-insensitively
@@ -46,6 +141,18 @@ export function printedCertificateNumber(query: string): string | null {
   return m ? m[1].replace(/\s+/g, "").replace(/-\./, ".") : null;
 }
 
+function editionSuffixYears(query: string): Set<string> {
+  // "R 60:2021", "R 60-1:2021" — the EDITION carries no register
+  // meaning (certificates key on family); its bare year token would
+  // poison the token arms (the "2021" matched nothing: issue scheme
+  // years differ from edition years). Collect them for stripping.
+  const years = new Set<string>();
+  for (const m of query.matchAll(/\b([RDMB])\s?-?\d{2,3}(?:-\d+)?\s?:\s?(\d{4})\b/gi)) {
+    years.add(m[2]!);
+  }
+  return years;
+}
+
 export function registerTokens(query: string): string[] {
   const stop = new Set([
     "the", "a", "an", "is", "are", "was", "were", "still", "currently", "in", "on", "for", "of", "and", "or",
@@ -55,9 +162,12 @@ export function registerTokens(query: string): string[] {
   ]);
   const tokens: string[] = [];
   const publisherWord = P().publisher.name.toLowerCase();
+  const editionYears = editionSuffixYears(query);
+  const stop2 = new Set([...stop, "many", "issued", "issue", "issued", "latest", "newest", "recent", "total", "number"]);
   for (const w of query.split(/[^A-Za-z0-9&-]+/)) {
     if (w.length < 2) continue;
-    if (stop.has(w.toLowerCase())) continue;
+    if (stop2.has(w.toLowerCase())) continue;
+    if (/^\d{4}$/.test(w) && editionYears.has(w)) continue; // an edition year, not an issue filter
     if (w.toLowerCase() === publisherWord) continue;
     if (/^\d+$/.test(w) && w.length < 2) continue;
     if (!tokens.includes(w)) tokens.push(w);

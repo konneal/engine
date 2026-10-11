@@ -22,7 +22,7 @@ import {
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-FKG5VGOL.js";
+} from "./chunk-3L6TJAS6.js";
 import {
   NO_CONTEXT,
   STAGE_NAMES,
@@ -100,10 +100,15 @@ import {
   sha256Hex
 } from "./chunk-VT7DR6NQ.js";
 import {
+  aggregateBlock,
+  aggregateNote,
   certificateLinks,
+  queryFamily,
+  registerAggregate,
+  registerAggregateIntent,
   registerNote,
   searchRegister
-} from "./chunk-JZFXSTYX.js";
+} from "./chunk-IOT75KLU.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -2066,7 +2071,24 @@ async function handleAsk(env, ctx, req, tier, key) {
     }
   }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
-  const regNote = register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : void 0;
+  function queryFamilyForAggregate(query) {
+    return queryFamily(query);
+  }
+  let registerBlock = null;
+  let aggregateNoteText;
+  const aggIntent = registerAggregateIntent(q.query);
+  if (aggIntent) {
+    const fam = queryFamilyForAggregate(q.query);
+    if (fam) {
+      const agg = await registerAggregate(env.DB, fam);
+      if (agg) {
+        aggregateNoteText = aggregateNote(agg);
+        registerBlock = aggregateBlock(agg);
+        console.log("register aggregate:", agg.family, "count", agg.count, "latest", agg.latest?.num ?? "none");
+      }
+    }
+  }
+  const regNote = aggregateNoteText ?? (register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : void 0);
   const ops = await operationsLane(env.DB, q.query);
   if (understanding?.intent === "conversational") {
     const queryHash2 = await sha256Hex(q.query);
@@ -2751,7 +2773,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
       if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
     }
   }
-  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
+  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
   const cacheable = !contextual && !declaredCtx && !ablate && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
