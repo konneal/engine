@@ -12,6 +12,7 @@ import { retrieveInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
 import { gradeRetrieval } from "./grader";
 import summarizePrompt from "../prompts/summarize.md";
+import agentDataPrompt from "../prompts/agent-data.md";
 import { embed, generateOnce } from "./ai";
 import { reflect } from "./reflect";
 import { scoreFaithfulness } from "./faithfulness";
@@ -1401,7 +1402,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     try {
       const imageTurn = typeof withImage === "string";
       if (imageTurn) mark("Reading the photograph to identify the instrument");
-      const probeMessages: any[] = [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}\n\n${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query — never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : ""}\n\n${q.query}`.replace("\n\n\n\n", "\n\n") }];
+      const probeMessages: any[] = [...messages.slice(0, -1), { role: "user", content: `${agentDataPrompt.trimEnd()}\n\n${TOOL_DECLARATION}\n\n${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query — never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : ""}\n\n${q.query}`.replace("\n\n\n\n", "\n\n") }];
       if (imageTurn) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
       const probe = await (env as any).AI.run(model, {
         messages: probeMessages,
