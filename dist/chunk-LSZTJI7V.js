@@ -1,55 +1,3 @@
-import {
-  answerEffort,
-  effortBudget
-} from "./chunk-VT7DR6NQ.js";
-
-// workers/worker_public/src/ai.ts
-var delay = (ms) => new Promise((r) => setTimeout(r, ms));
-async function embed(ai, _model, text) {
-  let lastError = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const vecs = await ai.embed([text]);
-      if (vecs?.[0]?.length) return vecs[0];
-      lastError = new Error("adapter returned no vector");
-    } catch (e) {
-      lastError = e;
-    }
-    if (attempt < 2) await delay(250 * (attempt + 1));
-  }
-  throw new Error(`embed failed after retries: ${String(lastError)}`);
-}
-async function rerank(ai, model, query, texts) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const scores = await ai.rerank(model, query, texts);
-    if (scores && scores.some((s) => Number.isFinite(s))) return scores;
-  }
-  console.error("rerank failed, using vector order");
-  return null;
-}
-async function generateOnce(env, model, messages, effort) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await Promise.race([
-        env.AI.run(model, {
-          messages,
-          max_tokens: effortBudget(effort ?? answerEffort(env)),
-          reasoning_effort: effort ?? answerEffort(env),
-          temperature: 0.6,
-          top_p: 0.95
-        }),
-        new Promise((r) => setTimeout(() => r(null), 12e4))
-      ]);
-      if (typeof res?.response === "string" && res.response.trim()) return res.response;
-      if (typeof res?.choices?.[0]?.message?.content === "string" && res.choices[0].message.content.trim()) return res.choices[0].message.content;
-      if (attempt === 0) console.error("generate returned empty:", model);
-    } catch (e) {
-      console.error("generate failed:", model, String(e).slice(0, 120));
-    }
-  }
-  return null;
-}
-
 // workers/worker_public/src/ports/cloudflare/adapters.ts
 var EMBED_REQUEST_SHAPES = {
   // "text" first: the verified request shape for qwen3-embedding-0.6b
@@ -166,6 +114,13 @@ function cfVectorIndex(index) {
     }
   };
 }
+function cfKv(ns) {
+  const kv = ns;
+  return {
+    get: (key) => kv.get(key),
+    put: (key, value, opts) => kv.put(key, value, opts?.ttlSec ? { expirationTtl: opts.ttlSec } : void 0)
+  };
+}
 function cfBlobs(bucket) {
   const r2 = bucket;
   return {
@@ -185,6 +140,14 @@ function cfBlobs(bucket) {
 function cfStore(db) {
   return db;
 }
+function cfRuntime(ctx) {
+  return {
+    defer(fn) {
+      if (ctx) ctx.waitUntil(fn());
+      else void fn();
+    }
+  };
+}
 
 // workers/worker_public/src/env.ts
 function portModelRunner(env) {
@@ -193,6 +156,12 @@ function portModelRunner(env) {
 function portIndex(env, which = "public") {
   const b = which === "public" ? env.VECTORIZE : which === "primmel" ? env.EXP_PRIMMEL : which === "composed" ? env.EXP_COMPOSED : which === "plain" ? env.EXP_PLAIN : which === "adoc" ? env.EXP_ADC : which === "mko" ? env.EXP_MKO : which === "pflat" ? env.EXP_PFLAT : env.GLOSSARY;
   return cfVectorIndex(b);
+}
+function portKv(env) {
+  return cfKv(env.CACHE);
+}
+function portBlobs(env) {
+  return cfBlobs(env.UNIT_ASSETS);
 }
 function portStore(env) {
   return cfStore(env.DB);
@@ -203,14 +172,17 @@ function hasLane(env, which) {
       return !!env.GLOSSARY;
   }
 }
+function portRuntime(ctx) {
+  return cfRuntime(ctx);
+}
 
 export {
-  embed,
-  rerank,
-  generateOnce,
   cfBlobs,
   portModelRunner,
   portIndex,
+  portKv,
+  portBlobs,
   portStore,
-  hasLane
+  hasLane,
+  portRuntime
 };

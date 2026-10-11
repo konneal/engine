@@ -1426,28 +1426,52 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // the tool call — one reader, one tool, no parallel extraction racing a
   // second vision pass that drifts hour to hour. The old probe dropped the
   // image-bearing message, which is why the private bridge had to exist.
-  if (multiTurn && /certificate|certified|certification/i.test(q.query) && env.DB) {
+  if (multiTurn && env.DB) {
     try {
       const imageTurn = typeof withImage === "string";
       if (imageTurn) mark("Reading the photograph to identify the instrument");
-      const probeMessages: any[] = [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}\n\n${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query — never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : ""}\n\n${q.query}`.replace("\n\n\n\n", "\n\n") }];
-      if (imageTurn) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
-      const probe = await (env as any).AI.run(model, {
-        messages: probeMessages,
-        max_tokens: 600,
-        reasoning_effort: imageTurn ? "high" : "low",
-      });
-      const probeText = typeof probe?.response === "string" ? probe.response : probe?.choices?.[0]?.message?.content ?? "";
-      probeTokensUsed += usageTotal((probe as any)?.usage) ?? 0;
-      const call = parseToolCall(probeText);
-      if (call) {
-        mark(`Searching the certificate register for “${String(call.args?.query ?? "")}”`);
+      // the loop v2 (the owner's 2026-10-12 direction): the MODEL decides
+      // whether and what to query — no intent regex arms it. Three
+      // bounded rounds; each result joins the messages ATTRIBUTED and the
+      // next probe re-reads them (the model composes db.find predicates
+      // over the published schema and corrects from schema-named
+      // errors). Cross-turn memory: the conversation history above
+      // already carries the prior answers (which quote their tool
+      // results) — a follow-up reuses them instead of re-querying.
+      // Native function-calling rides alongside the line protocol: when
+      // the binding returns tool_calls, they dispatch identically.
+      for (let round = 0; round < 3; round++) {
+        const imageNote = imageTurn && round === 0
+          ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query — never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)."
+          : "";
+        const continueNote = round > 0
+          ? "The tool results above are in hand. Answer now without a TOOL line, or issue exactly one more TOOL line if one more query is genuinely needed."
+          : "";
+        const probeMessages: any[] = [...messages.slice(0, -1), { role: "user", content: [TOOL_DECLARATION, imageNote, continueNote, q.query].filter(Boolean).join("\n\n") }];
+        if (imageTurn && round === 0) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
+        const probe = await (env as any).AI.run(model, {
+          messages: probeMessages,
+          max_tokens: 700,
+          reasoning_effort: imageTurn && round === 0 ? "high" : "low",
+        });
+        const probeText = typeof probe?.response === "string" ? probe?.response : probe?.choices?.[0]?.message?.content ?? "";
+        probeTokensUsed += usageTotal((probe as any)?.usage) ?? 0;
+        const nativeCall = Array.isArray((probe as any)?.tool_calls) ? (probe as any).tool_calls[0]?.function : null;
+        const call = nativeCall
+          ? {
+              name: String(nativeCall.name ?? ""),
+              args: (() => {
+                try { return typeof nativeCall.arguments === "string" ? JSON.parse(nativeCall.arguments) : (nativeCall.arguments ?? {}); } catch { return {}; }
+              })(),
+            }
+          : parseToolCall(probeText);
+        if (!call || !call.name) break; // the model chose to answer
         const result = await runTool(env, call);
-        if (result) {
-          messages.push({ role: "system", content: toolNote(result) });
-          pendingTools.push(result);
-          console.log("agent-tool:", result.name, JSON.stringify(result.query), "->", result.output.slice(0, 80));
-        }
+        if (!result) break;
+        mark(`${result.name} — ${result.query}`.slice(0, 140));
+        messages.push({ role: "system", content: toolNote(result) });
+        pendingTools.push(result);
+        console.log("agent-tool:", result.name, JSON.stringify(result.query), "->", result.output.slice(0, 80));
       }
     } catch {
       /* the loop is optional — the answer proceeds without the tool */
