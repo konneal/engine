@@ -58,6 +58,29 @@ tags:
       the index-maintenance battery (enrichment, section units, vectors
       and figure captions).
 paths:
+  /api/credits:
+    get:
+      tags: [Service]
+      summary: The caller's daily credit balance
+      description: >-
+        Returns the credits the caller has left today — resolved by the
+        same tiering as ask (anonymous by IP, member by session, key by
+        its owner member's shared cap). 1 credit ≈ 1000 tokens of
+        consumption; the UI's meter reads this.
+      operationId: credits
+      responses:
+        '200':
+          description: The balance.
+  /v1/credits:
+    get:
+      tags: [Service]
+      summary: The caller's daily credit balance (the authenticated path)
+      description: The same balance, authenticated by session or key.
+      operationId: creditsAlias
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: The balance.
   /api/ask:
     post:
       tags: [Ask]

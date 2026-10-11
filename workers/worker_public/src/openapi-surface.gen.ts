@@ -7,6 +7,8 @@ export interface OpenApiRoute {
 }
 
 export type OpenApiOperationId =
+  | "credits"
+  | "creditsAlias"
   | "askAnonymous"
   | "askKeyed"
   | "search"
@@ -64,6 +66,16 @@ export type OpenApiOperationId =
   | "adminCreateKey"
 
 export const OPENAPI_SURFACE: readonly (Omit<OpenApiRoute, "operationId"> & { operationId: OpenApiOperationId })[] = [
+  {
+    "method": "GET",
+    "pattern": "/api/credits",
+    "operationId": "credits"
+  },
+  {
+    "method": "GET",
+    "pattern": "/v1/credits",
+    "operationId": "creditsAlias"
+  },
   {
     "method": "POST",
     "pattern": "/api/ask",
