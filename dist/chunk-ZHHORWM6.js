@@ -2086,7 +2086,7 @@ async function handleAsk(env, ctx, req, tier, key) {
         const linkLine = agg.latest?.pdf_key ? `
 
 [The latest certificate's document](${`/cert-pdf/${agg.latest.pdf_key}`}) is on file.` : "";
-        const answer2 = aggIntent === "count" ? `The OIML ${agg.family} family holds **${agg.count} certificate${agg.count === 1 ? "" : "s"}** in the OIML-CS register snapshot (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).
+        const answer2 = aggIntent === "count" ? `The ${P().publisher.name} ${agg.family} family holds **${agg.count} certificate${agg.count === 1 ? "" : "s"}** in the ${P().publisher.name}-CS register snapshot (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).
 
 Certificates are issued per recommendation family \u2014 the register carries no edition dimension, so the 2021 you named does not narrow the count. The register is a snapshot rather than live certification status.` : `${latestLine}${linkLine}
 
@@ -2099,7 +2099,7 @@ Certificates are issued per recommendation family \u2014 the register carries no
         const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q.query.length, answer2.length);
         return json({
           answer: answer2,
-          citations: [{ docidentifier: `OIML-CS certificate register (family ${agg.family})`, corpus: "register" }],
+          citations: [{ docidentifier: `${P().publisher.name}-CS certificate register (family ${agg.family})`, corpus: "register" }],
           model: MODELS.member,
           query_hash: queryHash2,
           follow_ups: [],

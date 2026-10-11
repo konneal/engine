@@ -782,7 +782,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           ? `\n\n[The latest certificate's document](${`/cert-pdf/${agg.latest.pdf_key}`}) is on file.`
           : "";
         const answer = aggIntent === "count"
-          ? `The OIML ${agg.family} family holds **${agg.count} certificate${agg.count === 1 ? "" : "s"}** in the OIML-CS register snapshot (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).\n\nCertificates are issued per recommendation family — the register carries no edition dimension, so the 2021 you named does not narrow the count. The register is a snapshot rather than live certification status.`
+          ? `The ${P().publisher.name} ${agg.family} family holds **${agg.count} certificate${agg.count === 1 ? "" : "s"}** in the ${P().publisher.name}-CS register snapshot (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).\n\nCertificates are issued per recommendation family — the register carries no edition dimension, so the 2021 you named does not narrow the count. The register is a snapshot rather than live certification status.`
           : `${latestLine}${linkLine}\n\nCertificates are issued per recommendation family — the register carries no edition dimension. The register is a snapshot rather than live certification status.`;
         const block = aggregateBlock(agg);
         registerBlock = block;
@@ -792,7 +792,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, answer.length);
         return json({
           answer,
-          citations: [{ docidentifier: `OIML-CS certificate register (family ${agg.family})`, corpus: "register" }],
+          citations: [{ docidentifier: `${P().publisher.name}-CS certificate register (family ${agg.family})`, corpus: "register" }],
           model: MODELS.member,
           query_hash: queryHash,
           follow_ups: [],
