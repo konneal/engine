@@ -6,6 +6,61 @@ import {
 function isRegisterShaped(query) {
   return /\bcertif(ied|icates?|ication)s?\b/i.test(query) && /\b(is|are|still|currently|valid|status|suspended|revoked|was|were|have|has|hold|holds|possess|carry|got)\b/i.test(query);
 }
+function registerAggregateIntent(query) {
+  if (!/\bcertif(ied|icates?|ication)s?\b/i.test(query)) return null;
+  if (/\b(latest|most recent|newest|last)\b/i.test(query)) return "latest";
+  if (/\b(how many|count|number of|total|how much)\b/i.test(query)) return "count";
+  return null;
+}
+async function registerAggregate(db, family) {
+  try {
+    const digits = family.replace(/^[A-Za-z]+/, "");
+    const rows = await db.prepare(
+      "SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE family = ?1 ORDER BY CAST(year AS INTEGER) DESC, num DESC LIMIT 1"
+    ).bind(digits).all();
+    const totals = await db.prepare("SELECT COUNT(*) AS n, SUM(CASE WHEN status = 'Valid' THEN 1 ELSE 0 END) AS valid, SUM(CASE WHEN status = 'Suspended' THEN 1 ELSE 0 END) AS suspended FROM certificates WHERE family = ?1").bind(digits).first();
+    if (!totals || !totals.n) return null;
+    return {
+      family: digits,
+      count: Number(totals.n),
+      valid: Number(totals.valid ?? 0),
+      suspended: Number(totals.suspended ?? 0),
+      latest: (rows.results ?? [])[0] ?? null
+    };
+  } catch {
+    return null;
+  }
+}
+function aggregateNote(agg) {
+  const latest = agg.latest ? `The latest certificate in the snapshot is ${agg.latest.num} (holder ${agg.latest.holder}, model "${agg.latest.model}"${agg.latest.year ? `, issued ${agg.latest.year}` : ""}, status ${agg.latest.status}).` : "No certificate rows are present in the snapshot.";
+  const link = agg.latest?.pdf_key ? ` Its document: https://www.oimlsmart.org/cert-pdf/${agg.latest.pdf_key}` : "";
+  return [
+    `Certificate register (authoritative computation over the snapshot): the ${agg.family} family holds ${agg.count} certificate${agg.count === 1 ? "" : "s"} (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).`,
+    latest + link,
+    "Certificates are issued per RECOMMENDATION FAMILY \u2014 the register carries no edition dimension, so an edition named in the question (e.g. 2021) does not narrow it. State the family total, qualify that the register is a snapshot, and cite these numbers verbatim."
+  ].join("\n");
+}
+function aggregateBlock(agg) {
+  return {
+    type: "register",
+    payload: {
+      family: agg.family,
+      count: agg.count,
+      valid: agg.valid,
+      ...agg.suspended ? { suspended: agg.suspended } : {},
+      ...agg.latest ? {
+        latest: {
+          num: agg.latest.num,
+          holder: agg.latest.holder,
+          model: agg.latest.model,
+          year: agg.latest.year,
+          status: agg.latest.status,
+          ...agg.latest.pdf_key ? { url: `/cert-pdf/${agg.latest.pdf_key}` } : {}
+        }
+      } : {}
+    }
+  };
+}
 function queryFamily(query) {
   const m = /\b([RDMB])\s?-?(\d{2,3})\b/i.exec(query);
   return m ? `${m[1].toUpperCase()}${m[2].padStart(2, "0")}` : null;
@@ -13,6 +68,13 @@ function queryFamily(query) {
 function printedCertificateNumber(query) {
   const m = /\b([RDMB]\s?-?\d{2,3}\s?\/\s?\d{4}\s?-\s?[A-Z0-9]+\s?-\s?[^\s,;]+(?:\s?\.\s?\d+)?)/i.exec(query);
   return m ? m[1].replace(/\s+/g, "").replace(/-\./, ".") : null;
+}
+function editionSuffixYears(query) {
+  const years = /* @__PURE__ */ new Set();
+  for (const m of query.matchAll(/\b([RDMB])\s?-?\d{2,3}(?:-\d+)?\s?:\s?(\d{4})\b/gi)) {
+    years.add(m[2]);
+  }
+  return years;
 }
 function registerTokens(query) {
   const stop = /* @__PURE__ */ new Set([
@@ -64,9 +126,12 @@ function registerTokens(query) {
   ]);
   const tokens = [];
   const publisherWord = P().publisher.name.toLowerCase();
+  const editionYears = editionSuffixYears(query);
+  const stop2 = /* @__PURE__ */ new Set([...stop, "many", "issued", "issue", "issued", "latest", "newest", "recent", "total", "number"]);
   for (const w of query.split(/[^A-Za-z0-9&-]+/)) {
     if (w.length < 2) continue;
-    if (stop.has(w.toLowerCase())) continue;
+    if (stop2.has(w.toLowerCase())) continue;
+    if (/^\d{4}$/.test(w) && editionYears.has(w)) continue;
     if (w.toLowerCase() === publisherWord) continue;
     if (/^\d+$/.test(w) && w.length < 2) continue;
     if (!tokens.includes(w)) tokens.push(w);
@@ -150,6 +215,10 @@ ${absent.join("\n")}`);
 
 export {
   isRegisterShaped,
+  registerAggregateIntent,
+  registerAggregate,
+  aggregateNote,
+  aggregateBlock,
   queryFamily,
   printedCertificateNumber,
   registerTokens,

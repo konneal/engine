@@ -44,7 +44,7 @@ export type { Env };
 import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
 import { chargeTokens, checkQuota, clientIp, estimateTokens, telemetry, tokenBudget, usageTotal } from "./quota";
 import { graphExpand, editionNote } from "./graph";
-import { registerNote, searchRegister, certificateLinks } from "./certificates";
+import { registerNote, searchRegister, certificateLinks, registerAggregateIntent, registerAggregate, aggregateNote, aggregateBlock, queryFamily } from "./certificates";
 import { TOOL_DECLARATION, parseToolCall, runTool, toolNote } from "./tools";
 import { operationsLane } from "./operations.ts";
 import { extractNameplate, nameplateRegisterQuery } from "./nameplate.ts";
@@ -756,7 +756,28 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     }
   }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
-  const regNote = register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : undefined;
+  function queryFamilyForAggregate(query: string): string | null {
+    return queryFamily(query);
+  }
+  // the AGGREGATE register intent (TODO 2026-10-11): count/latest
+  // questions are answered by deterministic computation — the numbers
+  // ride as an authoritative note AND a typed block the UI renders
+  let registerBlock: any = null;
+  let aggregateNoteText: string | undefined;
+  const aggIntent = registerAggregateIntent(q.query);
+  if (aggIntent) {
+    const fam = queryFamilyForAggregate(q.query);
+    if (fam) {
+      const agg = await registerAggregate(env.DB, fam);
+      if (agg) {
+        aggregateNoteText = aggregateNote(agg);
+        registerBlock = aggregateBlock(agg);
+        console.log("register aggregate:", agg.family, "count", agg.count, "latest", agg.latest?.num ?? "none");
+      }
+    }
+  }
+  const regNote = aggregateNoteText
+    ?? (register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : undefined);
   const ops = await operationsLane(env.DB, q.query);
 
   // Conversational route, decided by query UNDERSTANDING (any language, any
@@ -1735,7 +1756,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
     }
   }
-  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
+  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
   const cacheable = !contextual && !declaredCtx && !ablate && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
