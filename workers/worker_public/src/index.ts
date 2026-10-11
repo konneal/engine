@@ -215,6 +215,19 @@ async function mcpRoute(c: RouteContext): Promise<Response> {
   return withCors(await handleMcp(c.env, c.ctx, c.req, t.tier, t.key), corsHeaders(c.req));
 }
 
+/** The caller's daily credit balance (2026-10-11): the meter the UI
+ *  shows — resolved by the same tiering as ask (anon by IP, member by
+ *  session, key by its owner member's shared cap). */
+async function creditsRoute(c: RouteContext): Promise<Response> {
+  const t = await tierFor(c);
+  if (t instanceof Response) return t;
+  const key = t.key;
+  const memberKey = t.tier === "key" ? key?.owner_sub ?? null : null;
+  const bucketId = memberKey ? `sub:${memberKey}` : t.tier === "key" ? `key:${key!.id}` : t.tier === "member" ? `sub:${(c as any).member?.sub ?? "member"}` : clientIp(c.req);
+  const cb = await creditBudget(c.env, bucketId);
+  return withCors(json({ credits: cb }), corsHeaders(c.req));
+}
+
 async function askRoute(c: RouteContext): Promise<Response> {
   const t = await tierFor(c);
   if (t instanceof Response) return t;
@@ -571,6 +584,8 @@ const INFRA_ROUTES: Route[] = [
 
 const OPENAPI_HANDLERS: Record<OpenApiOperationId, RouteHandler> = {
   askAnonymous: askRoute,
+  credits: creditsRoute,
+  creditsAlias: creditsRoute,
   askKeyed: askRoute,
   search: searchRoute,
   searchKeyed: searchRoute,

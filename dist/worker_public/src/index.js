@@ -1088,6 +1088,16 @@ function matchRoute(routes, method, path) {
 // workers/worker_public/src/openapi-surface.gen.ts
 var OPENAPI_SURFACE = [
   {
+    "method": "GET",
+    "pattern": "/api/credits",
+    "operationId": "credits"
+  },
+  {
+    "method": "GET",
+    "pattern": "/v1/credits",
+    "operationId": "creditsAlias"
+  },
+  {
     "method": "POST",
     "pattern": "/api/ask",
     "operationId": "askAnonymous"
@@ -1496,6 +1506,15 @@ async function mcpRoute(c) {
   if (t instanceof Response) return t;
   return withCors(await handleMcp(c.env, c.ctx, c.req, t.tier, t.key), corsHeaders(c.req));
 }
+async function creditsRoute(c) {
+  const t = await tierFor(c);
+  if (t instanceof Response) return t;
+  const key = t.key;
+  const memberKey = t.tier === "key" ? key?.owner_sub ?? null : null;
+  const bucketId = memberKey ? `sub:${memberKey}` : t.tier === "key" ? `key:${key.id}` : t.tier === "member" ? `sub:${c.member?.sub ?? "member"}` : clientIp(c.req);
+  const cb = await creditBudget(c.env, bucketId);
+  return withCors(json({ credits: cb }), corsHeaders(c.req));
+}
 async function askRoute(c) {
   const t = await tierFor(c);
   if (t instanceof Response) return t;
@@ -1785,6 +1804,8 @@ var INFRA_ROUTES = [
 ];
 var OPENAPI_HANDLERS = {
   askAnonymous: askRoute,
+  credits: creditsRoute,
+  creditsAlias: creditsRoute,
   askKeyed: askRoute,
   search: searchRoute,
   searchKeyed: searchRoute,
