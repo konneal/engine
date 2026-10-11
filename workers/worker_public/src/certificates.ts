@@ -89,9 +89,10 @@ export function aggregateNote(agg: RegisterAggregate): string {
     ? ` Its document: https://www.oimlsmart.org/cert-pdf/${agg.latest.pdf_key}`
     : "";
   return [
-    `Certificate register (authoritative computation over the snapshot): the ${agg.family} family holds ${agg.count} certificate${agg.count === 1 ? "" : "s"} (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).`,
+    `CERTIFICATE REGISTER — THIS NOTE ANSWERS THE QUESTION. Answer from THIS note; do not refuse for want of passages (the retrieval passages are irrelevant for register questions).`,
+    `The ${agg.family} family holds ${agg.count} certificate${agg.count === 1 ? "" : "s"} (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}) — computed over the register snapshot; state these numbers verbatim.`,
     latest + link,
-    "Certificates are issued per RECOMMENDATION FAMILY — the register carries no edition dimension, so an edition named in the question (e.g. 2021) does not narrow it. State the family total, qualify that the register is a snapshot, and cite these numbers verbatim.",
+    "Certificates are issued per RECOMMENDATION FAMILY — the register carries no edition dimension, so an edition named in the question (e.g. 2021) does not narrow it; say so when the question names an edition. Qualify that the register is a snapshot, and cite the register.",
   ].join("\n");
 }
 
