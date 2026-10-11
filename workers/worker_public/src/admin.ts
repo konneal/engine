@@ -440,15 +440,18 @@ export async function handleCreateKey(env: Env, req: Request): Promise<Response>
   const body = await readJson(req);
   if (!body?.name || typeof body.name !== "string") return err(400, "invalid_input", "name is required");
   const dayLimit = Number.isFinite(Number(body.day_limit)) && Number(body.day_limit) > 0 ? Number(body.day_limit) : num(env as any, "KEY_DAY_ASK_DEFAULT", 2000);
+  // the owner member (2026-10-12): a key minted for a member draws from
+  // HER credit cap — one shared daily allowance across key and web
+  const memberSub = typeof body?.member_sub === "string" && body.member_sub.trim() ? body.member_sub.trim().slice(0, 64) : null;
   const raw = `${P().publisher.id}_${[...crypto.getRandomValues(new Uint8Array(24))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
   const id = crypto.randomUUID();
   const keyHash = await sha256Hex(raw);
   await env.DB.prepare(
-    "INSERT INTO api_keys (id, name, key_hash, day_limit, created_at, revoked) VALUES (?1,?2,?3,?4,?5,0)",
+    "INSERT INTO api_keys (id, name, key_hash, day_limit, owner_sub, created_at, revoked) VALUES (?1,?2,?3,?4,?5,?6,0)",
   )
-    .bind(id, body.name, keyHash, dayLimit, new Date().toISOString())
+    .bind(id, body.name, keyHash, dayLimit, memberSub, new Date().toISOString())
     .run();
-  return json({ id, name: body.name, day_limit: dayLimit, key: raw, note: "Store this key now — it is not retrievable again." });
+  return json({ id, name: body.name, day_limit: dayLimit, ...(memberSub ? { member_sub: memberSub } : {}), key: raw, note: "Store this key now — it is not retrievable again." + (memberSub ? " This key draws from its member's shared daily credit cap." : "") });
 }
 
 export async function handleListKeys(env: Env, req: Request): Promise<Response> {
@@ -456,7 +459,7 @@ export async function handleListKeys(env: Env, req: Request): Promise<Response> 
   const auth = req.headers.get("authorization") ?? "";
   if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
   const rows = await env.DB.prepare(
-    "SELECT id, name, day_limit, created_at, revoked FROM api_keys ORDER BY created_at DESC",
+    "SELECT id, name, day_limit, owner_sub, created_at, revoked FROM api_keys ORDER BY created_at DESC",
   ).all();
   return json({ keys: rows.results, ...corsHeaders(req) });
 }

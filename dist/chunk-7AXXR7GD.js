@@ -9,7 +9,7 @@ import {
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-DJ65EF5G.js";
+} from "./chunk-W7J5SFXJ.js";
 import {
   DATASETS,
   LIMITS,

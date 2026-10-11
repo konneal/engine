@@ -46,6 +46,11 @@ export interface ApiKey {
   id: string;
   name: string;
   day_limit: number;
+  /** the member whose credit cap this key draws from (the owner's
+   *  2026-10-12 law): a member-owned key shares the member's daily
+   *  allowance — key and web traffic are ONE budget. Null = a service
+   *  key with its own per-key cap. */
+  owner_sub?: string | null;
 }
 
 export async function authenticate(env: Pick<Env, "DB">, req: Request): Promise<ApiKey | null> {
@@ -54,7 +59,7 @@ export async function authenticate(env: Pick<Env, "DB">, req: Request): Promise<
   if (!m) return null;
   const keyHash = await sha256Hex(m[1].trim());
   const row = await env.DB.prepare(
-    "SELECT id, name, day_limit FROM api_keys WHERE key_hash = ?1 AND revoked = 0",
+    "SELECT id, name, day_limit, owner_sub FROM api_keys WHERE key_hash = ?1 AND revoked = 0",
   )
     .bind(keyHash)
     .first<ApiKey>();

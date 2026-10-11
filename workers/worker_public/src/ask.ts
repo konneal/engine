@@ -409,9 +409,17 @@ async function handleAsk(
   const routeEffort = (route: "fast" | "deep") =>
     route === "fast" && !declaredEffort ? ("low" as const) : effort;
 
+  // the owner-member law (2026-10-12): a member-owned API key draws
+  // from HER credit cap — key traffic and web traffic share ONE daily
+  // bucket (sub:<owner>), so a key can never multiply an allowance.
+  // Ownerless service keys keep the per-key bucket.
+  const memberKey = tier === "key" ? key?.owner_sub ?? null : null;
   const limit =
-    tier === "key" ? key!.day_limit : tier === "member" || member ? num(env as any, "MEMBER_DAY_ASK", 300) : num(env as any, "ANON_DAY_ASK", 20);
-  const bucketId = tier === "key" ? `key:${key!.id}` : member ? `sub:${member.sub}` : clientIp(req);
+    memberKey ? num(env as any, "MEMBER_DAY_ASK", 300)
+    : tier === "key" ? key!.day_limit
+    : tier === "member" || member ? num(env as any, "MEMBER_DAY_ASK", 300)
+    : num(env as any, "ANON_DAY_ASK", 20);
+  const bucketId = memberKey ? `sub:${memberKey}` : tier === "key" ? `key:${key!.id}` : member ? `sub:${member.sub}` : clientIp(req);
   const quota = await checkQuota(env, "ask", bucketId, limit, effort === "low" ? 1 : 2);
   const creditPreview = creditEstimate({ effort, toolTurns: body?.multi_turn !== false ? 3 : 0, image: false });
   if (!quota.ok) {
