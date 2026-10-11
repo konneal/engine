@@ -1,0 +1,12 @@
+import type { ToolSpec } from "./tools.ts";
+export declare const unitsGet: ToolSpec;
+export declare const graphCites: ToolSpec;
+export declare const docsSection: ToolSpec;
+export declare const documentsFamily: ToolSpec;
+export declare const licensedSection: ToolSpec;
+export declare const verdictEvaluate: ToolSpec;
+export declare const conditionsCheck: ToolSpec;
+export declare const bibEntry: ToolSpec;
+export declare const unitsLookup: ToolSpec;
+export declare const unitsConvert: ToolSpec;
+export declare const glossaryLookup: ToolSpec;

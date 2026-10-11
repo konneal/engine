@@ -20,6 +20,7 @@ import type { Env } from "./env";
 import { portModelRunner } from "./env.ts";
 export type { Env };
 import { json, err, corsHeaders, withCors, readJson, authenticate, type ApiKey } from "./lib/http";
+import { creditBudget, clientIp } from "./quota";
 
 import { handleSearch } from "./search";
 import { handleEnrich, handleSectionUnit, handleCaption, handleVectors, handleJudge, handleCreateKey, handleListKeys, handleRevokeKey, handleKeyUsage, handleFamilySummary } from "./admin";
@@ -223,7 +224,7 @@ async function creditsRoute(c: RouteContext): Promise<Response> {
   if (t instanceof Response) return t;
   const key = t.key;
   const memberKey = t.tier === "key" ? key?.owner_sub ?? null : null;
-  const bucketId = memberKey ? `sub:${memberKey}` : t.tier === "key" ? `key:${key!.id}` : t.tier === "member" ? `sub:${(c as any).member?.sub ?? "member"}` : clientIp(c.req);
+  const bucketId = memberKey ? `sub:${memberKey}` : t.tier === "key" ? `key:${key!.id}` : clientIp(c.req);
   const cb = await creditBudget(c.env, bucketId);
   return withCors(json({ credits: cb }), corsHeaders(c.req));
 }
