@@ -79,15 +79,20 @@ export interface RefusalScope {
   cited?: boolean;
 }
 
-/** A whole-sentence redirect offer: first person + an answer/help verb
- *  + a redirect marker (questions about / instead) in ONE sentence. */
+/** A whole-sentence redirect offer in ONE sentence, first person:
+ *  the "questions about" marker (four observed shapes carry it —
+ *  "I'm happy to help with questions about…", "I can answer questions
+ *  about…", "I'm a metrology assistant — I can answer questions
+ *  about…", "I'm here for questions about…"), or the "instead" marker
+ *  in a sentence with NO citation apparatus (no clause anchors, no
+ *  digits — an offer names no provisions). */
 function redirectOfferSentences(answer: string): Array<[number, number]> {
   const out: Array<[number, number]> = [];
   let i = 0;
   while (i < answer.length) {
     const end = sentenceEnd(answer, i);
     const s = answer.slice(i, end);
-    if (/\bI\b[^.!?]{0,120}\b(?:answer|help|assist)\b/i.test(s) && /\b(?:questions? about|instead)\b/i.test(s)) out.push([i, end]);
+    if (/\bI\b[^.!?]{0,160}?\bquestions? about\b/i.test(s) || (/\bI\b[^.!?]{0,160}?\binstead\b/i.test(s) && !/[§\[\d]/.test(s))) out.push([i, end]);
     i = end;
     while (i < answer.length && /\s/.test(answer[i] ?? "")) i++;
   }
