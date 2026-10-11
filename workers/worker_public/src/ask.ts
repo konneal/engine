@@ -17,7 +17,7 @@ import { reflect } from "./reflect";
 import { scoreFaithfulness } from "./faithfulness";
 import { entailmentVerdict } from "./entailment";
 import { checkQuoteAnchors, ANCHOR_CORRECTION_NOTE } from "./anchors";
-import { canonicalRefusal, exciseMisplacedPin } from "./refusal";
+import { cacheableAnswer, canonicalRefusal, exciseMisplacedPin } from "./refusal";
 import { contractV2, tableRetyped } from "./refs";
 import { completeTables, completeFigures } from "./completion";
 import { NO_CONTEXT, appliedContext, contextNote, namedDocumentIn, parseContext, resolveDocScope, syntheticUnderstanding } from "./context";
@@ -1582,7 +1582,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified — not caching");
           }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(refusalAnswer()) && !ablate) {
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(usedHits.length > 0)) && !ablate) {
             ctx.waitUntil(
               env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...(sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}), ...(streamedEntailment ? { entailment: streamedEntailment } : {}) }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
@@ -1811,7 +1811,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     }
   }
   const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
-  const cacheable = !contextual && !declaredCtx && !ablate && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
+  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(usedHits.length > 0)) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));

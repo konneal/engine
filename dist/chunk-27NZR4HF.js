@@ -80,10 +80,11 @@ import {
   validateQuery
 } from "./chunk-W7J5SFXJ.js";
 import {
+  cacheableAnswer,
   canonicalRefusal,
   exciseMisplacedPin,
   refusalAnswer
-} from "./chunk-WPOKSNPE.js";
+} from "./chunk-XBZIJMS7.js";
 import {
   entitlementScope,
   requestSalt,
@@ -2659,7 +2660,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified \u2014 not caching");
           }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !canonical.includes(refusalAnswer()) && !ablate) {
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(usedHits.length > 0)) && !ablate) {
             ctx.waitUntil(
               env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}, ...streamedEntailment ? { entailment: streamedEntailment } : {} }), { expirationTtl: LIMITS.cacheTtlSec })
             );
@@ -2807,7 +2808,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
     }
   }
   const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
-  const cacheable = !contextual && !declaredCtx && !ablate && !answer.includes(refusalAnswer()) && finalAnchors.violations.length === 0;
+  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(usedHits.length > 0)) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));

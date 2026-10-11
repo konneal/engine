@@ -32,3 +32,11 @@ export declare function canonicalRefusal(answer: string, scope?: RefusalScope): 
  *  the pin sentence (and its refusal-shaped paraphrases) are excised —
  *  the surrounding content stands on its own. */
 export declare function exciseMisplacedPin(answer: string, cites: boolean): string;
+/** Cacheable under the refusal law (2026-10-11, the poisoned-entry
+ *  lesson): "refusals are never cached" was enforced as "answers
+ *  containing the pin are never cached" — backwards for DRIFT, which
+ *  lacks the pin and cached itself across deploy windows (an edge
+ *  instance running pre-wall code wrote a drifted refusal that served
+ *  every later ask). An answer is cacheable only when it carries no
+ *  pin AND the wall would not rewrite it. */
+export declare function cacheableAnswer(answer: string, scope?: RefusalScope): boolean;

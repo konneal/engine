@@ -97,9 +97,14 @@ function exciseMisplacedPin(answer, cites) {
   }
   return out.replace(/^[ \t\n]+/, "").replace(/\n{3,}/g, "\n\n").trim();
 }
+function cacheableAnswer(answer, scope) {
+  if (answer.includes(refusalAnswer())) return false;
+  return canonicalRefusal(answer, scope) === answer;
+}
 
 export {
   refusalAnswer,
   canonicalRefusal,
-  exciseMisplacedPin
+  exciseMisplacedPin,
+  cacheableAnswer
 };
