@@ -4,7 +4,7 @@
 // stripping, no build step): node --test tests/refusal.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canonicalRefusal, exciseMisplacedPin, refusalAnswer } from "../workers/worker_public/src/refusal.ts";
+import { cacheableAnswer, canonicalRefusal, exciseMisplacedPin, refusalAnswer } from "../workers/worker_public/src/refusal.ts";
 import { setProfile } from "../workers/worker_public/src/profile.ts";
 import { PROFILE } from "../workers/worker_public/src/profile.gen.ts";
 
@@ -130,6 +130,27 @@ test("drift: the redirect TAIL after a real answer is preserved, not canonicaliz
 test("control: a real answer opening with capability phrasing is untouched", () => {
   const answer = "I can answer that from R 60-1 §4.1: the maximum number of verification intervals is set by the class.";
   assert.equal(canonicalRefusal(answer), answer);
+});
+
+// ── the cache law (2026-10-11, the poisoned-entry lesson) ──
+
+test("the pin is never cacheable", () => {
+  assert.equal(cacheableAnswer(REFUSAL_ANSWER), false);
+});
+
+test("a real cited answer is cacheable", () => {
+  const answer = "A load cell is a force transducer that converts a force into an electrical signal [OIML R 60-1:2021 §4.1].";
+  assert.equal(cacheableAnswer(answer), true);
+});
+
+test("a drifted refusal is NOT cacheable — the wall would rewrite it (the poisoned-entry law)", () => {
+  const drift = "I'm here for questions about OIML publications, certification workflows and the OIML-CS — not recipes.";
+  assert.equal(cacheableAnswer(drift, { cited: false, conversational: false }), false);
+});
+
+test("the same shape on a conversational turn is cacheable — it is the answer", () => {
+  const identity = "I'm here for questions about OIML publications, certification workflows and the OIML-CS — not recipes.";
+  assert.equal(cacheableAnswer(identity, { cited: false, conversational: true }), true);
 });
 
 // ── the loose family (2026-10-11, third smoke shape): question-class ×
