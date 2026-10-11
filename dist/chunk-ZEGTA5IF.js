@@ -208,6 +208,9 @@ async function scoreJudge(ai, model, systemPrompt, userPrompt) {
 // workers/worker_public/prompts/summarize.md
 var summarize_default = "Summarize this conversation so a Q&A assistant can continue it with full continuity. Capture: documents and editions discussed, questions asked, answers given (key values and definitions), terminology established, unresolved threads. Under 150 words, plain text, no preamble. The conversation may be any length and in any language \u2014 summarize it in English.\n";
 
+// workers/worker_public/prompts/agent-data.md
+var agent_data_default = "You answer over a standards corpus AND structured data planes. Before answering, decide what information you need and whether a tool provides it \u2014 chain up to three tool turns, reading each result before the next decision. NEVER guess at structured facts a tool could return.\n\nThe data planes available to your tools:\n\n- **Certificate register** (snapshot, per recommendation FAMILY \u2014 no edition dimension): one row per issued certificate \u2014 number (encodes scheme year and issuing country), family (digits, e.g. 60), holder, model designation, issue year, status (Valid/Suspended), and the document link when a PDF is on file. `certificates.search` matches by holder/model/printed number; `certificates.query` computes counts, latest, group-bys, and filtered searches over these columns.\n- **Units and quantities** (the units plane): named units with dimensions, symbols, and conversion factors. `units.lookup` finds a unit; `units.get` reads one; `units.convert` converts values between compatible units.\n- **The typed model plane** (the publications' machine-readable units \u2014 {{PUBLISHER_NAME}}'s mko/pko payloads): typed tables, formulas, figures, requirements, terms, and constraints with machine-checkable checks, keyed by unit id and clause. `docs.section` reads a publication's section; `glossary.lookup` resolves terms; `graph.cites` reads a publication's citation edges; `verdict.evaluate` executes a constraint's machine check against stated values; `conditions.check` evaluates condition-set membership.\n- **The publications registry**: families, editions, active/superseded status, successors. `documents.family` reads a family's edition lineage.\n- **The indexed corpus itself**: the passages in your context, retrieved for this question.\n\nMethod: state to yourself what the answer turns on; if it is a structured fact (a count, a status, a latest, a conversion, a machine verdict), call the tool that computes it and read the result; if the first result narrows the question, call the next tool on what you learned; only then write the final answer, attributing computed numbers to the tool that returned them.\n";
+
 // workers/worker_public/prompts/reflect.md
 var reflect_default = 'You are a factuality critic. Given a question, an answer, and the passages the answer was based on, determine if every factual claim in the answer is directly supported by the passages. Reply with ONLY: {"grounded": true} or {"grounded": false, "missing_info": "what is missing"}\n';
 
@@ -2517,7 +2520,9 @@ Answer account questions from these records ONLY: name the record when you use i
     try {
       const imageTurn = typeof withImage === "string";
       if (imageTurn) mark("Reading the photograph to identify the instrument");
-      const probeMessages = [...messages.slice(0, -1), { role: "user", content: `${TOOL_DECLARATION}
+      const probeMessages = [...messages.slice(0, -1), { role: "user", content: `${agent_data_default.trimEnd()}
+
+${TOOL_DECLARATION}
 
 ${imageTurn ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query \u2014 never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : ""}
 
