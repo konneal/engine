@@ -108,3 +108,26 @@ test("a scope DISCUSSION inside a real answer is never excised", () => {
   const real = "This exemption falls outside the scope of R 60's metrological requirements [1], so the verifying authority may apply national rules.";
   assert.equal(exciseMisplacedPin(real, true), real);
 });
+
+// ── the redirect-only openers (2026-10-11 smoke): the pinned sentence
+//    replaced by a scope OFFER ──
+
+test("drift: the happy-to-help opener ending in 'instead' canonicalizes", () => {
+  const answer = "I'm happy to help with questions about OIML legal-metrology publications — Recommendations, Documents, Guides, Basic publications, or the OIML Certification System — instead.";
+  assert.equal(canonicalRefusal(answer), REFUSAL_ANSWER);
+});
+
+test("drift: the can-answer opener with the scope list canonicalizes", () => {
+  const answer = "I can answer questions about OIML legal-metrology publications — Recommendations, Documents, Guides and Basic publications — such as OIML B 20:2024 on the use of OIML logos.";
+  assert.equal(canonicalRefusal(answer), REFUSAL_ANSWER);
+});
+
+test("drift: the redirect TAIL after a real answer is preserved, not canonicalized", () => {
+  const answer = "The certificate R60/2021-A-NL1-26.12 is valid [register snapshot]. I'm happy to help with questions about OIML legal-metrology publications instead.";
+  assert.equal(canonicalRefusal(answer), answer);
+});
+
+test("control: a real answer opening with capability phrasing is untouched", () => {
+  const answer = "I can answer that from R 60-1 §4.1: the maximum number of verification intervals is set by the class.";
+  assert.equal(canonicalRefusal(answer), answer);
+});
