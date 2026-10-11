@@ -24,7 +24,16 @@ function refusalPatterns(publisher) {
       // verb is the guard, a scope DISCUSSION inside a real answer
       // ("this exemption is outside the scope of R 60") never matches
       /\bI don[’']?t have (?:any )?information on [^.]{0,80}(?:that[’']?s|—)?\s*(?:general|common) knowledge\b/i,
-      /\b(?:that[’']?s|this is) (?:just )?(?:general|common) knowledge[^.]{0,80}(?:outside|beyond|not covered)\b/i
+      /\b(?:that[’']?s|this is) (?:just )?(?:general|common) knowledge[^.]{0,80}(?:outside|beyond|not covered)\b/i,
+      // the redirect-only openers (2026-10-11 smoke): the model swaps the
+      // pinned sentence for a scope OFFER — "I'm happy to help with
+      // questions about OIML … instead." / "I can answer questions about
+      // OIML … — such as OIML B 20:2024 …". Anchored at the answer's
+      // start (a real answer never OPENS with the redirect — the
+      // redirect TAIL after content survives untouched), the publisher
+      // token profile-driven.
+      new RegExp(`^\\s*I(?:['\u2019]m| am) happy to help with questions about ${publisher}\\b[^\\n]{0,220}?\\binstead\\b`, "i"),
+      new RegExp(`^\\s*I can (?:answer|help with) questions about ${publisher}\\b[^\\n]{0,220}?\\bpublications\\b`, "i")
     ],
     // the misplaced-pin wall's subset: every pattern here carries a
     // first-person refusal verb ("I don't have information", "I can't
