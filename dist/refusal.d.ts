@@ -2,11 +2,27 @@
  *  Refusals are never cached: a refusal says "retrieval found nothing",
  *  which is a property of the moment, not of the question. */
 export declare function refusalAnswer(): string;
+/** The refusal scope (2026-10-11, the third smoke shape): the loose
+ *  redirect-offer family is gated by what the PIPELINE knows, not by
+ *  ever-more phrase patterns. The model's scope offers keep drifting
+ *  ("I'm happy to help … instead", "I can answer questions about …",
+ *  "I'm a metrology assistant — I can help with … instead") — the same
+ *  surface form that legitimately ANSWERS a conversational question
+ *  ("what can you help me with?"). The discriminators: a knowledge-seek
+ *  question (the understanding's own class) and an UNCITED answer — a
+ *  cited answer's scope talk is content, a conversational turn's scope
+ *  talk is the answer itself. */
+export interface RefusalScope {
+    /** the understanding read the question as a conversational turn */
+    conversational?: boolean;
+    /** the answer carries citations */
+    cited?: boolean;
+}
 /** Normalize a refusal-shaped answer to the pinned sentence. A drift
  *  refusal occupies its own sentence: swap that sentence (preface
  *  included) for the pinned one — the redirect tail survives. An answer
  *  outside the refusal family is returned byte-identical. */
-export declare function canonicalRefusal(answer: string): string;
+export declare function canonicalRefusal(answer: string, scope?: RefusalScope): string;
 /** The misplaced-pin wall (2026-10-10): an answer that actually cites
  *  passages is NOT a refusal — but the model sometimes drops the
  *  pinned sentence into an otherwise-correct, well-cited answer as a

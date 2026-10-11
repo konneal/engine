@@ -164,7 +164,7 @@ async function run(
     telemetry(env, ctx, "member", "research", MODELS.research, false, 0, queryHash, q.lang);
     throw new Error("The generation model is unavailable; please retry.");
   }
-  answer = canonicalRefusal(answer);
+  answer = canonicalRefusal(answer, { cited: usedHits.length > 0, conversational: false });
   const anchors = checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
   if (anchors.violations.length) console.log("research anchors:", anchors.violations.length, "unverified");
   const out = {

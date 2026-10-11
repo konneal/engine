@@ -625,6 +625,10 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // take this path (they always run understanding + live retrieval);
   // fresh already bypassed the exact cache above and bypasses this one.
   let understanding: any = null;
+  // the loose redirect-offer family's gate (refusal.ts): knowledge-seek
+  // questions only, uncited answers only — a conversational turn's
+  // scope vocabulary is the answer itself
+  const refusalScope = (cited: boolean) => ({ cited, conversational: understanding?.intent === "conversational" });
   // a query naming a model node (/req/…, /term/…) is node-SCOPED: its
   // ── Option C: optimistic parallel retrieval ──
   // The dense lane (folded-query embed + unfiltered Vectorize query) runs
@@ -1537,7 +1541,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           }
           // the misplaced-pin wall rides the streamed path too: a
           // CITED stream is not a refusal
-          const canonical0 = usedHits.length > 0 ? exciseMisplacedPin(canonicalRefusal(full), true) : canonicalRefusal(full);
+          const canonical0 = usedHits.length > 0 ? exciseMisplacedPin(canonicalRefusal(full, refusalScope(usedHits.length > 0)), true) : canonicalRefusal(full, refusalScope(false));
           // answer contract v2: validate [[u:]] refs, resolve typed blocks
           const c2 = canonical0.includes(refusalAnswer())
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
@@ -1641,7 +1645,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       );
     answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
-  if (answer) answer = canonicalRefusal(answer);
+  if (answer) answer = canonicalRefusal(answer, refusalScope(usedHits.length > 0));
   // the misplaced-pin wall: a CITED answer is not a refusal — excise
   // the pinned sentence if the model dropped it in as a disclaimer
   // (measured on chip-scoped asks: correct cited answers carrying the
@@ -1684,7 +1688,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       generateRetries += 1;
       const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], routeEffort(routed.route));
       if (corrected) {
-        const correctedAnswer = canonicalRefusal(corrected);
+        const correctedAnswer = canonicalRefusal(corrected, refusalScope(usedHits.length > 0));
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
         const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
         if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped) || (unreferenced && correctedAnswer.includes("[[u:"))) {
@@ -1729,7 +1733,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
         // the answer now comes from the retry passages — citations must follow
         if (retryAnswer) {
-          answer = canonicalRefusal(retryAnswer);
+          answer = canonicalRefusal(retryAnswer, refusalScope(retryRetrieve.hits.length > 0));
           used = retryUsed;
         }
       }
@@ -1781,7 +1785,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       messages[messages.length - 1],
     ], effort);
     if (regen && !regen.includes(refusalAnswer())) {
-      answer = canonicalRefusal(regen);
+      answer = canonicalRefusal(regen, refusalScope(true));
       console.log("blind-answer: regeneration grounded");
     }
   }

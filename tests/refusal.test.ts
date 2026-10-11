@@ -112,14 +112,14 @@ test("a scope DISCUSSION inside a real answer is never excised", () => {
 // ── the redirect-only openers (2026-10-11 smoke): the pinned sentence
 //    replaced by a scope OFFER ──
 
-test("drift: the happy-to-help opener ending in 'instead' canonicalizes", () => {
+test("loose: the happy-to-help opener ending in 'instead' canonicalizes on a knowledge seek", () => {
   const answer = "I'm happy to help with questions about OIML legal-metrology publications — Recommendations, Documents, Guides, Basic publications, or the OIML Certification System — instead.";
-  assert.equal(canonicalRefusal(answer), REFUSAL_ANSWER);
+  assert.equal(canonicalRefusal(answer, { cited: false, conversational: false }), REFUSAL_ANSWER);
 });
 
-test("drift: the can-answer opener with the scope list canonicalizes", () => {
+test("loose: the can-answer opener with the scope list canonicalizes on a knowledge seek", () => {
   const answer = "I can answer questions about OIML legal-metrology publications — Recommendations, Documents, Guides and Basic publications — such as OIML B 20:2024 on the use of OIML logos.";
-  assert.equal(canonicalRefusal(answer), REFUSAL_ANSWER);
+  assert.equal(canonicalRefusal(answer, { cited: false, conversational: false }), REFUSAL_ANSWER);
 });
 
 test("drift: the redirect TAIL after a real answer is preserved, not canonicalized", () => {
@@ -130,4 +130,36 @@ test("drift: the redirect TAIL after a real answer is preserved, not canonicaliz
 test("control: a real answer opening with capability phrasing is untouched", () => {
   const answer = "I can answer that from R 60-1 §4.1: the maximum number of verification intervals is set by the class.";
   assert.equal(canonicalRefusal(answer), answer);
+});
+
+// ── the loose family (2026-10-11, third smoke shape): question-class ×
+//    citation-state gated — the surface form that ANSWERS a
+//    conversational question is never a refusal ──
+
+test("loose: the identity-preface offer (the third smoke shape) canonicalizes on a knowledge seek", () => {
+  const answer = "I'm a metrology assistant — I can answer questions about OIML Recommendations, Documents, Guides and Basic publications, such as how to get instruments certified or which edition of a publication applies.";
+  assert.equal(canonicalRefusal(answer, { cited: false, conversational: false }), REFUSAL_ANSWER);
+});
+
+test("loose: the assistant-on-platform offer (the ops smoke shape) canonicalizes on a knowledge seek", () => {
+  const answer = "I'm Ommisa, the assistant on the OIML SMART certification platform — I can help with OIML publications, certification procedures, and your application workflow instead.";
+  assert.equal(canonicalRefusal(answer, { cited: false, conversational: false }), REFUSAL_ANSWER);
+});
+
+test("loose control: the same offer is the ANSWER on a conversational turn — untouched", () => {
+  const answer = "I'm Ommisa, the assistant on the OIML SMART certification platform — I can help with OIML publications, certification procedures, and your application workflow instead.";
+  assert.equal(canonicalRefusal(answer, { cited: false, conversational: true }), answer);
+});
+
+test("loose control: a cited answer's offer sentence is content — untouched", () => {
+  const answer = "I can help with questions about OIML publications [1]. R 60 covers load cells [2].";
+  assert.equal(canonicalRefusal(answer, { cited: true, conversational: false }), answer);
+});
+
+test("loose: multi-sentence drift — the offer sentence swaps, surrounding text survives", () => {
+  const answer = "I'm a metrology assistant. I can answer questions about OIML legal-metrology publications instead.";
+  assert.equal(
+    canonicalRefusal(answer, { cited: false, conversational: false }),
+    `I'm a metrology assistant. ${REFUSAL_ANSWER}`,
+  );
 });

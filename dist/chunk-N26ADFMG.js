@@ -24,16 +24,7 @@ function refusalPatterns(publisher) {
       // verb is the guard, a scope DISCUSSION inside a real answer
       // ("this exemption is outside the scope of R 60") never matches
       /\bI don[’']?t have (?:any )?information on [^.]{0,80}(?:that[’']?s|—)?\s*(?:general|common) knowledge\b/i,
-      /\b(?:that[’']?s|this is) (?:just )?(?:general|common) knowledge[^.]{0,80}(?:outside|beyond|not covered)\b/i,
-      // the redirect-only openers (2026-10-11 smoke): the model swaps the
-      // pinned sentence for a scope OFFER — "I'm happy to help with
-      // questions about OIML … instead." / "I can answer questions about
-      // OIML … — such as OIML B 20:2024 …". Anchored at the answer's
-      // start (a real answer never OPENS with the redirect — the
-      // redirect TAIL after content survives untouched), the publisher
-      // token profile-driven.
-      new RegExp(`^\\s*I(?:['\u2019]m| am) happy to help with questions about ${publisher}\\b[^\\n]{0,220}?\\binstead\\b`, "i"),
-      new RegExp(`^\\s*I can (?:answer|help with) questions about ${publisher}\\b[^\\n]{0,220}?\\bpublications\\b`, "i")
+      /\b(?:that[’']?s|this is) (?:just )?(?:general|common) knowledge[^.]{0,80}(?:outside|beyond|not covered)\b/i
     ],
     // the misplaced-pin wall's subset: every pattern here carries a
     // first-person refusal verb ("I don't have information", "I can't
@@ -61,7 +52,19 @@ function sentenceEnd(answer, i) {
   const m = /[.!?\n]/.exec(answer.slice(i));
   return m ? i + m.index + 1 : answer.length;
 }
-function canonicalRefusal(answer) {
+function redirectOfferSentences(answer) {
+  const out = [];
+  let i = 0;
+  while (i < answer.length) {
+    const end = sentenceEnd(answer, i);
+    const s = answer.slice(i, end);
+    if (/\bI\b[^.!?]{0,120}\b(?:answer|help|assist)\b/i.test(s) && /\b(?:questions? about|instead)\b/i.test(s)) out.push([i, end]);
+    i = end;
+    while (i < answer.length && /\s/.test(answer[i] ?? "")) i++;
+  }
+  return out;
+}
+function canonicalRefusal(answer, scope) {
   const CANON = refusalAnswer();
   if (answer.includes(CANON)) return answer;
   const { variant: REFUSAL_VARIANT, drift: REFUSAL_DRIFT } = refusalPatterns(P().publisher.name);
@@ -71,6 +74,10 @@ function canonicalRefusal(answer) {
     const m = drift.exec(answer);
     if (!m) continue;
     return answer.slice(0, sentenceStart(answer, m.index)) + CANON + answer.slice(sentenceEnd(answer, m.index));
+  }
+  if (scope && !scope.cited && !scope.conversational) {
+    const offer = redirectOfferSentences(answer)[0];
+    if (offer) return answer.slice(0, offer[0]) + CANON + answer.slice(offer[1]);
   }
   return answer;
 }
