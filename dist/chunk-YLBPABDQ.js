@@ -1981,6 +1981,7 @@ async function handleAsk(env, ctx, req, tier, key) {
     }
   }
   let understanding = null;
+  const answerCites = (t) => /\[[^\]]+\]/.test(t);
   const refusalScope = (cited) => ({ cited, conversational: understanding?.intent === "conversational" });
   let optimisticVec = null;
   let optimisticHits = [];
@@ -2622,7 +2623,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
               }
             }
           }
-          const canonical0 = usedHits.length > 0 ? exciseMisplacedPin(canonicalRefusal(full, refusalScope(usedHits.length > 0)), true) : canonicalRefusal(full, refusalScope(false));
+          const canonical0 = usedHits.length > 0 ? exciseMisplacedPin(canonicalRefusal(full, refusalScope(answerCites(full))), true) : canonicalRefusal(full, refusalScope(false));
           const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
           send({
             type: "done",
@@ -2660,7 +2661,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified \u2014 not caching");
           }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(usedHits.length > 0)) && !ablate) {
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
             ctx.waitUntil(
               env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}, ...streamedEntailment ? { entailment: streamedEntailment } : {} }), { expirationTtl: LIMITS.cacheTtlSec })
             );
@@ -2706,7 +2707,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
     );
     answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
-  if (answer) answer = canonicalRefusal(answer, refusalScope(usedHits.length > 0));
+  if (answer) answer = canonicalRefusal(answer, refusalScope(answerCites(answer)));
   if (answer && usedHits.length > 0) answer = exciseMisplacedPin(answer, true);
   stageTiming.generate = Date.now() - tGen;
   let used = usedHits;
@@ -2731,7 +2732,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
       generateRetries += 1;
       const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], routeEffort(routed.route));
       if (corrected) {
-        const correctedAnswer = canonicalRefusal(corrected, refusalScope(usedHits.length > 0));
+        const correctedAnswer = canonicalRefusal(corrected, refusalScope(answerCites(corrected)));
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h) => h.text));
         const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
         if (retryAnchors.violations.length < anchors.violations.length || !retryRetyped && retyped || unreferenced && correctedAnswer.includes("[[u:")) {
@@ -2756,7 +2757,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, void 0, summary, budget);
         const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
         if (retryAnswer) {
-          answer = canonicalRefusal(retryAnswer, refusalScope(retryRetrieve.hits.length > 0));
+          answer = canonicalRefusal(retryAnswer, refusalScope(answerCites(retryAnswer)));
           used = retryUsed;
         }
       }
@@ -2788,7 +2789,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
       messages[messages.length - 1]
     ], effort);
     if (regen && !regen.includes(refusalAnswer())) {
-      answer = canonicalRefusal(regen, refusalScope(true));
+      answer = canonicalRefusal(regen, refusalScope(answerCites(regen)));
       console.log("blind-answer: regeneration grounded");
     }
   }
@@ -2808,7 +2809,7 @@ ${q.query}`.replace("\n\n\n\n", "\n\n") }];
     }
   }
   const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
-  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(usedHits.length > 0)) && finalAnchors.violations.length === 0;
+  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer))) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));

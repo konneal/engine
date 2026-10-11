@@ -627,7 +627,12 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   let understanding: any = null;
   // the loose redirect-offer family's gate (refusal.ts): knowledge-seek
   // questions only, uncited answers only — a conversational turn's
-  // scope vocabulary is the answer itself
+  // scope vocabulary is the answer itself. "Cited" is the ANSWER TEXT
+  // carrying citation markers, NEVER the prompt's hit count: retrieval
+  // always returns passages (the model just declines to cite them on a
+  // refusal) — gating on usedHits left every refusal "cited" and the
+  // wall dark through three deploys (2026-10-11)
+  const answerCites = (t: string) => /\[[^\]]+\]/.test(t);
   const refusalScope = (cited: boolean) => ({ cited, conversational: understanding?.intent === "conversational" });
   // a query naming a model node (/req/…, /term/…) is node-SCOPED: its
   // ── Option C: optimistic parallel retrieval ──
@@ -1541,7 +1546,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           }
           // the misplaced-pin wall rides the streamed path too: a
           // CITED stream is not a refusal
-          const canonical0 = usedHits.length > 0 ? exciseMisplacedPin(canonicalRefusal(full, refusalScope(usedHits.length > 0)), true) : canonicalRefusal(full, refusalScope(false));
+          const canonical0 = usedHits.length > 0 ? exciseMisplacedPin(canonicalRefusal(full, refusalScope(answerCites(full))), true) : canonicalRefusal(full, refusalScope(false));
           // answer contract v2: validate [[u:]] refs, resolve typed blocks
           const c2 = canonical0.includes(refusalAnswer())
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
@@ -1582,7 +1587,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified — not caching");
           }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(usedHits.length > 0)) && !ablate) {
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
             ctx.waitUntil(
               env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...(sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}), ...(streamedEntailment ? { entailment: streamedEntailment } : {}) }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
@@ -1645,7 +1650,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       );
     answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
-  if (answer) answer = canonicalRefusal(answer, refusalScope(usedHits.length > 0));
+  if (answer) answer = canonicalRefusal(answer, refusalScope(answerCites(answer)));
   // the misplaced-pin wall: a CITED answer is not a refusal — excise
   // the pinned sentence if the model dropped it in as a disclaimer
   // (measured on chip-scoped asks: correct cited answers carrying the
@@ -1688,7 +1693,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       generateRetries += 1;
       const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], routeEffort(routed.route));
       if (corrected) {
-        const correctedAnswer = canonicalRefusal(corrected, refusalScope(usedHits.length > 0));
+        const correctedAnswer = canonicalRefusal(corrected, refusalScope(answerCites(corrected)));
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
         const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
         if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped) || (unreferenced && correctedAnswer.includes("[[u:"))) {
@@ -1733,7 +1738,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
         // the answer now comes from the retry passages — citations must follow
         if (retryAnswer) {
-          answer = canonicalRefusal(retryAnswer, refusalScope(retryRetrieve.hits.length > 0));
+          answer = canonicalRefusal(retryAnswer, refusalScope(answerCites(retryAnswer)));
           used = retryUsed;
         }
       }
@@ -1785,7 +1790,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       messages[messages.length - 1],
     ], effort);
     if (regen && !regen.includes(refusalAnswer())) {
-      answer = canonicalRefusal(regen, refusalScope(true));
+      answer = canonicalRefusal(regen, refusalScope(answerCites(regen)));
       console.log("blind-answer: regeneration grounded");
     }
   }
@@ -1811,7 +1816,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     }
   }
   const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
-  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(usedHits.length > 0)) && finalAnchors.violations.length === 0;
+  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer))) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
