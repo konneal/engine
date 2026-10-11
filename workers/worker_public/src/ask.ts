@@ -770,9 +770,38 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     if (fam) {
       const agg = await registerAggregate(env.DB, fam);
       if (agg) {
+        // DETERMINISTIC ANSWER (the verdict engine's law applied to the
+        // register): a count/latest question is computed data — the
+        // model never enters the loop, so its scope training can never
+        // refuse a computed fact. The prose mirrors the note; the block
+        // carries the same numbers for the UI.
+        const latestLine = agg.latest
+          ? `The latest certificate in the snapshot is ${agg.latest.num} — holder ${agg.latest.holder}, model "${agg.latest.model}"${agg.latest.year ? `, issued ${agg.latest.year}` : ""}, status ${agg.latest.status}.`
+          : "No certificate rows are present in the snapshot.";
+        const linkLine = agg.latest?.pdf_key
+          ? `\n\n[The latest certificate's document](${`/cert-pdf/${agg.latest.pdf_key}`}) is on file.`
+          : "";
+        const answer = aggIntent === "count"
+          ? `The OIML ${agg.family} family holds **${agg.count} certificate${agg.count === 1 ? "" : "s"}** in the OIML-CS register snapshot (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).\n\nCertificates are issued per recommendation family — the register carries no edition dimension, so the 2021 you named does not narrow the count. The register is a snapshot rather than live certification status.`
+          : `${latestLine}${linkLine}\n\nCertificates are issued per recommendation family — the register carries no edition dimension. The register is a snapshot rather than live certification status.`;
+        const block = aggregateBlock(agg);
+        registerBlock = block;
         aggregateNoteText = aggregateNote(agg);
-        registerBlock = aggregateBlock(agg);
-        console.log("register aggregate:", agg.family, "count", agg.count, "latest", agg.latest?.num ?? "none");
+        const queryHash = await sha256Hex(q.query);
+        telemetry(env, ctx, tier, "ask", MODELS.member, true, answer.length, queryHash, q.lang, undefined, telemetryMeta());
+        const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, answer.length);
+        return json({
+          answer,
+          citations: [{ docidentifier: `OIML-CS certificate register (family ${agg.family})`, corpus: "register" }],
+          model: MODELS.member,
+          query_hash: queryHash,
+          follow_ups: [],
+          blocks: [block],
+          context_applied: NO_CONTEXT,
+          read: readAs(),
+          ...(ablate ? { ablate } : {}),
+          quota: { ...quota, ...tq },
+        });
       }
     }
   }
