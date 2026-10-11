@@ -23,3 +23,17 @@ export declare function tokenBudget(env: Env, bucketId: string): Promise<{
 }>;
 export declare function chargeTokens(env: Env, bucketId: string, tokens: number): Promise<void>;
 export declare function usageTotal(usage: unknown): number | null;
+export declare const CREDIT_TOKEN_UNIT = 1000;
+export declare function creditLimit(env: Env, bucketId: string): number;
+export declare function creditBudget(env: Env, bucketId: string): Promise<{
+    credits_used: number;
+    credits_limit: number;
+}>;
+/** The credit-price preview for an ask: effort, tool turns armed, and
+ *  multimodality each add real consumption — the estimate shown BEFORE
+ *  generation so users see what a mode costs. Honest, not exact. */
+export declare function creditEstimate(opts: {
+    effort: string;
+    toolTurns: number;
+    image: boolean;
+}): number;

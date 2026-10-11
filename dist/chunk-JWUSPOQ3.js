@@ -24725,6 +24725,18 @@ function usageTotal(usage) {
   const total = p + c;
   return Number.isFinite(total) && total > 0 ? total : null;
 }
+var CREDIT_TOKEN_UNIT = 1e3;
+function creditLimit(env, bucketId) {
+  return Math.floor(tokenLimit(env, bucketId) / CREDIT_TOKEN_UNIT);
+}
+async function creditBudget(env, bucketId) {
+  const b = await tokenBudget(env, bucketId);
+  return { credits_used: Math.ceil(b.used / CREDIT_TOKEN_UNIT), credits_limit: creditLimit(env, bucketId) };
+}
+function creditEstimate(opts) {
+  const effortCredits = opts.effort === "low" ? 1 : opts.effort === "medium" ? 2 : 3;
+  return effortCredits + Math.max(0, opts.toolTurns) + (opts.image ? 1 : 0);
+}
 
 // workers/worker_public/src/graph.ts
 function docNumberOf(nodeId) {
@@ -24816,6 +24828,8 @@ export {
   tokenBudget,
   chargeTokens,
   usageTotal,
+  creditBudget,
+  creditEstimate,
   graphExpand,
   editionNote
 };

@@ -95,3 +95,29 @@ export function usageTotal(usage: unknown): number | null {
   const total = p + c;
   return Number.isFinite(total) && total > 0 ? total : null;
 }
+
+// ── credits (2026-10-11, the owner's direction): the user-facing quota
+// unit. 1 credit = CREDIT_TOKEN_UNIT tokens of actual consumption
+// (default 1000 — a simple ask is ~1 credit, an elevated-effort answer
+// a few, a multi-turn agent ask with tool probes what it truly cost).
+// The KV token counters stay the source of truth; credits are their
+// honest denomination. Every quota payload carries them so the UI shows
+// one number users can reason about.
+export const CREDIT_TOKEN_UNIT = 1000;
+
+export function creditLimit(env: Env, bucketId: string): number {
+  return Math.floor(tokenLimit(env, bucketId) / CREDIT_TOKEN_UNIT);
+}
+
+export async function creditBudget(env: Env, bucketId: string): Promise<{ credits_used: number; credits_limit: number }> {
+  const b = await tokenBudget(env, bucketId);
+  return { credits_used: Math.ceil(b.used / CREDIT_TOKEN_UNIT), credits_limit: creditLimit(env, bucketId) };
+}
+
+/** The credit-price preview for an ask: effort, tool turns armed, and
+ *  multimodality each add real consumption — the estimate shown BEFORE
+ *  generation so users see what a mode costs. Honest, not exact. */
+export function creditEstimate(opts: { effort: string; toolTurns: number; image: boolean }): number {
+  const effortCredits = opts.effort === "low" ? 1 : opts.effort === "medium" ? 2 : 3;
+  return effortCredits + Math.max(0, opts.toolTurns) + (opts.image ? 1 : 0);
+}
