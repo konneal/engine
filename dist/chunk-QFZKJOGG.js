@@ -2082,9 +2082,33 @@ async function handleAsk(env, ctx, req, tier, key) {
     if (fam) {
       const agg = await registerAggregate(env.DB, fam);
       if (agg) {
+        const latestLine = agg.latest ? `The latest certificate in the snapshot is ${agg.latest.num} \u2014 holder ${agg.latest.holder}, model "${agg.latest.model}"${agg.latest.year ? `, issued ${agg.latest.year}` : ""}, status ${agg.latest.status}.` : "No certificate rows are present in the snapshot.";
+        const linkLine = agg.latest?.pdf_key ? `
+
+[The latest certificate's document](${`/cert-pdf/${agg.latest.pdf_key}`}) is on file.` : "";
+        const answer2 = aggIntent === "count" ? `The OIML ${agg.family} family holds **${agg.count} certificate${agg.count === 1 ? "" : "s"}** in the OIML-CS register snapshot (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).
+
+Certificates are issued per recommendation family \u2014 the register carries no edition dimension, so the 2021 you named does not narrow the count. The register is a snapshot rather than live certification status.` : `${latestLine}${linkLine}
+
+Certificates are issued per recommendation family \u2014 the register carries no edition dimension. The register is a snapshot rather than live certification status.`;
+        const block = aggregateBlock(agg);
+        registerBlock = block;
         aggregateNoteText = aggregateNote(agg);
-        registerBlock = aggregateBlock(agg);
-        console.log("register aggregate:", agg.family, "count", agg.count, "latest", agg.latest?.num ?? "none");
+        const queryHash2 = await sha256Hex(q.query);
+        telemetry(env, ctx, tier, "ask", MODELS.member, true, answer2.length, queryHash2, q.lang, void 0, telemetryMeta());
+        const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q.query.length, answer2.length);
+        return json({
+          answer: answer2,
+          citations: [{ docidentifier: `OIML-CS certificate register (family ${agg.family})`, corpus: "register" }],
+          model: MODELS.member,
+          query_hash: queryHash2,
+          follow_ups: [],
+          blocks: [block],
+          context_applied: NO_CONTEXT,
+          read: readAs(),
+          ...ablate ? { ablate } : {},
+          quota: { ...quota, ...tq2 }
+        });
       }
     }
   }
