@@ -3,7 +3,7 @@
 // exercise the real handlers and live in e2e, not here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dispatch, TOOLS, PROTOCOL_VERSION, mcpName, registryName } from "../workers/worker_public/src/mcp-proto.ts";
+import { dispatch, buildTools, PROTOCOL_VERSION, mcpName, registryName } from "../workers/worker_public/src/mcp-proto.ts";
 
 const call = (body: unknown) => dispatch((body as any)?.method ?? null, (body as any)?.params, async () => ({}));
 
@@ -18,10 +18,10 @@ test("initialize reports the protocol version and tools capability", async () =>
 test("tools/list exposes the prefixed ask, retrieve and the registry's MCP tools with schemas", async () => {
   const b = (await call({ jsonrpc: "2.0", id: 2, method: "tools/list" })) as any;
   assert.deepEqual(
-    (b.result.tools as typeof TOOLS).map((t) => t.name),
+    (b.result.tools as ReturnType<typeof buildTools>).map((t) => t.name),
     [mcpName("ask"), mcpName("retrieve"), ...["db.schema", "db.find", "certificates.search", "units.get", "graph.cites", "docs.section", "glossary.lookup", "documents.family", "licensed.section", "verdict.evaluate", "conditions.check", "bib.entry", "units.lookup", "units.convert"].map(mcpName)],
   );
-  for (const t of TOOLS) {
+  for (const t of buildTools()) {
     assert.equal(t.inputSchema.type, "object");
     assert.ok(Object.keys(t.inputSchema.properties as Record<string, unknown>).length > 0, "every tool declares its params");
     for (const r of t.inputSchema.required) {
@@ -82,4 +82,18 @@ test("tools/call accepts the prefixed name and dispatches the registry tool", as
   const unknown = await dispatch("tools/call", { name: "oiml_nope", arguments: {} }, async () => ({}));
   assert.equal(unknown.ok, false);
   if (!unknown.ok) assert.equal(unknown.code, -32602);
+});
+
+test("tools/list carries the DEPLOYMENT's prefix — the profile is read per call, never frozen at import", async () => {
+  const { setProfile } = await import("../workers/worker_public/src/profile.ts");
+  const { PROFILE } = await import("../workers/worker_public/src/profile.gen.ts");
+  setProfile({ ...PROFILE, publisher: { ...PROFILE.publisher, id: "oiml", name: "OIML" } });
+  try {
+    const b = (await call({ jsonrpc: "2.0", id: 9, method: "tools/list" })) as any;
+    const names = (b.result.tools as { name: string }[]).map((t) => t.name);
+    assert.ok(names.every((n) => n.startsWith("oiml_")), JSON.stringify(names));
+    assert.ok(names.includes("oiml_ask") && names.includes("oiml_search") && names.includes("oiml_documents"));
+  } finally {
+    setProfile(PROFILE); // the fixture default back for the other tests
+  }
 });

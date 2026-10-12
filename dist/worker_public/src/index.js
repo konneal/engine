@@ -962,19 +962,21 @@ async function deleteAttachment(deps, sub, id) {
 // workers/worker_public/src/mcp-proto.ts
 var PROTOCOL_VERSION = "2025-06-18";
 var mcpPrefix = () => `${P().publisher.id}_`;
-var MCP_NAME_OVERRIDES = {
+var mcpOverrides = () => ({
   retrieve: `${P().publisher.id}_search`,
   // the published retrieval contract
   "documents.family": `${P().publisher.id}_documents`
   // the published registry contract
-};
+});
 function mcpName(registryName2) {
-  return MCP_NAME_OVERRIDES[registryName2] ?? `${mcpPrefix()}${registryName2.replace(/\./g, "_")}`;
+  const overrides = mcpOverrides();
+  return overrides[registryName2] ?? `${mcpPrefix()}${registryName2.replace(/\./g, "_")}`;
 }
 function registryName(presented) {
   const pid = P().publisher.id;
   if (presented === `${pid}_ask`) return "ask";
-  for (const [reg, mc] of Object.entries(MCP_NAME_OVERRIDES)) if (mc === presented) return reg;
+  const overrides = mcpOverrides();
+  for (const [reg, mc] of Object.entries(overrides)) if (mc === presented) return reg;
   if (presented.startsWith(`${pid}_`)) {
     const rest = presented.slice(pid.length + 1);
     const hit = TOOLS_REGISTRY.find((t) => t.audiences.includes("mcp") && t.name.replace(/\./g, "_") === rest);
@@ -982,41 +984,43 @@ function registryName(presented) {
   }
   return presented;
 }
-var TOOLS = [
-  {
-    name: mcpName("ask"),
-    description: "Ask the corpus a question; returns a citation-grounded answer with the passages it rests on.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "The question (1-8000 chars)" },
-        lang: { type: "string", description: "Answer language hint (e.g. en, fr)" }
-      },
-      required: ["query"]
-    }
-  },
-  {
-    name: mcpName("retrieve"),
-    description: "Retrieve the top passages for a query (hybrid dense + metadata steering, reranked).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-        k: { type: "number", description: "Hits to return (default 5)" }
-      },
-      required: ["query"]
-    }
-  },
-  ...TOOLS_REGISTRY.filter((t) => t.audiences.includes("mcp")).map((t) => ({
-    name: mcpName(t.name),
-    description: t.description,
-    inputSchema: {
-      type: "object",
-      properties: Object.fromEntries(t.params.map((p) => [p.key, { type: "string", description: p.description }])),
-      required: t.params.filter((p) => p.required).map((p) => p.key)
-    }
-  }))
-];
+function buildTools() {
+  return [
+    {
+      name: mcpName("ask"),
+      description: "Ask the corpus a question; returns a citation-grounded answer with the passages it rests on.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The question (1-8000 chars)" },
+          lang: { type: "string", description: "Answer language hint (e.g. en, fr)" }
+        },
+        required: ["query"]
+      }
+    },
+    {
+      name: mcpName("retrieve"),
+      description: "Retrieve the top passages for a query (hybrid dense + metadata steering, reranked).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          k: { type: "number", description: "Hits to return (default 5)" }
+        },
+        required: ["query"]
+      }
+    },
+    ...TOOLS_REGISTRY.filter((t) => t.audiences.includes("mcp")).map((t) => ({
+      name: mcpName(t.name),
+      description: t.description,
+      inputSchema: {
+        type: "object",
+        properties: Object.fromEntries(t.params.map((p) => [p.key, { type: "string", description: p.description }])),
+        required: t.params.filter((p) => p.required).map((p) => p.key)
+      }
+    }))
+  ];
+}
 function dispatch(method, params, callTool) {
   switch (method) {
     case "initialize":
@@ -1025,10 +1029,10 @@ function dispatch(method, params, callTool) {
     case "ping":
       return Promise.resolve({ ok: true, accepted: true });
     case "tools/list":
-      return Promise.resolve({ ok: true, result: { tools: TOOLS } });
+      return Promise.resolve({ ok: true, result: { tools: buildTools() } });
     case "tools/call": {
       const name = typeof params?.name === "string" ? params.name : "";
-      if (!TOOLS.some((t) => t.name === name)) {
+      if (!buildTools().some((t) => t.name === name)) {
         return Promise.resolve({ ok: false, code: -32602, message: `unknown tool: ${name}` });
       }
       return callTool(registryName(name), params?.arguments ?? {}).then(

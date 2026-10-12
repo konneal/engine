@@ -11,14 +11,18 @@ export const PROTOCOL_VERSION = "2025-06-18";
 // across servers. The three names docs/MCP.md already publishes keep
 // their exact spelling; the mechanical transform covers the rest.
 const mcpPrefix = () => `${P().publisher.id}_`;
-const MCP_NAME_OVERRIDES: Record<string, string> = {
+// per call like everything else here — a module-level map froze the
+// fixture prefix into the two published contracts (the freeze test
+// caught this one AFTER catching the TOOLS array)
+const mcpOverrides = (): Record<string, string> => ({
   retrieve: `${P().publisher.id}_search`,          // the published retrieval contract
   "documents.family": `${P().publisher.id}_documents`, // the published registry contract
-};
+});
 
 /** Registry tool name → the MCP-presented name. */
 export function mcpName(registryName: string): string {
-  return MCP_NAME_OVERRIDES[registryName] ?? `${mcpPrefix()}${registryName.replace(/\./g, "_")}`;
+  const overrides = mcpOverrides();
+  return overrides[registryName] ?? `${mcpPrefix()}${registryName.replace(/\./g, "_")}`;
 }
 
 /** MCP-presented name → the name the handlers dispatch on. Raw
@@ -27,7 +31,8 @@ export function mcpName(registryName: string): string {
 export function registryName(presented: string): string {
   const pid = P().publisher.id;
   if (presented === `${pid}_ask`) return "ask";
-  for (const [reg, mc] of Object.entries(MCP_NAME_OVERRIDES)) if (mc === presented) return reg;
+  const overrides = mcpOverrides();
+  for (const [reg, mc] of Object.entries(overrides)) if (mc === presented) return reg;
   if (presented.startsWith(`${pid}_`)) {
     const rest = presented.slice(pid.length + 1);
     const hit = TOOLS_REGISTRY.find((t) => t.audiences.includes("mcp") && t.name.replace(/\./g, "_") === rest);
@@ -43,8 +48,14 @@ export interface McpTool {
 }
 
 // the registry's MCP-audience tools are GENERATED here (OCP: adding a
-// tool registers it; this list is never hand-extended for them)
-export const TOOLS: McpTool[] = [
+// tool registers it; this list is never hand-extended for them).
+// BUILT PER CALL, never at module load: the names carry the publisher
+// prefix, and the deployment's setProfile runs AFTER this module's
+// imports evaluate — a module-level array froze the fixture prefix
+// into production's tools/list (caught by the 2026-10-12 deploy smoke's
+// tools/list line, which the "ask" substring grep was too weak to fail).
+export function buildTools(): McpTool[] {
+  return [
   {
     name: mcpName("ask"),
     description: "Ask the corpus a question; returns a citation-grounded answer with the passages it rests on.",
@@ -80,7 +91,8 @@ export const TOOLS: McpTool[] = [
         required: t.params.filter((p) => p.required).map((p) => p.key),
       },
     })),
-];
+  ];
+}
 
 export type McpResult =
   | { ok: true; result: unknown }
@@ -101,10 +113,10 @@ export function dispatch(
     case "ping":
       return Promise.resolve({ ok: true, accepted: true });
     case "tools/list":
-      return Promise.resolve({ ok: true, result: { tools: TOOLS } });
+      return Promise.resolve({ ok: true, result: { tools: buildTools() } });
     case "tools/call": {
       const name = typeof params?.name === "string" ? params.name : "";
-      if (!TOOLS.some((t) => t.name === name)) {
+      if (!buildTools().some((t) => t.name === name)) {
         return Promise.resolve({ ok: false, code: -32602, message: `unknown tool: ${name}` });
       }
       return callTool(registryName(name), params?.arguments ?? {}).then(
