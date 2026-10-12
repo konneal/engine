@@ -961,9 +961,30 @@ async function deleteAttachment(deps, sub, id) {
 
 // workers/worker_public/src/mcp-proto.ts
 var PROTOCOL_VERSION = "2025-06-18";
+var mcpPrefix = () => `${P().publisher.id}_`;
+var MCP_NAME_OVERRIDES = {
+  retrieve: `${P().publisher.id}_search`,
+  // the published retrieval contract
+  "documents.family": `${P().publisher.id}_documents`
+  // the published registry contract
+};
+function mcpName(registryName2) {
+  return MCP_NAME_OVERRIDES[registryName2] ?? `${mcpPrefix()}${registryName2.replace(/\./g, "_")}`;
+}
+function registryName(presented) {
+  const pid = P().publisher.id;
+  if (presented === `${pid}_ask`) return "ask";
+  for (const [reg, mc] of Object.entries(MCP_NAME_OVERRIDES)) if (mc === presented) return reg;
+  if (presented.startsWith(`${pid}_`)) {
+    const rest = presented.slice(pid.length + 1);
+    const hit = TOOLS_REGISTRY.find((t) => t.audiences.includes("mcp") && t.name.replace(/\./g, "_") === rest);
+    if (hit) return hit.name;
+  }
+  return presented;
+}
 var TOOLS = [
   {
-    name: "ask",
+    name: mcpName("ask"),
     description: "Ask the corpus a question; returns a citation-grounded answer with the passages it rests on.",
     inputSchema: {
       type: "object",
@@ -975,7 +996,7 @@ var TOOLS = [
     }
   },
   {
-    name: "retrieve",
+    name: mcpName("retrieve"),
     description: "Retrieve the top passages for a query (hybrid dense + metadata steering, reranked).",
     inputSchema: {
       type: "object",
@@ -987,7 +1008,7 @@ var TOOLS = [
     }
   },
   ...TOOLS_REGISTRY.filter((t) => t.audiences.includes("mcp")).map((t) => ({
-    name: t.name,
+    name: mcpName(t.name),
     description: t.description,
     inputSchema: {
       type: "object",
@@ -1010,7 +1031,7 @@ function dispatch(method, params, callTool) {
       if (!TOOLS.some((t) => t.name === name)) {
         return Promise.resolve({ ok: false, code: -32602, message: `unknown tool: ${name}` });
       }
-      return callTool(name, params?.arguments ?? {}).then(
+      return callTool(registryName(name), params?.arguments ?? {}).then(
         (payload) => ({ ok: true, result: { content: [{ type: "text", text: JSON.stringify(payload) }] } })
       );
     }
