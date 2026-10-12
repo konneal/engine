@@ -1570,7 +1570,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           }
           // the misplaced-pin wall rides the streamed path too: a
           // CITED stream is not a refusal
-          const canonical0 = usedHits.length > 0 ? exciseMisplacedPin(canonicalRefusal(full, refusalScope(answerCites(full))), true) : canonicalRefusal(full, refusalScope(false));
+          const canonical0 = exciseMisplacedPin(canonicalRefusal(full, refusalScope(answerCites(full))), answerCites(full));
           // answer contract v2: validate [[u:]] refs, resolve typed blocks
           const c2 = canonical0.includes(refusalAnswer())
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
@@ -1679,7 +1679,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // the pinned sentence if the model dropped it in as a disclaimer
   // (measured on chip-scoped asks: correct cited answers carrying the
   // pin mid-text, read by users and graders as total refusals)
-  if (answer && usedHits.length > 0) answer = exciseMisplacedPin(answer, true);
+  if (answer) answer = exciseMisplacedPin(answer, answerCites(answer));
   stageTiming.generate = Date.now() - tGen;
 
   // ── Deterministic quote-anchor + table-retyping check ──
