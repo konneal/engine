@@ -14,7 +14,7 @@ export interface McpTool {
         required: string[];
     };
 }
-export declare const TOOLS: McpTool[];
+export declare function buildTools(): McpTool[];
 export type McpResult = {
     ok: true;
     result: unknown;
