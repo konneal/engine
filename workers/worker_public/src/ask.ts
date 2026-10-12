@@ -1570,7 +1570,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           }
           // the misplaced-pin wall rides the streamed path too: a
           // CITED stream is not a refusal
-          const canonical0 = exciseMisplacedPin(canonicalRefusal(full, refusalScope(answerCites(full))), answerCites(full));
+          const canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
           // answer contract v2: validate [[u:]] refs, resolve typed blocks
           const c2 = canonical0.includes(refusalAnswer())
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
@@ -1674,7 +1674,14 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       );
     answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
+  // the protocol scrub: a TOOL line is the agent loop's wire protocol,
+  // never user-facing prose — the answer model occasionally echoes the
+  // line it just composed (observed live: 'TOOL db.find …' opened a
+  // served answer). Stripped here and on the streamed path.
+  const scrubToolLines = (t: string) => t.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, "");
+  if (answer) answer = scrubToolLines(answer);
   if (answer) answer = canonicalRefusal(answer, refusalScope(answerCites(answer)));
+  if (answer) answer = scrubToolLines(answer);
   // the misplaced-pin wall: a CITED answer is not a refusal — excise
   // the pinned sentence if the model dropped it in as a disclaimer
   // (measured on chip-scoped asks: correct cited answers carrying the

@@ -2633,7 +2633,7 @@ Answer account questions from these records ONLY: name the record when you use i
               }
             }
           }
-          const canonical0 = exciseMisplacedPin(canonicalRefusal(full, refusalScope(answerCites(full))), answerCites(full));
+          const canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
           const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
           send({
             type: "done",
@@ -2717,7 +2717,10 @@ Answer account questions from these records ONLY: name the record when you use i
     );
     answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
+  const scrubToolLines = (t) => t.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, "");
+  if (answer) answer = scrubToolLines(answer);
   if (answer) answer = canonicalRefusal(answer, refusalScope(answerCites(answer)));
+  if (answer) answer = scrubToolLines(answer);
   if (answer) answer = exciseMisplacedPin(answer, answerCites(answer));
   stageTiming.generate = Date.now() - tGen;
   let used = usedHits;
