@@ -1,4 +1,10 @@
 export declare const PROTOCOL_VERSION = "2025-06-18";
+/** Registry tool name → the MCP-presented name. */
+export declare function mcpName(registryName: string): string;
+/** MCP-presented name → the name the handlers dispatch on. Raw
+ *  registry names pass through (transition tolerance for early
+ *  consumers of the unprefixed surface). */
+export declare function registryName(presented: string): string;
 export interface McpTool {
     name: string;
     description: string;

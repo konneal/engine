@@ -3,7 +3,7 @@
 // exercise the real handlers and live in e2e, not here.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dispatch, TOOLS, PROTOCOL_VERSION } from "../workers/worker_public/src/mcp-proto.ts";
+import { dispatch, TOOLS, PROTOCOL_VERSION, mcpName, registryName } from "../workers/worker_public/src/mcp-proto.ts";
 
 const call = (body: unknown) => dispatch((body as any)?.method ?? null, (body as any)?.params, async () => ({}));
 
@@ -15,11 +15,11 @@ test("initialize reports the protocol version and tools capability", async () =>
   assert.ok(b.result.serverInfo.name);
 });
 
-test("tools/list exposes ask, retrieve and the registry's MCP tools with schemas", async () => {
+test("tools/list exposes the prefixed ask, retrieve and the registry's MCP tools with schemas", async () => {
   const b = (await call({ jsonrpc: "2.0", id: 2, method: "tools/list" })) as any;
   assert.deepEqual(
     (b.result.tools as typeof TOOLS).map((t) => t.name),
-    ["ask", "retrieve", "db.schema", "db.find", "certificates.search", "units.get", "graph.cites", "docs.section", "glossary.lookup", "documents.family", "licensed.section", "verdict.evaluate", "conditions.check", "bib.entry", "units.lookup", "units.convert"],
+    [mcpName("ask"), mcpName("retrieve"), ...["db.schema", "db.find", "certificates.search", "units.get", "graph.cites", "docs.section", "glossary.lookup", "documents.family", "licensed.section", "verdict.evaluate", "conditions.check", "bib.entry", "units.lookup", "units.convert"].map(mcpName)],
   );
   for (const t of TOOLS) {
     assert.equal(t.inputSchema.type, "object");
@@ -45,8 +45,41 @@ test("unknown methods fail with -32601; unknown tools with -32602", async () => 
 });
 
 test("a tool call wraps the handler payload as text content", async () => {
-  const r = (await dispatch("tools/call", { name: "ask", arguments: { query: "x" } }, async () => ({ answer: "a", citations: [] }))) as any;
+  const r = (await dispatch("tools/call", { name: mcpName("ask"), arguments: { query: "x" } }, async () => ({ answer: "a", citations: [] }))) as any;
   assert.ok(r.ok);
   assert.equal(r.result.content[0].type, "text");
   assert.equal(JSON.parse(r.result.content[0].text).answer, "a");
+});
+
+// ── the MCP naming convention (2026-10-12): publisher-prefixed, the
+//    three published contracts keep their exact spelling ──
+
+test("the naming transform: mechanical, overrides, reverse, raw tolerance", () => {
+  // mechanical: dots become underscores under the publisher prefix
+  assert.match(mcpName("db.schema"), /^[a-z]+_db_schema$/);
+  assert.equal(mcpName("ask").endsWith("_ask"), true);
+  // the published contracts keep their exact spelling
+  assert.equal(mcpName("retrieve").endsWith("_search"), true);
+  assert.equal(mcpName("documents.family").endsWith("_documents"), true);
+  // the reverse lands on the handler-dispatch names
+  assert.equal(registryName(mcpName("ask")), "ask");
+  assert.equal(registryName(mcpName("retrieve")), "retrieve");
+  assert.equal(registryName(mcpName("documents.family")), "documents.family");
+  assert.equal(registryName(mcpName("db.schema")), "db.schema");
+  // raw registry names pass through (transition tolerance)
+  assert.equal(registryName("ask"), "ask");
+  assert.equal(registryName("db.find"), "db.find");
+});
+
+test("tools/call accepts the prefixed name and dispatches the registry tool", async () => {
+  const seen: string[] = [];
+  const r = await dispatch("tools/call", { name: mcpName("db.schema"), arguments: {} }, async (name) => {
+    seen.push(name);
+    return { ok: true };
+  });
+  assert.equal(r.ok, true);
+  assert.deepEqual(seen, ["db.schema"]);
+  const unknown = await dispatch("tools/call", { name: "oiml_nope", arguments: {} }, async () => ({}));
+  assert.equal(unknown.ok, false);
+  if (!unknown.ok) assert.equal(unknown.code, -32602);
 });

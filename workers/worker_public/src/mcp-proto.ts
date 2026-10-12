@@ -2,7 +2,39 @@
 // dependency-free so plain node can load it for unit tests — the
 // route adapter (mcp.ts) owns the handler wiring.
 import { TOOLS_REGISTRY } from "./tools.ts";
+import { P } from "./profile.ts";
 export const PROTOCOL_VERSION = "2025-06-18";
+
+// The MCP naming convention (2026-10-12): every tool the publisher
+// exposes over MCP carries the publisher prefix — MCP clients render
+// tool names in a SHARED namespace, so generic names ("ask") collide
+// across servers. The three names docs/MCP.md already publishes keep
+// their exact spelling; the mechanical transform covers the rest.
+const mcpPrefix = () => `${P().publisher.id}_`;
+const MCP_NAME_OVERRIDES: Record<string, string> = {
+  retrieve: `${P().publisher.id}_search`,          // the published retrieval contract
+  "documents.family": `${P().publisher.id}_documents`, // the published registry contract
+};
+
+/** Registry tool name → the MCP-presented name. */
+export function mcpName(registryName: string): string {
+  return MCP_NAME_OVERRIDES[registryName] ?? `${mcpPrefix()}${registryName.replace(/\./g, "_")}`;
+}
+
+/** MCP-presented name → the name the handlers dispatch on. Raw
+ *  registry names pass through (transition tolerance for early
+ *  consumers of the unprefixed surface). */
+export function registryName(presented: string): string {
+  const pid = P().publisher.id;
+  if (presented === `${pid}_ask`) return "ask";
+  for (const [reg, mc] of Object.entries(MCP_NAME_OVERRIDES)) if (mc === presented) return reg;
+  if (presented.startsWith(`${pid}_`)) {
+    const rest = presented.slice(pid.length + 1);
+    const hit = TOOLS_REGISTRY.find((t) => t.audiences.includes("mcp") && t.name.replace(/\./g, "_") === rest);
+    if (hit) return hit.name;
+  }
+  return presented;
+}
 
 export interface McpTool {
   name: string;
@@ -14,7 +46,7 @@ export interface McpTool {
 // tool registers it; this list is never hand-extended for them)
 export const TOOLS: McpTool[] = [
   {
-    name: "ask",
+    name: mcpName("ask"),
     description: "Ask the corpus a question; returns a citation-grounded answer with the passages it rests on.",
     inputSchema: {
       type: "object",
@@ -26,7 +58,7 @@ export const TOOLS: McpTool[] = [
     },
   },
   {
-    name: "retrieve",
+    name: mcpName("retrieve"),
     description: "Retrieve the top passages for a query (hybrid dense + metadata steering, reranked).",
     inputSchema: {
       type: "object",
@@ -40,7 +72,7 @@ export const TOOLS: McpTool[] = [
   ...TOOLS_REGISTRY
     .filter((t) => t.audiences.includes("mcp"))
     .map((t): McpTool => ({
-      name: t.name,
+      name: mcpName(t.name),
       description: t.description,
       inputSchema: {
         type: "object",
@@ -75,7 +107,7 @@ export function dispatch(
       if (!TOOLS.some((t) => t.name === name)) {
         return Promise.resolve({ ok: false, code: -32602, message: `unknown tool: ${name}` });
       }
-      return callTool(name, params?.arguments ?? {}).then(
+      return callTool(registryName(name), params?.arguments ?? {}).then(
         (payload) => ({ ok: true, result: { content: [{ type: "text", text: JSON.stringify(payload) }] } }) as McpResult,
       );
     }
