@@ -7,12 +7,28 @@
 // on_violation word ("invalid"/"void") when any fails; "void" plus the
 // missing parameter names when the question does not state enough —
 // honest degradation, never a guess.
+//
+// Uncertainty ranges (values stated with a tolerance — "30000 ± 60 v",
+// "30000 pm 0.2 %", the AsciiMath spelling included) are first-class:
+// the check is evaluated across the stated band, and a band that spans
+// both outcomes voids with its reason — guarded acceptance, never a
+// silent worst-case ruling.
 
 export interface MachineCheck {
   expression: string;
   symbolic: string;
   values: Record<string, number>;
   result: boolean | null; // null: could not evaluate (missing params)
+  /** present when the question states a tolerance on a symbol this
+   *  check reads: the band's corner evaluations beside the nominal */
+  uncertainty?: {
+    symbol: string;
+    stated: string;
+    tol: number;
+    unit?: string;
+    nominal: boolean;
+    corners: (boolean | null)[];
+  };
 }
 
 export interface Verdict {
@@ -196,22 +212,94 @@ export function extractParams(query: string, symbols: string[]): Record<string, 
   return extractParamsWithUnits(query, symbols).values;
 }
 
+/** A stated uncertainty: "± 60 v" / "pm 60 v" / "± 0.2 %". `tol` is
+ *  absolute (a relative statement resolves against the stated value);
+ *  `stated` quotes the source form for narration. */
+export interface StatedUncertainty {
+  tol: number;
+  stated: string;
+  relative: boolean;
+  unit?: string;
+}
+
+const TOL_SEP_SRC = "\\u00b1|\\bpm\\b|\\+/-";
+const NUM_SRC = "[0-9][0-9 ,.]*[0-9]";
+const UNIT_SRC = "%|\\u00b0?[A-Za-z\\u00b5\\u03a9]{0,6}";
+
+function statedUncertainty(
+  value: number,
+  tolRaw: string,
+  tolUnitRaw: string | undefined,
+  valueUnit: string | undefined,
+): StatedUncertainty {
+  const tolNum = parseNumber(tolRaw);
+  const tolUnit = (tolUnitRaw ?? "").trim();
+  const relative = tolUnit === "%";
+  return {
+    tol: relative ? Math.abs(value) * tolNum / 100 : tolNum,
+    stated: relative ? `± ${tolRaw} %` : `± ${tolRaw}${tolUnit ? ` ${tolUnit}` : ""}`,
+    relative,
+    unit: relative ? valueUnit : (tolUnit || valueUnit),
+  };
+}
+
 /** The stated values WITH their unit tokens (TODO.sota/04's unit
  *  semantics): "E_max 30000 v" binds e_max=30000 and the unit "v" —
- *  the dimension check needs both. */
+ *  the dimension check needs both. A tolerance after the value —
+ *  "30000 ± 60 v", "30000 v ± 60", "± 0.2 %", or the AsciiMath
+ *  spelling "30000 pm 60 v" — binds a first-class uncertainty. */
 export function extractParamsWithUnits(
   query: string,
   symbols: string[],
-): { values: Record<string, number>; units: Record<string, string> } {
+): {
+  values: Record<string, number>;
+  units: Record<string, string>;
+  uncertainties: Record<string, StatedUncertainty>;
+} {
   const values: Record<string, number> = {};
   const units: Record<string, string> = {};
+  const uncertainties: Record<string, StatedUncertainty> = {};
   for (const sym of symbols) {
     const leaf = sym.split(".").pop() ?? sym;
     const esc = leaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // symbol, a short non-numeric gap (words like "were"/"of" allowed),
-    // then the number, then an optional unit token directly after
-    const re = new RegExp(`\\b${esc}\\b\\D{0,14}?([0-9][0-9 ,.]*[0-9])\\s*(%|\\u00b0?[A-Za-z\\u00b5\\u03a9]{0,6})?`, "iu");
-    const m = query.match(re);
+    // tolerance first ("value ± tol unit" — the tol's unit names the
+    // shared unit when the value carries none), then value and unit
+    // side by side with a trailing tolerance, then the plain form
+    const reTolFirst = new RegExp(
+      `\\b${esc}\\b\\D{0,14}?(${NUM_SRC})\\s*(?:${TOL_SEP_SRC})\\s*(${NUM_SRC})\\s*(${UNIT_SRC})?`,
+      "iu",
+    );
+    const reTolAfter = new RegExp(
+      `\\b${esc}\\b\\D{0,14}?(${NUM_SRC})\\s*(${UNIT_SRC})\\s*(?:${TOL_SEP_SRC})\\s*(${NUM_SRC})\\s*(${UNIT_SRC})?`,
+      "iu",
+    );
+    const rePlain = new RegExp(
+      `\\b${esc}\\b\\D{0,14}?(${NUM_SRC})\\s*(${UNIT_SRC})?`,
+      "iu",
+    );
+    const mFirst = query.match(reTolFirst);
+    const mAfter = mFirst ? null : query.match(reTolAfter);
+    const mTol = mFirst ?? mAfter;
+    if (mTol) {
+      const value = parseNumber(mTol[1]!);
+      if (!Number.isFinite(value)) continue;
+      values[sym] = value;
+      let unit: string | undefined;
+      let u: StatedUncertainty;
+      if (mFirst) {
+        // [2]=tol, [3]=tol unit (shared with the value when present)
+        unit = (mFirst[3] ?? "").trim() || undefined;
+        u = statedUncertainty(value, mFirst[2]!, mFirst[3], unit);
+      } else {
+        // [2]=value unit, [3]=tol, [4]=tol unit (defaults to the value's)
+        unit = (mAfter![2] ?? "").trim() || undefined;
+        u = statedUncertainty(value, mAfter![3]!, mAfter![4], unit || undefined);
+      }
+      if (unit) units[sym] = unit;
+      uncertainties[sym] = u;
+      continue;
+    }
+    const m = query.match(rePlain);
     if (m) {
       const v = parseNumber(m[1]!);
       if (Number.isFinite(v)) {
@@ -221,7 +309,7 @@ export function extractParamsWithUnits(
       }
     }
   }
-  return { values, units };
+  return { values, units, uncertainties };
 }
 
 /** Dimension coherence (TODO.sota/04 item 2): the units plane gives
@@ -261,10 +349,13 @@ export function evaluate(content: unknown, query: string, opts?: { dimensions?: 
   let voidReason: string | null = null;
   const machine: MachineCheck[] = checks.map((expression) => {
     const values: Record<string, number> = {};
+    const ids: string[] = [];
     try {
-      for (const t of tokenize(expression)) if (t.t === "id" && params[t.v] !== undefined) values[t.v] = params[t.v];
+      for (const t of tokenize(expression)) if (t.t === "id") ids.push(t.v);
     } catch { /* values stay partial */ }
+    for (const t of new Set(ids)) if (params[t] !== undefined) values[t] = params[t];
     let result: boolean | null = null;
+    let uncertainty: MachineCheck["uncertainty"];
     if (missing.length === 0) {
       // unit semantics (TODO.sota/04): a comparison mixing dimensions
       // cannot evaluate — void with the reason, never a number answer
@@ -273,9 +364,39 @@ export function evaluate(content: unknown, query: string, opts?: { dimensions?: 
         voidReason = voidReason ?? mismatch;
       } else {
         try { result = !!parseAndEval(expression, params); } catch { result = null; }
+        // uncertainty band: the check re-evaluates at every corner of
+        // the stated tolerances (2^k ≤ 8); a band spanning both
+        // outcomes is undecidable as stated — void with its reason
+        const bandSyms = [...new Set(ids)].filter((s) => bound.uncertainties[s] !== undefined).slice(0, 3);
+        if (bandSyms.length && result !== null) {
+          const corners: (boolean | null)[] = [];
+          for (let mask = 0; mask < 1 << bandSyms.length; mask++) {
+            const corner = { ...params };
+            bandSyms.forEach((s, i) => { corner[s] = corner[s]! + ((mask >> i) & 1 ? 1 : -1) * bound.uncertainties[s]!.tol; });
+            try { corners.push(!!parseAndEval(expression, corner)); } catch { corners.push(null); }
+          }
+          const first = bandSyms[0]!;
+          const un = bound.uncertainties[first]!;
+          uncertainty = {
+            symbol: first,
+            stated: un.stated,
+            tol: un.tol,
+            unit: un.unit,
+            nominal: result,
+            corners,
+          };
+          const decided = corners.filter((c): c is boolean => c !== null);
+          if (decided.length && decided.some((c) => c !== result)) {
+            voidReason = voidReason ?? (
+              `the stated uncertainty (${un.stated}) on ${first.split(".").pop()} crosses the decision boundary — ` +
+              `the check evaluates ${result ? "true" : "false"} at the stated value but ` +
+              `${decided.find((c) => c !== result) ? "true" : "false"} at the band edge; the question cannot be decided as stated`
+            );
+          }
+        }
       }
     }
-    return { expression, symbolic: expression, values, result };
+    return { expression, symbolic: expression, values, result, uncertainty };
   });
   if (missing.length) {
     return { verdict: "void", missing, checks: machine };
@@ -286,6 +407,9 @@ export function evaluate(content: unknown, query: string, opts?: { dimensions?: 
     if (voidReason) return { verdict: "void", missing: [], void_reason: voidReason, checks: machine };
     return null;
   }
+  // a stated uncertainty spanning both outcomes — guarded acceptance:
+  // void with the reason, never a silent worst-case ruling
+  if (voidReason) return { verdict: "void", missing: [], void_reason: voidReason, checks: machine };
   return {
     verdict: failed ? "fail" : "pass",
     on_violation: failed ? String(c.on_violation ?? "invalid") : undefined,
@@ -303,6 +427,11 @@ export function verdictNote(v: Verdict, node: { node_id: string; clause?: { urn?
   for (const c of v.checks) {
     const vals = Object.entries(c.values).map(([k, n]) => `${k}=${n}`).join(", ");
     lines.push(`- ${c.expression}${vals ? `  [${vals}]` : ""} → ${c.result === null ? "not evaluated" : c.result ? "holds" : "VIOLATED"}`);
+    if (c.uncertainty) {
+      const u = c.uncertainty;
+      const edges = u.corners.map((r) => (r === null ? "not evaluated" : r ? "holds" : "VIOLATED")).join("; ");
+      lines.push(`  band ${u.stated}${u.unit && !u.stated.includes(u.unit) ? ` ${u.unit}` : ""} on ${u.symbol}: ${edges} across the band`);
+    }
   }
   if (v.verdict === "void") {
     lines.push(v.void_reason
