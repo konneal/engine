@@ -82,6 +82,11 @@ export async function registerAggregate(db: any, family: string): Promise<Regist
  *  model narrates, never recomputes. The edition disclaimer rides every
  *  family-scoped answer (the register has no edition dimension). */
 export function aggregateNote(agg: RegisterAggregate): string {
+  // the register stores the family as digits ("60"); the user-facing
+  // name carries the series letter, which the certificate numbers
+  // themselves carry ("R60/…") — derived from the data, never hardcoded
+  const series = agg.latest?.num?.match(/^[A-Za-z]+/)?.[0] ?? "";
+  const familyName = series ? `${series} ${agg.family}` : agg.family;
   const latest = agg.latest
     ? `The latest certificate in the snapshot is ${agg.latest.num} (holder ${agg.latest.holder}, model "${agg.latest.model}"${agg.latest.year ? `, issued ${agg.latest.year}` : ""}, status ${agg.latest.status}).`
     : "No certificate rows are present in the snapshot.";
@@ -90,7 +95,7 @@ export function aggregateNote(agg: RegisterAggregate): string {
     : "";
   return [
     `CERTIFICATE REGISTER — THIS NOTE ANSWERS THE QUESTION. Answer from THIS note; do not refuse for want of passages (the retrieval passages are irrelevant for register questions).`,
-    `The ${agg.family} family holds ${agg.count} certificate${agg.count === 1 ? "" : "s"} (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}) — computed over the register snapshot; state these numbers verbatim.`,
+    `The ${familyName} family holds ${agg.count} certificate${agg.count === 1 ? "" : "s"} (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}) — computed over the register snapshot; state these numbers verbatim.`,
     latest + link,
     "Certificates are issued per RECOMMENDATION FAMILY — the register carries no edition dimension, so an edition named in the question (e.g. 2021) does not narrow it; say so when the question names an edition. Qualify that the register is a snapshot, and cite the register.",
   ].join("\n");

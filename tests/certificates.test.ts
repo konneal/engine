@@ -115,3 +115,16 @@ test("the aggregate computes in SQL and renders its note with the edition discla
   assert.equal(block.payload.count, 1624);
   assert.equal(block.payload.latest.url, "/cert-pdf/R60/2021/x.pdf");
 });
+
+test("the note names the family with its series letter, derived from the certificate numbers", async () => {
+  const { aggregateNote } = await import("../workers/worker_public/src/certificates.ts");
+  const agg = {
+    family: "60",
+    count: 1624,
+    valid: 1624,
+    latest: { num: "R60/2021-A-NL1-26.12", holder: "H", model: "M", year: "2026", status: "Valid", pdf_key: "R60/2021/x.pdf" },
+  } as any;
+  const note = aggregateNote(agg);
+  assert.ok(note.includes("The R 60 family holds 1624 certificates"), note.split("\n")[1]);
+  assert.ok(!note.includes("The 60 family"), "the bare digits must not stand alone");
+});
