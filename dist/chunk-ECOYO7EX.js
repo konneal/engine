@@ -33,7 +33,7 @@ async function registerAggregate(db, family) {
 }
 function aggregateNote(agg) {
   const series = agg.latest?.num?.match(/^[A-Za-z]+/)?.[0] ?? "";
-  const familyName = series ? `${series} ${agg.family}` : agg.family;
+  const familyName = `${P().publisher.name} ${series} ${agg.family}`.trim();
   const latest = agg.latest ? `The latest certificate in the snapshot is ${agg.latest.num} (holder ${agg.latest.holder}, model "${agg.latest.model}"${agg.latest.year ? `, issued ${agg.latest.year}` : ""}, status ${agg.latest.status}).` : "No certificate rows are present in the snapshot.";
   const link = agg.latest?.pdf_key ? ` Its document: https://www.oimlsmart.org/cert-pdf/${agg.latest.pdf_key}` : "";
   return [

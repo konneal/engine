@@ -86,7 +86,7 @@ export function aggregateNote(agg: RegisterAggregate): string {
   // name carries the series letter, which the certificate numbers
   // themselves carry ("R60/…") — derived from the data, never hardcoded
   const series = agg.latest?.num?.match(/^[A-Za-z]+/)?.[0] ?? "";
-  const familyName = series ? `${series} ${agg.family}` : agg.family;
+  const familyName = `${P().publisher.name} ${series} ${agg.family}`.trim();
   const latest = agg.latest
     ? `The latest certificate in the snapshot is ${agg.latest.num} (holder ${agg.latest.holder}, model "${agg.latest.model}"${agg.latest.year ? `, issued ${agg.latest.year}` : ""}, status ${agg.latest.status}).`
     : "No certificate rows are present in the snapshot.";
