@@ -11,7 +11,7 @@ import {
   registerNote,
   registerTokens,
   searchRegister
-} from "./chunk-45GD6334.js";
+} from "./chunk-ECOYO7EX.js";
 import "./chunk-3FYJM7LH.js";
 export {
   aggregateBlock,

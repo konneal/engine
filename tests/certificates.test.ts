@@ -125,6 +125,8 @@ test("the note names the family with its series letter, derived from the certifi
     latest: { num: "R60/2021-A-NL1-26.12", holder: "H", model: "M", year: "2026", status: "Valid", pdf_key: "R60/2021/x.pdf" },
   } as any;
   const note = aggregateNote(agg);
-  assert.ok(note.includes("The R 60 family holds 1624 certificates"), note.split("\n")[1]);
+  // the publisher name prefixes the series: "OIML R 60" — the model
+  // quotes the note's identifier verbatim
+  assert.match(note, /The \w+ R 60 family holds 1624 certificates/);
   assert.ok(!note.includes("The 60 family"), "the bare digits must not stand alone");
 });
