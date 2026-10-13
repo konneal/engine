@@ -101,10 +101,14 @@ function cacheableAnswer(answer, scope) {
   if (answer.includes(refusalAnswer())) return false;
   return canonicalRefusal(answer, scope) === answer;
 }
+function refusalShaped(answer, scope) {
+  return !cacheableAnswer(answer, scope);
+}
 
 export {
   refusalAnswer,
   canonicalRefusal,
   exciseMisplacedPin,
-  cacheableAnswer
+  cacheableAnswer,
+  refusalShaped
 };

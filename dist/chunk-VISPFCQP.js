@@ -91,8 +91,9 @@ import {
   cacheableAnswer,
   canonicalRefusal,
   exciseMisplacedPin,
-  refusalAnswer
-} from "./chunk-XBZIJMS7.js";
+  refusalAnswer,
+  refusalShaped
+} from "./chunk-ETLSWSZ7.js";
 import {
   entitlementScope,
   requestSalt,
@@ -2640,7 +2641,7 @@ Answer account questions from these records ONLY: name the record when you use i
             type: "done",
             model,
             query_hash: queryHash,
-            follow_ups: understanding?.follow_ups ?? [],
+            follow_ups: refusalShaped(canonical0, refusalScope(answerCites(full))) ? [] : understanding?.follow_ups ?? [],
             blocks: [...c2.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : []],
             context_applied: ctxApplied,
             read: readAs(),
@@ -2822,7 +2823,7 @@ Answer account questions from these records ONLY: name the record when you use i
       if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
     }
   }
-  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
+  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer, refusalScope(answerCites(answer))) ? [] : understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
   const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer))) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));

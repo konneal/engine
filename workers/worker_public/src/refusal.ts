@@ -158,3 +158,12 @@ export function cacheableAnswer(answer: string, scope?: RefusalScope): boolean {
   if (answer.includes(refusalAnswer())) return false;
   return canonicalRefusal(answer, scope) === answer;
 }
+
+/** The follow-up-chips law (2026-10-13): the understanding stage's
+ *  follow_ups are generated BEFORE retrieval and answer — after a
+ *  refusal they advertise the very topic the corpus does not carry.
+ *  Chips serve only when the answer is not refusal-shaped (carries no
+ *  pin and the wall would not rewrite it). */
+export function refusalShaped(answer: string, scope?: RefusalScope): boolean {
+  return !cacheableAnswer(answer, scope);
+}
