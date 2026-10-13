@@ -807,8 +807,11 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         const linkLine = agg.latest?.pdf_key
           ? `\n\n[The latest certificate's document](${`/cert-pdf/${agg.latest.pdf_key}`}) is on file.`
           : "";
+        // the series letter comes from the data (the certificate numbers
+        // carry it: "R60/…") — the register's families are Recommendations
+        const series = agg.latest?.num?.match(/^[A-Za-z]+/)?.[0] ?? "R";
         const answer = aggIntent === "count"
-          ? `The ${P().publisher.name} ${agg.family} family holds **${agg.count} certificate${agg.count === 1 ? "" : "s"}** in the ${P().publisher.name}-CS register snapshot (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).\n\nCertificates are issued per recommendation family — the register carries no edition dimension, so the 2021 you named does not narrow the count. The register is a snapshot rather than live certification status.`
+          ? `The ${P().publisher.name} ${series} ${agg.family} family holds **${agg.count} certificate${agg.count === 1 ? "" : "s"}** in the ${P().publisher.name}-CS register snapshot (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).\n\nCertificates are issued per recommendation family — the register carries no edition dimension, so the 2021 you named does not narrow the count. The register is a snapshot rather than live certification status.`
           : `${latestLine}${linkLine}\n\nCertificates are issued per recommendation family — the register carries no edition dimension. The register is a snapshot rather than live certification status.`;
         const block = aggregateBlock(agg);
         registerBlock = block;
