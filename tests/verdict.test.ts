@@ -118,3 +118,75 @@ test("the plain oiml-r60 projection carries the OCL under `expression` — it ev
   const pass = evaluate(plain, "with E_max 30000 v, is testing to D_max 28500 v valid?")!;
   assert.equal(pass.verdict, "pass");
 });
+
+test("uncertainty: ± binds a first-class tolerance", () => {
+  const b = extractParamsWithUnits("the balance reads E_max 30000 ± 60 v", ["model.parameters.e_max"]);
+  assert.equal(b.values["model.parameters.e_max"], 30000);
+  assert.equal(b.units["model.parameters.e_max"], "v");
+  const u = b.uncertainties["model.parameters.e_max"]!;
+  assert.equal(u.tol, 60);
+  assert.equal(u.unit, "v");
+  assert.equal(u.stated, "± 60 v");
+  assert.equal(u.relative, false);
+});
+
+test("uncertainty: the AsciiMath spelling pm binds the same tolerance", () => {
+  const b = extractParamsWithUnits("E_max 30000 pm 60 v", ["model.parameters.e_max"]);
+  assert.equal(b.uncertainties["model.parameters.e_max"]!.tol, 60);
+  assert.equal(b.uncertainties["model.parameters.e_max"]!.unit, "v");
+});
+
+test("uncertainty: relative percent resolves against the value", () => {
+  const b = extractParamsWithUnits("E_max 30000 ± 0.2 %", ["model.parameters.e_max"]);
+  const u = b.uncertainties["model.parameters.e_max"]!;
+  assert.equal(u.relative, true);
+  assert.equal(u.tol, 60);
+  assert.equal(u.stated, "± 0.2 %");
+});
+
+test("uncertainty: tolerance after the unit inherits the value's unit", () => {
+  const b = extractParamsWithUnits("E_max 30000 v ± 60", ["model.parameters.e_max"]);
+  assert.equal(b.units["model.parameters.e_max"], "v");
+  const u = b.uncertainties["model.parameters.e_max"]!;
+  assert.equal(u.tol, 60);
+  assert.equal(u.unit, "v");
+});
+
+test("uncertainty: a unit literally named pm without a tolerance stays a unit", () => {
+  const b = extractParamsWithUnits("wavelength 650 pm", ["model.parameters.wavelength"]);
+  assert.equal(b.values["model.parameters.wavelength"], 650);
+  assert.equal(b.units["model.parameters.wavelength"], "pm");
+  assert.equal(b.uncertainties["model.parameters.wavelength"], undefined);
+});
+
+test("uncertainty: a band fully inside the limit passes", () => {
+  const v = evaluate(deadLoad, "E_max 30000 v, D_max 27500 ± 100 v")!;
+  assert.equal(v.verdict, "pass");
+  assert.equal(v.void_reason, undefined);
+});
+
+test("uncertainty: a band crossing the limit voids with its reason", () => {
+  const v = evaluate(deadLoad, "E_max 30000 v, D_max 27000 ± 100 v")!;
+  assert.equal(v.verdict, "void");
+  assert.match(v.void_reason ?? "", /uncertainty \(± 100 v\) on d_max/);
+  assert.match(v.void_reason ?? "", /crosses the decision boundary/);
+  assert.match(v.void_reason ?? "", /band edge/);
+});
+
+test("uncertainty: a band fully outside the limit still fails", () => {
+  const v = evaluate(deadLoad, "E_max 30000 v, D_max 26000 ± 100 v")!;
+  assert.equal(v.verdict, "fail");
+});
+
+test("uncertainty: the note narrates the band's corners", () => {
+  const v = evaluate(deadLoad, "E_max 30000 v, D_max 27000 ± 100 v")!;
+  const note = verdictNote(v, { node_id: "/constraint/dead_load_max_geometry" });
+  assert.match(note, /band ± 100 v/);
+  assert.match(note, /across the band/);
+  assert.match(note, /VIOLATED/);
+});
+
+test("uncertainty: a pm-stated tolerance evaluates across its band too", () => {
+  const v = evaluate(deadLoad, "E_max 30000 v, D_max 27000 pm 100 v")!;
+  assert.equal(v.verdict, "void");
+});

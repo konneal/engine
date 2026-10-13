@@ -3,6 +3,16 @@ export interface MachineCheck {
     symbolic: string;
     values: Record<string, number>;
     result: boolean | null;
+    /** present when the question states a tolerance on a symbol this
+     *  check reads: the band's corner evaluations beside the nominal */
+    uncertainty?: {
+        symbol: string;
+        stated: string;
+        tol: number;
+        unit?: string;
+        nominal: boolean;
+        corners: (boolean | null)[];
+    };
 }
 export interface Verdict {
     verdict: "pass" | "fail" | "void";
@@ -17,12 +27,24 @@ export interface Verdict {
 export declare function extractChecks(content: unknown): string[];
 export declare function symbolsIn(checks: string[]): string[];
 export declare function extractParams(query: string, symbols: string[]): Record<string, number>;
+/** A stated uncertainty: "± 60 v" / "pm 60 v" / "± 0.2 %". `tol` is
+ *  absolute (a relative statement resolves against the stated value);
+ *  `stated` quotes the source form for narration. */
+export interface StatedUncertainty {
+    tol: number;
+    stated: string;
+    relative: boolean;
+    unit?: string;
+}
 /** The stated values WITH their unit tokens (TODO.sota/04's unit
  *  semantics): "E_max 30000 v" binds e_max=30000 and the unit "v" —
- *  the dimension check needs both. */
+ *  the dimension check needs both. A tolerance after the value —
+ *  "30000 ± 60 v", "30000 v ± 60", "± 0.2 %", or the AsciiMath
+ *  spelling "30000 pm 60 v" — binds a first-class uncertainty. */
 export declare function extractParamsWithUnits(query: string, symbols: string[]): {
     values: Record<string, number>;
     units: Record<string, string>;
+    uncertainties: Record<string, StatedUncertainty>;
 };
 /** Dimension coherence (TODO.sota/04 item 2): the units plane gives
  *  each unit token a dimension; a parameter set whose bound symbols

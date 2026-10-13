@@ -270,14 +270,60 @@ function parseNumber(raw) {
   s = s.replace(/\.(\d{3})$/, "$1");
   return Number(s.replace(/,(?=\d{3}\b)/g, ""));
 }
+var TOL_SEP_SRC = "\\u00b1|\\bpm\\b|\\+/-";
+var NUM_SRC = "[0-9][0-9 ,.]*[0-9]";
+var UNIT_SRC = "%|\\u00b0?[A-Za-z\\u00b5\\u03a9]{0,6}";
+function statedUncertainty(value, tolRaw, tolUnitRaw, valueUnit) {
+  const tolNum = parseNumber(tolRaw);
+  const tolUnit = (tolUnitRaw ?? "").trim();
+  const relative = tolUnit === "%";
+  return {
+    tol: relative ? Math.abs(value) * tolNum / 100 : tolNum,
+    stated: relative ? `\xB1 ${tolRaw} %` : `\xB1 ${tolRaw}${tolUnit ? ` ${tolUnit}` : ""}`,
+    relative,
+    unit: relative ? valueUnit : tolUnit || valueUnit
+  };
+}
 function extractParamsWithUnits(query, symbols) {
   const values = {};
   const units = {};
+  const uncertainties = {};
   for (const sym of symbols) {
     const leaf = sym.split(".").pop() ?? sym;
     const esc = leaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(`\\b${esc}\\b\\D{0,14}?([0-9][0-9 ,.]*[0-9])\\s*(%|\\u00b0?[A-Za-z\\u00b5\\u03a9]{0,6})?`, "iu");
-    const m = query.match(re);
+    const reTolFirst = new RegExp(
+      `\\b${esc}\\b\\D{0,14}?(${NUM_SRC})\\s*(?:${TOL_SEP_SRC})\\s*(${NUM_SRC})\\s*(${UNIT_SRC})?`,
+      "iu"
+    );
+    const reTolAfter = new RegExp(
+      `\\b${esc}\\b\\D{0,14}?(${NUM_SRC})\\s*(${UNIT_SRC})\\s*(?:${TOL_SEP_SRC})\\s*(${NUM_SRC})\\s*(${UNIT_SRC})?`,
+      "iu"
+    );
+    const rePlain = new RegExp(
+      `\\b${esc}\\b\\D{0,14}?(${NUM_SRC})\\s*(${UNIT_SRC})?`,
+      "iu"
+    );
+    const mFirst = query.match(reTolFirst);
+    const mAfter = mFirst ? null : query.match(reTolAfter);
+    const mTol = mFirst ?? mAfter;
+    if (mTol) {
+      const value = parseNumber(mTol[1]);
+      if (!Number.isFinite(value)) continue;
+      values[sym] = value;
+      let unit;
+      let u;
+      if (mFirst) {
+        unit = (mFirst[3] ?? "").trim() || void 0;
+        u = statedUncertainty(value, mFirst[2], mFirst[3], unit);
+      } else {
+        unit = (mAfter[2] ?? "").trim() || void 0;
+        u = statedUncertainty(value, mAfter[3], mAfter[4], unit || void 0);
+      }
+      if (unit) units[sym] = unit;
+      uncertainties[sym] = u;
+      continue;
+    }
+    const m = query.match(rePlain);
     if (m) {
       const v = parseNumber(m[1]);
       if (Number.isFinite(v)) {
@@ -287,7 +333,7 @@ function extractParamsWithUnits(query, symbols) {
       }
     }
   }
-  return { values, units };
+  return { values, units, uncertainties };
 }
 function dimensionMismatch(check, units, dimensions) {
   const dims = /* @__PURE__ */ new Map();
@@ -313,11 +359,14 @@ function evaluate(content, query, opts) {
   let voidReason = null;
   const machine = checks.map((expression) => {
     const values = {};
+    const ids = [];
     try {
-      for (const t of tokenize(expression)) if (t.t === "id" && params[t.v] !== void 0) values[t.v] = params[t.v];
+      for (const t of tokenize(expression)) if (t.t === "id") ids.push(t.v);
     } catch {
     }
+    for (const t of new Set(ids)) if (params[t] !== void 0) values[t] = params[t];
     let result = null;
+    let uncertainty;
     if (missing.length === 0) {
       const mismatch = opts?.dimensions ? dimensionMismatch(expression, bound.units, opts.dimensions) : null;
       if (mismatch) {
@@ -328,9 +377,38 @@ function evaluate(content, query, opts) {
         } catch {
           result = null;
         }
+        const bandSyms = [...new Set(ids)].filter((s) => bound.uncertainties[s] !== void 0).slice(0, 3);
+        if (bandSyms.length && result !== null) {
+          const corners = [];
+          for (let mask = 0; mask < 1 << bandSyms.length; mask++) {
+            const corner = { ...params };
+            bandSyms.forEach((s, i) => {
+              corner[s] = corner[s] + (mask >> i & 1 ? 1 : -1) * bound.uncertainties[s].tol;
+            });
+            try {
+              corners.push(!!parseAndEval(expression, corner));
+            } catch {
+              corners.push(null);
+            }
+          }
+          const first = bandSyms[0];
+          const un = bound.uncertainties[first];
+          uncertainty = {
+            symbol: first,
+            stated: un.stated,
+            tol: un.tol,
+            unit: un.unit,
+            nominal: result,
+            corners
+          };
+          const decided = corners.filter((c2) => c2 !== null);
+          if (decided.length && decided.some((c2) => c2 !== result)) {
+            voidReason = voidReason ?? `the stated uncertainty (${un.stated}) on ${first.split(".").pop()} crosses the decision boundary \u2014 the check evaluates ${result ? "true" : "false"} at the stated value but ${decided.find((c2) => c2 !== result) ? "true" : "false"} at the band edge; the question cannot be decided as stated`;
+          }
+        }
       }
     }
-    return { expression, symbolic: expression, values, result };
+    return { expression, symbolic: expression, values, result, uncertainty };
   });
   if (missing.length) {
     return { verdict: "void", missing, checks: machine };
@@ -341,6 +419,7 @@ function evaluate(content, query, opts) {
     if (voidReason) return { verdict: "void", missing: [], void_reason: voidReason, checks: machine };
     return null;
   }
+  if (voidReason) return { verdict: "void", missing: [], void_reason: voidReason, checks: machine };
   return {
     verdict: failed ? "fail" : "pass",
     on_violation: failed ? String(c.on_violation ?? "invalid") : void 0,
@@ -356,6 +435,11 @@ function verdictNote(v, node) {
   for (const c of v.checks) {
     const vals = Object.entries(c.values).map(([k, n]) => `${k}=${n}`).join(", ");
     lines.push(`- ${c.expression}${vals ? `  [${vals}]` : ""} \u2192 ${c.result === null ? "not evaluated" : c.result ? "holds" : "VIOLATED"}`);
+    if (c.uncertainty) {
+      const u = c.uncertainty;
+      const edges = u.corners.map((r) => r === null ? "not evaluated" : r ? "holds" : "VIOLATED").join("; ");
+      lines.push(`  band ${u.stated}${u.unit && !u.stated.includes(u.unit) ? ` ${u.unit}` : ""} on ${u.symbol}: ${edges} across the band`);
+    }
   }
   if (v.verdict === "void") {
     lines.push(v.void_reason ? `VERDICT: VOID \u2014 ${v.void_reason}. State the mismatch plainly; the question cannot be decided as stated.` : `VERDICT: VOID \u2014 the question does not state: ${v.missing.join(", ")}. Say exactly what is missing; never assume values.`);
