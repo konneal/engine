@@ -84,6 +84,22 @@ All **37** compiled sample documents (R/D/B/G/E + OIML-CS admin + parts
 342 cited documents (native Relaton + pubid), ~11k graph rows
 ```
 
+## Full-corpus run (2026-10-13, live; the lutaml-0.8.106 + ± re-baseline)
+
+**46** documents export and ingest at the current stack (lutaml-model
+0.8.106 float, the ± glyph mapping in plain-text extraction, the six
+series-less editions carrying `:docidentifier:`):
+
+```
+46/46 bundles → 5,336 chunks, 1,423 typed units, 293 glossary terms,
+425 cited documents; D1: 15,390-statement graph projection, 33,480 FTS rows
+```
+
+Uncertainty ranges are first-class end to end on this baseline: display
+text carries ± (AsciiMath `pm` maps at the glyph layer), tolerance cells
+parse into `payload.uncertainties[]` records, and the verdict engine
+evaluates stated bands with guarded acceptance.
+
 Includes the amendment cases: R 60/A1 keeps its 17 terms in an annex
 (recovered into the glossary), and the OIML-CS admin documents keep
 their whole body in `<preface>` (walked as clauses). Clause text now
