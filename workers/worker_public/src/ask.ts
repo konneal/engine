@@ -1690,6 +1690,15 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // (measured on chip-scoped asks: correct cited answers carrying the
   // pin mid-text, read by users and graders as total refusals)
   if (answer) answer = exciseMisplacedPin(answer, answerCites(answer));
+  // the tool-narration leak (2026-10-14, the R 134-1 probe): the answer
+  // model sometimes NARRATES the agent loop's call in prose — 'The
+  // db.find tool returned, for the query "…": {…json…}' — instead of
+  // answering. The line scrub cannot catch prose; the contract retry
+  // below regenerates with an explicit notice, and the detector also
+  // gates the retry's acceptance so a narrating retry cannot ship.
+  const toolNarration = (t: string) =>
+    /^(?:the\s+)?[a-z][a-z_.]*\.[a-z_]+ tool returned\b/i.test(t.slice(0, 200)) ||
+    /tool returned,? for the query\b/i.test(t.slice(0, 300));
   stageTiming.generate = Date.now() - tGen;
 
   // ── Deterministic quote-anchor + table-retyping check ──
@@ -1714,14 +1723,16 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       );
       return nums.filter((n) => tableNums.has(n)).length >= 2;
     })();
-    if (anchors.violations.length > 0 || retyped || unreferenced) {
-      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "— regenerating");
+    if (anchors.violations.length > 0 || retyped || unreferenced || toolNarration(answer)) {
+      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "; toolNarration:", toolNarration(answer), "— regenerating");
       // name the EXACT unit the token must reference — a generic note
       // leaves the model guessing which id to write
       const tableUnitId = unreferenced
         ? used.find((h: Hit) => h.metadata.unit_id && h.metadata.block === "table")?.metadata.unit_id
         : undefined;
-      const note = retyped || unreferenced
+      const note = toolNarration(answer)
+        ? "Correction notice: your draft narrated an internal tool call ('the … tool returned …') instead of answering. Rewrite: answer the question directly from the retrieved passages, cite the clauses, and never mention tools, queries, wire formats, or JSON."
+        : retyped || unreferenced
         ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.`
         : ANCHOR_CORRECTION_NOTE;
       generateRetries += 1;
@@ -1730,7 +1741,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         const correctedAnswer = canonicalRefusal(corrected, refusalScope(answerCites(corrected)));
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
         const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
-        if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped) || (unreferenced && correctedAnswer.includes("[[u:"))) {
+        if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped) || (unreferenced && correctedAnswer.includes("[[u:")) || !toolNarration(correctedAnswer)) {
           answer = correctedAnswer;
         }
       }

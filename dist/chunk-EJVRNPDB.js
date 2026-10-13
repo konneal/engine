@@ -2724,6 +2724,7 @@ Answer account questions from these records ONLY: name the record when you use i
   if (answer) answer = canonicalRefusal(answer, refusalScope(answerCites(answer)));
   if (answer) answer = scrubToolLines(answer);
   if (answer) answer = exciseMisplacedPin(answer, answerCites(answer));
+  const toolNarration = (t) => /^(?:the\s+)?[a-z][a-z_.]*\.[a-z_]+ tool returned\b/i.test(t.slice(0, 200)) || /tool returned,? for the query\b/i.test(t.slice(0, 300));
   stageTiming.generate = Date.now() - tGen;
   let used = usedHits;
   if (answer && !answer.includes(refusalAnswer())) {
@@ -2740,17 +2741,17 @@ Answer account questions from these records ONLY: name the record when you use i
       );
       return nums.filter((n) => tableNums.has(n)).length >= 2;
     })();
-    if (anchors.violations.length > 0 || retyped || unreferenced) {
-      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "\u2014 regenerating");
+    if (anchors.violations.length > 0 || retyped || unreferenced || toolNarration(answer)) {
+      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "; toolNarration:", toolNarration(answer), "\u2014 regenerating");
       const tableUnitId = unreferenced ? used.find((h) => h.metadata.unit_id && h.metadata.block === "table")?.metadata.unit_id : void 0;
-      const note = retyped || unreferenced ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.` : ANCHOR_CORRECTION_NOTE;
+      const note = toolNarration(answer) ? "Correction notice: your draft narrated an internal tool call ('the \u2026 tool returned \u2026') instead of answering. Rewrite: answer the question directly from the retrieved passages, cite the clauses, and never mention tools, queries, wire formats, or JSON." : retyped || unreferenced ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.` : ANCHOR_CORRECTION_NOTE;
       generateRetries += 1;
       const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], routeEffort(routed.route));
       if (corrected) {
         const correctedAnswer = canonicalRefusal(corrected, refusalScope(answerCites(corrected)));
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h) => h.text));
         const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
-        if (retryAnchors.violations.length < anchors.violations.length || !retryRetyped && retyped || unreferenced && correctedAnswer.includes("[[u:")) {
+        if (retryAnchors.violations.length < anchors.violations.length || !retryRetyped && retyped || unreferenced && correctedAnswer.includes("[[u:") || !toolNarration(correctedAnswer)) {
           answer = correctedAnswer;
         }
       }
