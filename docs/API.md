@@ -410,7 +410,11 @@ never an invented grounding).
 
 `similar: true` means the answer came from the semantic cache (a
 near-identical recent question). `follow_ups` are suggested next
-questions (present when understanding produced them).
+questions (present when understanding produced them) — and are
+withheld entirely on refusal-shaped answers: the chips are generated
+before retrieval, so after an out-of-corpus refusal they would
+advertise the very topic the corpus does not carry. Honest absence
+extends to the conversation's next step.
 
 **Citation object** (also the shape in the `done`/JSON responses):
 ```jsonc
