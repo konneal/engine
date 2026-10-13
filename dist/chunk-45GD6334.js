@@ -32,11 +32,13 @@ async function registerAggregate(db, family) {
   }
 }
 function aggregateNote(agg) {
+  const series = agg.latest?.num?.match(/^[A-Za-z]+/)?.[0] ?? "";
+  const familyName = series ? `${series} ${agg.family}` : agg.family;
   const latest = agg.latest ? `The latest certificate in the snapshot is ${agg.latest.num} (holder ${agg.latest.holder}, model "${agg.latest.model}"${agg.latest.year ? `, issued ${agg.latest.year}` : ""}, status ${agg.latest.status}).` : "No certificate rows are present in the snapshot.";
   const link = agg.latest?.pdf_key ? ` Its document: https://www.oimlsmart.org/cert-pdf/${agg.latest.pdf_key}` : "";
   return [
     `CERTIFICATE REGISTER \u2014 THIS NOTE ANSWERS THE QUESTION. Answer from THIS note; do not refuse for want of passages (the retrieval passages are irrelevant for register questions).`,
-    `The ${agg.family} family holds ${agg.count} certificate${agg.count === 1 ? "" : "s"} (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}) \u2014 computed over the register snapshot; state these numbers verbatim.`,
+    `The ${familyName} family holds ${agg.count} certificate${agg.count === 1 ? "" : "s"} (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}) \u2014 computed over the register snapshot; state these numbers verbatim.`,
     latest + link,
     "Certificates are issued per RECOMMENDATION FAMILY \u2014 the register carries no edition dimension, so an edition named in the question (e.g. 2021) does not narrow it; say so when the question names an edition. Qualify that the register is a snapshot, and cite the register."
   ].join("\n");
