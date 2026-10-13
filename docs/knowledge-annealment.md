@@ -262,10 +262,14 @@ Beyond the ladder, the machine objects are EXECUTED, not retrieved:
   machine limit gets the check evaluated against its stated values —
   pass / the standard's own violation word / void naming what is
   missing — attached as data the answer must present faithfully.
-  Counterfactuals are free (values are values).
-- **Provable absence** (`/v1/absence`): an enumeration certificate
-  over the standard's model plane — absent means "N nodes enumerated,
-  0 matches", never a bare refusal.
+  Stated tolerances bind beside their values and the check re-runs at
+  every band corner; a band spanning both outcomes voids with its
+  reason (guarded acceptance). Counterfactuals are free (values are
+  values).
+- **Honest absence**: the question names a standard, the model plane
+  is enumerated, and a fruitless search answers as a plain sentence
+  with the scope named — never a bare refusal, never a certificate
+  document (the `/v1/absence` endpoint retired at engine 0.2.54).
 - **Answer verification** (`/v1/verify`): the deterministic contract
   battery plus a judged faithfulness score, exposed for any answer.
 

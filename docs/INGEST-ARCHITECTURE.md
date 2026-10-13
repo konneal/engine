@@ -80,9 +80,9 @@ hand.
 |---|---|
 | OII | de-facto: parse.py (HTML-first) + graph.py (relaton/glossarist). Target: consume the four native object serializations; the AI-serialization proposal (metanorma#592) is the upstream contract |
 | Identity SSOT | ✅ documents registry in D1 (derived status, active flags, supersession chains) |
-| Registry serving | ✅ edition notes injected into doc-scoped asks; `GET /api/documents?family=` public API |
+| Registry serving | ✅ edition notes injected into doc-scoped asks; the registry serves through the MCP `oiml_documents` tool and the `/docs/*` renderings |
 | Graph projection | ✅ 7,128 nodes / 6,486 edges in D1; query lane live (defined_terms → defines → candidates) |
-| Chunking | prose-only today; ChunkRecordV2 typed blocks = next build (tables/equations/requirements) |
+| Chunking | typed units live on the MKO plane (tables/formulas/terms/requirements as typed payloads, clause-anchored citations); the parse plane stays clause-prose |
 | Enrichment | ✅ 98.7% corpus (the residual ~400 are persistent empty enrichments), KV-cached, replayed from the durable record after full restores |
 | Verification | unit suites + contract tests in CI (`npm run test:units`, pydantic↔TS wire contract, schema-union drift); the data-quality report loop = next build |
 | Orchestration | manual commands today; one-command pipeline (`ingest run --doc X`) when the above land |
