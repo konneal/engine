@@ -40,3 +40,9 @@ export declare function exciseMisplacedPin(answer: string, cites: boolean): stri
  *  every later ask). An answer is cacheable only when it carries no
  *  pin AND the wall would not rewrite it. */
 export declare function cacheableAnswer(answer: string, scope?: RefusalScope): boolean;
+/** The follow-up-chips law (2026-10-13): the understanding stage's
+ *  follow_ups are generated BEFORE retrieval and answer — after a
+ *  refusal they advertise the very topic the corpus does not carry.
+ *  Chips serve only when the answer is not refusal-shaped (carries no
+ *  pin and the wall would not rewrite it). */
+export declare function refusalShaped(answer: string, scope?: RefusalScope): boolean;

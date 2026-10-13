@@ -4,7 +4,7 @@
 // stripping, no build step): node --test tests/refusal.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cacheableAnswer, canonicalRefusal, exciseMisplacedPin, refusalAnswer } from "../workers/worker_public/src/refusal.ts";
+import { cacheableAnswer, canonicalRefusal, exciseMisplacedPin, refusalAnswer, refusalShaped } from "../workers/worker_public/src/refusal.ts";
 import { setProfile } from "../workers/worker_public/src/profile.ts";
 import { PROFILE } from "../workers/worker_public/src/profile.gen.ts";
 
@@ -193,4 +193,19 @@ test("loose: multi-sentence drift — the offer sentence swaps, surrounding text
     canonicalRefusal(answer, { cited: false, conversational: false }),
     `I'm a metrology assistant. ${REFUSAL_ANSWER}`,
   );
+});
+
+test("refusalShaped: the pinned refusal and every wall-rewritable drift shape true", () => {
+  assert.equal(refusalShaped(REFUSAL_ANSWER, { cited: false, conversational: false }), true);
+  assert.equal(refusalShaped("I'm here for questions about OIML publications instead.", { cited: false, conversational: false }), true);
+  assert.equal(refusalShaped(`I'm a metrology assistant. ${REFUSAL_ANSWER}`), true);
+});
+
+test("refusalShaped: cited content answers are never refusal-shaped (the excise contract)", () => {
+  const cited = "R 60 defines the load cell accuracy class [OIML R 60 §3.2].";
+  assert.equal(refusalShaped(cited, { cited: true, conversational: false }), false);
+});
+
+test("refusalShaped: conversational intent keeps chips servable", () => {
+  assert.equal(refusalShaped("Hello there!", { cited: false, conversational: true }), false);
 });
