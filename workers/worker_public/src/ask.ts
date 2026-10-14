@@ -50,6 +50,21 @@ import { operationsLane } from "./operations.ts";
 import { extractNameplate, nameplateRegisterQuery } from "./nameplate.ts";
 import { P } from "./profile.ts";
 
+// the tool-narration leak (2026-10-14, the R 134-1 probe): the answer
+// model sometimes NARRATES the agent loop's call in prose — 'The
+// db.find tool returned, for the query "…": {…json…}' — instead of
+// answering. The TOOL-line scrub cannot catch prose. The JSON lane
+// regenerates through the contract retry; the streamed lane buffers
+// the head and sends the retry sentinel (the blind-answer guard's
+// client contract) before streaming the fresh answer. One bounded
+// restart per lane.
+function toolNarration(t: string): boolean {
+  return /^(?:the\s+)?[a-z][a-z_.]*\.[a-z_]+ tool returned\b/i.test(t.slice(0, 200)) ||
+    /tool returned,? for the query\b/i.test(t.slice(0, 300));
+}
+const TOOL_NARRATION_NOTICE =
+  "Correction notice: your draft narrated an internal tool call ('the … tool returned …') instead of answering. Rewrite: answer the question directly from the retrieved passages, cite the clauses, and never mention tools, queries, wire formats, or JSON.";
+
 /** User-uploaded image for multimodal questions: a data URL
  *  (data:image/(png|jpeg|webp|gif);base64,…) up to 6 MB of payload. The
  *  question text still drives retrieval; the image is CONTEXT for the
@@ -1536,9 +1551,43 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           const stats: { usage?: unknown } = {};
           let full = "";
           try {
+            // the head buffers until it can rule out the tool-narration
+            // leak (the JSON lane's contract retry cannot run here — the
+            // tokens are already on the wire): a narrating head sends the
+            // retry sentinel — the blind-answer guard's client contract,
+            // which clears the buffer — and the fresh answer streams.
+            // One bounded restart; a narrating retry ships as-is.
+            let headSettled = false;
             for await (const tok of sseTokens(stream, stats)) {
               full += tok;
-              send({ type: "token", v: tok });
+              if (headSettled) { send({ type: "token", v: tok }); continue; }
+              if (full.length < 80) continue;
+              headSettled = true;
+              if (toolNarration(full)) {
+                console.log("tool-narration(stream): regenerating once");
+                send({ type: "retry" });
+                const regen = await generateStream(env, model, [
+                  ...messages,
+                  { role: "system", content: TOOL_NARRATION_NOTICE },
+                ], routeEffort(routed.route));
+                if (regen) {
+                  full = "";
+                  for await (const tok2 of sseTokens(regen, stats)) {
+                    full += tok2;
+                    send({ type: "token", v: tok2 });
+                  }
+                } else {
+                  // the restart failed — ship the buffered head rather
+                  // than an empty answer
+                  send({ type: "token", v: full });
+                }
+                break;
+              }
+              send({ type: "token", v: full });
+            }
+            if (!headSettled) {
+              headSettled = true;
+              if (!toolNarration(full)) send({ type: "token", v: full });
             }
           } catch {
             // stream ended prematurely — deliver what we have
@@ -1696,9 +1745,6 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // answering. The line scrub cannot catch prose; the contract retry
   // below regenerates with an explicit notice, and the detector also
   // gates the retry's acceptance so a narrating retry cannot ship.
-  const toolNarration = (t: string) =>
-    /^(?:the\s+)?[a-z][a-z_.]*\.[a-z_]+ tool returned\b/i.test(t.slice(0, 200)) ||
-    /tool returned,? for the query\b/i.test(t.slice(0, 300));
   stageTiming.generate = Date.now() - tGen;
 
   // ── Deterministic quote-anchor + table-retyping check ──
@@ -1731,7 +1777,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         ? used.find((h: Hit) => h.metadata.unit_id && h.metadata.block === "table")?.metadata.unit_id
         : undefined;
       const note = toolNarration(answer)
-        ? "Correction notice: your draft narrated an internal tool call ('the … tool returned …') instead of answering. Rewrite: answer the question directly from the retrieved passages, cite the clauses, and never mention tools, queries, wire formats, or JSON."
+        ? TOOL_NARRATION_NOTICE
         : retyped || unreferenced
         ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.`
         : ANCHOR_CORRECTION_NOTE;
