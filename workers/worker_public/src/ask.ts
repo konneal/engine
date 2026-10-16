@@ -350,17 +350,6 @@ async function handleAsk(
   let generateRetries = 0;
   // how the question was read, for the reader: the interpretation that
   // steered retrieval — a wrong read is visible before it costs trust
-  const readAs = () =>
-    understanding
-      ? {
-          intent: understanding.intent,
-          doc: understanding.docidentifier,
-          edition: understanding.edition ?? null,
-          term: understanding.term,
-          terms: (understanding.defined_terms ?? []).slice(0, 4),
-          lang: q?.lang ?? null,
-        }
-      : undefined;
   const serverTiming = () =>
     Object.entries(stageTiming)
       .map(([k, v]) => `${k};dur=${v}`)
@@ -466,8 +455,16 @@ async function handleAsk(
   // owner's 2026-10-04 direction — the user must see the system-to-model
   // questioning sessions, not stare at a spinner)
   const agentSteps: string[] = [];
+  // THE AGENT-MODE CHANNEL (the owner's directive: users see every call
+  // as it runs): the streamed lane's SSE opens IMMEDIATELY — the channel
+  // exists before the pipeline starts, and every step (and the answer
+  // tokens) enqueues into it live. The json lane leaves it null and the
+  // steps fall back to the agentSteps buffer for its single response.
+  let live: { send: (ev: unknown) => void; close: () => void } | null = null;
+  let liveResponse: Response | null = null;
   const mark = (step: string) => {
-    agentSteps.push(step);
+    if (live) live.send({ type: "agent", step });
+    else agentSteps.push(step);
     console.log(`agent-step: ${step}`);
   };
 
@@ -587,6 +584,62 @@ async function handleAsk(
   const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage || ablate ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
 
+  let probeTokensUsed = 0;
+  // THE STREAM-FIRST HOIST: the SSE response returns NOW — the pipeline
+  // below runs inside it, and every step and token streams as it happens.
+  if (wantsStream) {
+    const encoder = new TextEncoder();
+    let ctrl: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const sse = new ReadableStream({
+      start(c) { ctrl = c; },
+    });
+    live = {
+      send: (ev: unknown) => { try { ctrl!.enqueue(encoder.encode(`data: ${JSON.stringify(ev)}\n\n`)); } catch { /* the client went away */ } },
+      close: () => { try { ctrl!.close(); } catch { /* closed */ } },
+    };
+    liveResponse = new Response(sse, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "x-accel-buffering": "no", ...corsHeaders(req) } });
+  }
+
+  // THE PIPELINE: one body, two deliveries. Every `return` inside is an
+  // exit — for the streamed lane each exit converts to its live events
+  // via `finish` (and null, meaning the SSE already carried everything);
+  // for the json lane the same payload returns as the response.
+  const pipeline = async (qq: { query: string; lang?: string }): Promise<Response | null> => {
+    // the streamed lane's graceful degradation: a serving failure reaches
+    // the user as a line, never as a dropped stream
+    const q = qq;
+    const finishLine = (message: string) => {
+      if (live) {
+        live!.send({ type: "token", v: message });
+        live!.send({ type: "done", model: MODELS.member, query_hash: "", context_applied: NO_CONTEXT });
+        live!.close();
+        return null;
+      }
+      return err(503, "serving_busy", message);
+    };
+  const readAs = () =>
+    understanding
+      ? {
+          intent: understanding.intent,
+          doc: understanding.docidentifier,
+          edition: understanding.edition ?? null,
+          term: understanding.term,
+          terms: (understanding.defined_terms ?? []).slice(0, 4),
+          lang: q?.lang ?? null,
+        }
+      : undefined;
+    const finishPayload = (payload: Record<string, unknown>): Response | null => {
+      if (!live) return json(payload, 200, { ...corsHeaders(req) });
+      if (payload.citations !== undefined || payload.blocks !== undefined) {
+        live!.send({ type: "citations", citations: payload.citations ?? [], quota: payload.quota, context_applied: payload.context_applied ?? NO_CONTEXT, ...(payload.source_quality ? { source_quality: payload.source_quality, confidence_note: payload.confidence_note ?? null } : {}) });
+      }
+      if (payload.answer !== undefined) live!.send({ type: "token", v: String(payload.answer) });
+      live!.send({ type: "done", model: payload.model ?? MODELS.member, query_hash: payload.query_hash ?? "", served_from: payload.served_from, blocks: payload.blocks ?? [], follow_ups: payload.follow_ups ?? [], context_applied: payload.context_applied ?? NO_CONTEXT, read: payload.read });
+      if (payload.quota !== undefined) live!.send({ type: "quota", quota: payload.quota });
+      live!.close();
+      return null;
+    };
+
   if (cached) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact", telemetryMeta());
     // echo the context the CACHED answer was computed under — the payload
@@ -594,13 +647,12 @@ async function handleAsk(
     // node named in the question binds WITHOUT a chip and its echo must
     // survive the cache, not silently flatten to "none")
     const cctx = cached.value.context_applied ?? NO_CONTEXT;
-    if (wantsStream) {
-      // a cache hit must still speak SSE — the chat client parses a stream
-      return sseResponse([
-        { type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx, ...(cached.value.source_quality ? { source_quality: cached.value.source_quality, confidence_note: cached.value.confidence_note ?? null, ...(cached.value.experimental_sources ? { experimental_sources: cached.value.experimental_sources } : {}), ...(cached.value.entailment ? { entailment: cached.value.entailment } : {}) } : {}) },
-        { type: "token", v: cached.value.answer ?? "" },
-        { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, served_from: "cache", context_applied: cctx },
-      ], corsHeaders(req));
+    if (live) {
+      live!.send({ type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx, ...(cached.value.source_quality ? { source_quality: cached.value.source_quality, confidence_note: cached.value.confidence_note ?? null, ...(cached.value.experimental_sources ? { experimental_sources: cached.value.experimental_sources } : {}), ...(cached.value.entailment ? { entailment: cached.value.entailment } : {}) } : {}) });
+      live!.send({ type: "token", v: cached.value.answer ?? "" });
+      live!.send({ type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, served_from: "cache", context_applied: cctx });
+      live!.close();
+      return null;
     }
     return json({ ...cached.value, cached: true, quota, context_applied: cctx });
   }
@@ -841,18 +893,27 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         const queryHash = await sha256Hex(q.query);
         telemetry(env, ctx, tier, "ask", MODELS.member, true, answer.length, queryHash, q.lang, undefined, telemetryMeta());
         const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, answer.length);
-        return json({
+        const payload = {
           answer,
           citations: [{ docidentifier: `${P().publisher.name}-CS certificate register (family ${agg.family})`, corpus: "register" }],
           model: MODELS.member,
           query_hash: queryHash,
-          follow_ups: [],
+          follow_ups: [] as string[],
           blocks: [block],
           context_applied: NO_CONTEXT,
           read: readAs(),
           ...(ablate ? { ablate } : {}),
           quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview },
-        });
+        };
+        if (live) {
+          live!.send({ type: "citations", citations: payload.citations, quota: payload.quota, context_applied: NO_CONTEXT });
+          live!.send({ type: "token", v: answer });
+          live!.send({ type: "done", model: MODELS.member, query_hash: queryHash, blocks: [block], follow_ups: [], context_applied: NO_CONTEXT, read: readAs() });
+          live!.send({ type: "quota", quota: payload.quota });
+          live!.close();
+          return null;
+        }
+        return json(payload);
       }
     }
   }
@@ -874,37 +935,31 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       ...keptHistory.slice(-6),
       { role: "user", content: q.query },
     ];
-    if (wantsStream) {
+    if (wantsStream && live) {
+      // the reading arrives first — a conversational turn is still a reading
+      if (readAs()) live!.send({ type: "read", read: readAs() });
+      live!.send({ type: "citations", citations: [], context_applied: NO_CONTEXT, quota, });
+      const stats: { usage?: unknown } = {};
+      let full = "";
       const stream = await generateStream(env, model, messages, effort);
-      if (stream) {
-        const encoder = new TextEncoder();
-        const sse = new ReadableStream({
-          async start(controller) {
-            const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-            // the reading arrives first — a conversational turn is still a reading
-            if (readAs()) send({ type: "read", read: readAs() });
-            send({ type: "citations", citations: [], context_applied: NO_CONTEXT, quota, });
-            const stats: { usage?: unknown } = {};
-            let full = "";
-            try {
-              for await (const tok of sseTokens(stream, stats)) {
-                full += tok;
-                send({ type: "token", v: tok });
-              }
-            } catch {
-              // stream ended prematurely — deliver what we have
-            }
-            const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length, probeTokensUsed);
-            send({ type: "quota", quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
-            send({ type: "done", model, query_hash: queryHash, context_applied: NO_CONTEXT, read: readAs() });
-            telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang, undefined, telemetryMeta());
-            controller.close();
-          },
-        });
-        return new Response(sse, {
-          headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "x-accel-buffering": "no", ...corsHeaders(req) },
-        });
+      try {
+        if (stream) {
+          for await (const tok of sseTokens(stream, stats)) {
+            full += tok;
+            live!.send({ type: "token", v: tok });
+          }
+        } else {
+          live!.send({ type: "token", v: "The generation model is unavailable; please retry." });
+        }
+      } catch {
+        // stream ended prematurely — deliver what we have
       }
+      const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length, probeTokensUsed);
+      live!.send({ type: "quota", quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+      live!.send({ type: "done", model, query_hash: queryHash, context_applied: NO_CONTEXT, read: readAs() });
+      telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang, undefined, telemetryMeta());
+      live!.close();
+      return null;
     }
     let answer = await generateOnce(env, model, messages, effort);
     if (answer === null) answer = await generateOnce(env, MODELS.fallback, messages, effort);
@@ -956,16 +1011,13 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     const citations = verdict.citation ? [{ ...verdict.citation, corpus: P().publisher.id }] : [];
     const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
     telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash, q.lang, undefined, telemetryMeta());
-    if (wantsStream) {
-      return sseResponse(
-        [
-          ...(readAs() ? [{ type: "read", read: readAs() }] : []),
-          { type: "citations", citations, context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, },
-          { type: "token", v: verdict.answer },
-          { type: "done", model, query_hash: queryHash, context_applied: draftCtxApplied, read: readAs(), ...(ablate ? { ablate } : {}) },
-        ],
-        corsHeaders(req),
-      );
+    if (wantsStream && live) {
+      if (readAs()) live!.send({ type: "read", read: readAs() });
+      live!.send({ type: "citations", citations, context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, });
+      live!.send({ type: "token", v: verdict.answer });
+      live!.send({ type: "done", model, query_hash: queryHash, context_applied: draftCtxApplied, read: readAs(), ...(ablate ? { ablate } : {}) });
+      live!.close();
+      return null;
     }
     const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer.length);
     return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), ...(ablate ? { ablate } : {}), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
@@ -994,16 +1046,13 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     console.log("api_call draft:", apiCallIntent, "→", verdict.status === "draft" ? `draft (${verdict.draft.call.method} ${verdict.draft.call.path})` : `refused (${verdict.reason})`);
     const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
     telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash, q.lang, undefined, telemetryMeta());
-    if (wantsStream) {
-      return sseResponse(
-        [
-          ...(readAs() ? [{ type: "read", read: readAs() }] : []),
-          { type: "citations", citations: [], context_applied: callCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, },
-          { type: "token", v: verdict.answer },
-          { type: "done", model, query_hash: queryHash, context_applied: callCtxApplied, read: readAs(), ...(ablate ? { ablate } : {}) },
-        ],
-        corsHeaders(req),
-      );
+    if (wantsStream && live) {
+      if (readAs()) live!.send({ type: "read", read: readAs() });
+      live!.send({ type: "citations", citations: [], context_applied: callCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, });
+      live!.send({ type: "token", v: verdict.answer });
+      live!.send({ type: "done", model, query_hash: queryHash, context_applied: callCtxApplied, read: readAs(), ...(ablate ? { ablate } : {}) });
+      live!.close();
+      return null;
     }
     const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer.length);
     return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), ...(ablate ? { ablate } : {}), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
@@ -1445,7 +1494,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   const pendingTools: { name: string; query: string; output: string }[] = [];
   // the agent's own consumption (2026-10-11): every tool probe is a real
   // model call — its usage joins the charge so credits price the true cost
-  let probeTokensUsed = 0;
+
   // On an IMAGE turn the probe CARRIES THE IMAGE (2026-10-03, the owner's
   // architecture): the model that reads the plate is the model that issues
   // the tool call — one reader, one tool, no parallel extraction racing a
@@ -1539,10 +1588,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   if (wantsStream) {
     const stream = await generateStream(env, model, messages, routeEffort(routed.route));
     if (stream) {
-      const encoder = new TextEncoder();
-      const sse = new ReadableStream({
-        async start(controller) {
-          const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      const send = (obj: unknown) => live!.send(obj);
           // the agent trace arrives first: every questioning round the
           // assistant ran — the photograph read, the register search, any
           // re-answer — so the user watched what happened, not a spinner
@@ -1675,19 +1721,15 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
               env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...(sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}), ...(streamedEntailment ? { entailment: streamedEntailment } : {}) }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
           }
-          controller.close();
-        },
-      });
-      return new Response(sse, {
-        headers: {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          "x-accel-buffering": "no",
-          ...corsHeaders(req),
-        },
-      });
+          live!.close();
+      }
+    } else {
+      live!.send({ type: "token", v: "The generation model is unavailable; please retry." });
+      live!.send({ type: "done", model: MODELS.member, query_hash: "", context_applied: NO_CONTEXT });
+      live!.close();
+      return null;
     }
-  }
+    return null;
 
   const tGen = Date.now();
   // ── speculative draft-verify (TODO.sota/02 row 2): when the ablation
@@ -1931,6 +1973,16 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   }));
   const tq = await chargeAnswerTokens(env, bucketId, undefined, messageChars(messages), answer.length, probeTokensUsed);
   return json({ ...out, context: contextOut, read: readAs(), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
+  }
+
+  // THE DISPATCH: the streamed lane's response went out at the top — the
+  // pipeline has been feeding it live. The json lane awaits the pipeline
+  // and returns its aggregate.
+  if (liveResponse) {
+    void pipeline().catch(() => { try { live!.close(); } catch { /* the client went away */ } });
+    return liveResponse;
+  }
+  return await pipeline();
 }
 
 function sseResponse(events: unknown[], cors: Record<string, string>): Response {
