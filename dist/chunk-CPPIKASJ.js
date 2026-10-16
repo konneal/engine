@@ -75,7 +75,7 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-XH5QGX2O.js";
+} from "./chunk-G2RE4XRV.js";
 import {
   embed,
   generateOnce
@@ -1936,6 +1936,14 @@ async function handleAsk(env, ctx, req, tier, key) {
     }
   }
   const effectiveImage = userImage ?? storedImage;
+  let nameplate = null;
+  if (effectiveImage && /certificate|certified|certification/i.test(q.query)) {
+    mark("Reading the nameplate photograph");
+    nameplate = await extractNameplate(env.AI, MODELS.member, effectiveImage).catch(() => null);
+    if (nameplate?.manufacturer) {
+      mark(`Nameplate read: ${nameplate.manufacturer}${nameplate.model ? ` ${nameplate.model}` : ""}`);
+    }
+  }
   const budget = num(env, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
   const { kept: keptHistory, overflow } = splitHistory(history, budget);
   const summary = overflow.length >= 2 ? await summarizeHistory(env, MODELS.understand, overflow) ?? void 0 : void 0;
@@ -2074,16 +2082,11 @@ async function handleAsk(env, ctx, req, tier, key) {
   const graphDocNumbers = await graphExpand(env, understanding);
   const eNote = await editionNote(env, understanding);
   let register = await searchRegister(env.DB, q.query);
-  const bridgeImage = userImage ?? storedImage;
-  if (bridgeImage && /certificate|certified|certification/i.test(q.query)) {
-    mark("Reading the nameplate photograph");
-    const np = await extractNameplate(env.AI, MODELS.member, bridgeImage);
-    if (np?.manufacturer) {
-      const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query), true);
-      if (bridged?.rows?.length) {
-        register = bridged;
-        console.log("nameplate-bridge:", np.manufacturer, np.model ?? "", "\u2192", bridged.rows.length, "register rows");
-      }
+  if (nameplate?.manufacturer) {
+    const bridged = await searchRegister(env.DB, nameplateRegisterQuery(nameplate, q.query), true);
+    if (bridged?.rows?.length) {
+      register = bridged;
+      console.log("nameplate-bridge:", nameplate.manufacturer, nameplate.model ?? "", "\u2192", bridged.rows.length, "register rows");
     }
   }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
