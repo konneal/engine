@@ -43,3 +43,42 @@ the answer tokens.
    long question.
 3. Only after the probes: the ai pin bump PR → auto-deploy → the
    production probes.
+
+## WHAT LANDED (0.2.151, probes green)
+
+One pipeline body, TWO DELIVERIES — but the delivery is chosen by the
+CHANNEL PARAMETER, not the request's stream preference:
+`pipeline(channel, qq)` where channel is the live SSE writer or null.
+The dispatch: `if (liveResponse) { void pipeline(live, q); return
+liveResponse; } return await pipeline(null, q);`.
+
+Laws the build adds to the serving doctrine:
+
+1. **THE CHANNEL DECIDES THE LANE.** Inside the pipeline, every lane
+   branch keys off `live` (the channel) — never off `wantsStream` (the
+   request preference). The two are coupled by the hoist/dispatch, but
+   the channel is the authority: a preference-guarded branch is reachable
+   with a null channel (the first probe build 500'd every json ask in
+   exactly that else).
+2. **THE HOIST PRECEDES EVERY STEP.** The SSE opens before the vision
+   step, the understanding, the register bridge — each mark() streams at
+   the moment it runs (the owner's step order), never replayed from a
+   buffer. The agentSteps buffer survives only for the json lane's
+   single response.
+3. **ONE READER, ONE LOOKUP (the photo flow).** The nameplate bridge
+   (vision → extract → certificates.search) is the reader on a cert-photo
+   turn; the agent loop stands down there (`!nameplate?.manufacturer`).
+   The loop's image-bearing probe remains the reader on every OTHER
+   image turn. The user watches: Reading the nameplate photograph →
+   Nameplate read: … → certificates.search — … → the answer.
+4. **THE CFA BUDGET.** A ~1400-line closure drops TypeScript's flow
+   narrowing mid-function (values see `string | null` inside their own
+   guards). The 24 carried sites are guard-backed `!` assertions — the
+   guards are the runtime proof; a reduced repro for the narrowing loss
+   is a follow-up.
+
+Probes (local --remote dev against production bindings): JSON MPE ask
+(7-10 citations, table block), streamed Chomsky refusal (pinned
+sentence, no follow_up chips), streamed knowledge (read → citations →
+tokens → quota → done), text cert question (the loop streams), the
+photo flow in the owner's order.
