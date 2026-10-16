@@ -1,7 +1,9 @@
 import {
-  handleSearch
-} from "./chunk-LCMDQ3SJ.js";
-import "./chunk-LODMGQE7.js";
+  handleAsk
+} from "./chunk-2SRQDX7Y.js";
+import "./chunk-ECOYO7EX.js";
+import "./chunk-VYEMFSU5.js";
+import "./chunk-XH5QGX2O.js";
 import "./chunk-NI4CIK6W.js";
 import "./chunk-W7J5SFXJ.js";
 import "./chunk-ETLSWSZ7.js";
@@ -10,5 +12,5 @@ import "./chunk-VT7DR6NQ.js";
 import "./chunk-3FYJM7LH.js";
 import "./chunk-LSZTJI7V.js";
 export {
-  handleSearch
+  handleAsk
 };
