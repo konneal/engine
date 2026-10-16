@@ -549,6 +549,15 @@ async function handleAsk(
     }
   }
   const effectiveImage = userImage ?? storedImage;
+  // the nameplate vision call fires the moment the photo is known — it
+  // depends only on the pixels, so it runs concurrently with the
+  // understanding/retrieval phases instead of serializing after them
+  // (measured on the 2026-10-15 certificate-photo flow: the vision call
+  // sat on the critical path for its full duration before any token)
+  const nameplateBridgeWanted = /certificate|certified|certification/i.test(q.query);
+  const nameplateP = effectiveImage && nameplateBridgeWanted
+    ? extractNameplate((env as any).AI, MODELS.member, effectiveImage).catch(() => null)
+    : null;
   // history compaction: turns beyond the budget slice are summarized into a
   // continuity block (below) instead of silently dropped
   const budget = num(env as any, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
@@ -785,9 +794,11 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // question's stopwords ("this", "have") and can match an unrelated
   // holder, and the photograph's own reading is authoritative over them.
   const bridgeImage = userImage ?? storedImage;
-  if (bridgeImage && /certificate|certified|certification/i.test(q.query)) {
+  if (bridgeImage && nameplateBridgeWanted && nameplateP) {
     mark("Reading the nameplate photograph");
-    const np = await extractNameplate((env as any).AI, MODELS.member, bridgeImage);
+    // the vision call has been running since the photo resolved — only
+    // its result is awaited here
+    const np = await nameplateP;
     if (np?.manufacturer) {
       const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query), true);
       if (bridged?.rows?.length) {
