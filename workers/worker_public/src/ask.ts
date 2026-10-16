@@ -549,6 +549,20 @@ async function handleAsk(
     }
   }
   const effectiveImage = userImage ?? storedImage;
+  // STEP 1 — vision understanding (the certificate-photo flow): the
+  // photograph's reading runs FIRST, before the question understanding —
+  // the extracted manufacturer/model is what the question is ABOUT, and
+  // the register bridge re-queries with it below. One vision call, its
+  // step marked for the user as it runs.
+  let nameplate: Awaited<ReturnType<typeof extractNameplate>> | null = null;
+  if (effectiveImage && /certificate|certified|certification/i.test(q.query)) {
+    mark("Reading the nameplate photograph");
+    nameplate = await extractNameplate((env as any).AI, MODELS.member, effectiveImage).catch(() => null);
+    if (nameplate?.manufacturer) {
+      mark(`Nameplate read: ${nameplate.manufacturer}${nameplate.model ? ` ${nameplate.model}` : ""}`);
+    }
+  }
+
   // history compaction: turns beyond the budget slice are summarized into a
   // continuity block (below) instead of silently dropped
   const budget = num(env as any, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
@@ -778,22 +792,15 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // join the prompt as an authoritative note — exact matches, never a
   // similarity guess about certification standing
   let register = await searchRegister(env.DB, q.query);
-  // the nameplate bridge (TODO.new-era/6's image lane): a certificate
-  // question WITH a photograph carries its manufacturer in the pixels —
-  // one vision call extracts it, and those tokens re-query the register.
-  // Fires whenever a photo is present: the text lane's tokens are the
-  // question's stopwords ("this", "have") and can match an unrelated
-  // holder, and the photograph's own reading is authoritative over them.
-  const bridgeImage = userImage ?? storedImage;
-  if (bridgeImage && /certificate|certified|certification/i.test(q.query)) {
-    mark("Reading the nameplate photograph");
-    const np = await extractNameplate((env as any).AI, MODELS.member, bridgeImage);
-    if (np?.manufacturer) {
-      const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query), true);
-      if (bridged?.rows?.length) {
-        register = bridged;
-        console.log("nameplate-bridge:", np.manufacturer, np.model ?? "", "→", bridged.rows.length, "register rows");
-      }
+  // the nameplate bridge's register leg (the VISION leg ran first — see
+  // the nameplate extraction before the understanding): the photograph's
+  // own reading is authoritative over the text lane's tokens ("this",
+  // "have" — stopwords that can match an unrelated holder)
+  if (nameplate?.manufacturer) {
+    const bridged = await searchRegister(env.DB, nameplateRegisterQuery(nameplate, q.query), true);
+    if (bridged?.rows?.length) {
+      register = bridged;
+      console.log("nameplate-bridge:", nameplate.manufacturer, nameplate.model ?? "", "→", bridged.rows.length, "register rows");
     }
   }
   console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
