@@ -620,7 +620,13 @@ async function handleAsk(
   // exit — for the streamed lane each exit converts to its live events
   // via `finish` (and null, meaning the SSE already carried everything);
   // for the json lane the same payload returns as the response.
-  const pipeline = async (qq: { query: string; lang?: string }): Promise<Response | null> => {
+  const pipeline = async (
+    channel: { send: (ev: unknown) => void; close: () => void } | null,
+    qq: { query: string; lang?: string },
+  ): Promise<Response | null> => {
+    // the channel is a parameter: effectively const inside, so every
+    // guard on it narrows for the whole body
+    const live = channel;
     // the streamed lane's graceful degradation: a serving failure reaches
     // the user as a line, never as a dropped stream
     const q = qq;
@@ -644,17 +650,6 @@ async function handleAsk(
           lang: q?.lang ?? null,
         }
       : undefined;
-    const finishPayload = (payload: Record<string, unknown>): Response | null => {
-      if (!live) return json(payload, 200, { ...corsHeaders(req) });
-      if (payload.citations !== undefined || payload.blocks !== undefined) {
-        live!.send({ type: "citations", citations: payload.citations ?? [], quota: payload.quota, context_applied: payload.context_applied ?? NO_CONTEXT, ...(payload.source_quality ? { source_quality: payload.source_quality, confidence_note: payload.confidence_note ?? null } : {}) });
-      }
-      if (payload.answer !== undefined) live!.send({ type: "token", v: String(payload.answer) });
-      live!.send({ type: "done", model: payload.model ?? MODELS.member, query_hash: payload.query_hash ?? "", served_from: payload.served_from, blocks: payload.blocks ?? [], follow_ups: payload.follow_ups ?? [], context_applied: payload.context_applied ?? NO_CONTEXT, read: payload.read });
-      if (payload.quota !== undefined) live!.send({ type: "quota", quota: payload.quota });
-      live!.close();
-      return null;
-    };
 
   if (cached) {
     telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact", telemetryMeta());
@@ -907,8 +902,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         registerBlock = block;
         aggregateNoteText = aggregateNote(agg);
         const queryHash = await sha256Hex(q.query);
-        telemetry(env, ctx, tier, "ask", MODELS.member, true, answer.length, queryHash, q.lang, undefined, telemetryMeta());
-        const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, answer.length);
+        telemetry(env, ctx, tier, "ask", MODELS.member, true, answer!.length, queryHash, q.lang, undefined, telemetryMeta());
+        const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, answer!.length);
         const payload = {
           answer,
           citations: [{ docidentifier: `${P().publisher.name}-CS certificate register (family ${agg.family})`, corpus: "register" }],
@@ -970,7 +965,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       } catch {
         // stream ended prematurely — deliver what we have
       }
-      const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length, probeTokensUsed);
+      const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages!), full.length, probeTokensUsed);
       live!.send({ type: "quota", quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
       live!.send({ type: "done", model, query_hash: queryHash, context_applied: NO_CONTEXT, read: readAs() });
       telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang, undefined, telemetryMeta());
@@ -983,7 +978,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, undefined, telemetryMeta());
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
-    telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang, undefined, telemetryMeta());
+    telemetry(env, ctx, tier, "ask", model, true, answer!.length, queryHash, q.lang, undefined, telemetryMeta());
     return json({ answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: NO_CONTEXT, read: readAs(), quota, });
   }
 
@@ -1026,7 +1021,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     console.log("draft act:", draftAct, "→", verdict.status === "draft" ? `draft (${Object.keys(verdict.draft.fields).length} fields)` : `refused (${verdict.reason})`);
     const citations = verdict.citation ? [{ ...verdict.citation, corpus: P().publisher.id }] : [];
     const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
-    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash, q.lang, undefined, telemetryMeta());
+    telemetry(env, ctx, tier, "ask", model, true, verdict.answer!.length, queryHash, q.lang, undefined, telemetryMeta());
     if (wantsStream && live) {
       if (readAs()) live!.send({ type: "read", read: readAs() });
       live!.send({ type: "citations", citations, context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, });
@@ -1035,7 +1030,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       live!.close();
       return null;
     }
-    const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer.length);
+    const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer!.length);
     return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), ...(ablate ? { ablate } : {}), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
   }
 
@@ -1061,7 +1056,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     });
     console.log("api_call draft:", apiCallIntent, "→", verdict.status === "draft" ? `draft (${verdict.draft.call.method} ${verdict.draft.call.path})` : `refused (${verdict.reason})`);
     const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
-    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash, q.lang, undefined, telemetryMeta());
+    telemetry(env, ctx, tier, "ask", model, true, verdict.answer!.length, queryHash, q.lang, undefined, telemetryMeta());
     if (wantsStream && live) {
       if (readAs()) live!.send({ type: "read", read: readAs() });
       live!.send({ type: "citations", citations: [], context_applied: callCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, });
@@ -1070,7 +1065,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       live!.close();
       return null;
     }
-    const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer.length);
+    const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer!.length);
     return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), ...(ablate ? { ablate } : {}), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
   }
 
@@ -1423,7 +1418,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   } catch (e) {
     console.log("ask: retrieval failed:", String(e).slice(0, 300));
     telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q.query), q.lang, undefined, telemetryMeta());
-    return err(503, "retrieval_unavailable", "Search is briefly busy — please retry in a moment.");
+    return finishLine("Search is briefly busy — please retry in a moment.");
   }
   const { hits } = retrieved;
   if (hits.length === 0 && !liveRecords?.length && (!boundModel || boundModel.gated)) {
@@ -1434,7 +1429,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     const answer =
       licenseBoundaryRefusal(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys) ?? refusalAnswer();
     const out = { answer, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied, ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
-    telemetry(env, ctx, tier, "ask", model, true, answer.length, out.query_hash, q.lang, undefined, telemetryMeta());
+    telemetry(env, ctx, tier, "ask", model, true, answer!.length, out.query_hash, q.lang, undefined, telemetryMeta());
     return json({ ...out, quota, });
   }
 
@@ -1661,7 +1656,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           } catch {
             // stream ended prematurely — deliver what we have
           }
-          const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length, probeTokensUsed);
+          const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages!), full.length, probeTokensUsed);
           send({ type: "quota", quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
           // the blind-answer guard ON THE STREAM PATH (the JSON path has
           // had it since 0.2.80): an image rode the turn, the register
@@ -1717,10 +1712,10 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
               new Promise<null>((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs)),
             ]);
             if (raced) {
-              const v = entailmentVerdict(raced.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
-              streamedEntailment = { support: v.support, score: Math.round(raced.score * 100) / 100, ...(raced.ungrounded_claims?.length ? { ungrounded: raced.ungrounded_claims.slice(0, 3) } : {}) };
+              const v = entailmentVerdict(raced!.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
+              streamedEntailment = { support: v.support, score: Math.round(raced!.score * 100) / 100, ...(raced!.ungrounded_claims?.length ? { ungrounded: raced!.ungrounded_claims.slice(0, 3) } : {}) };
               streamedNote = v.note;
-              if (v.support !== "supported") console.log("entailment(stream):", v.support, raced.score);
+              if (v.support !== "supported") console.log("entailment(stream):", v.support, raced!.score);
               send({ type: "confidence", source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality), ...(streamedEntailment ? { entailment: streamedEntailment } : {}) });
             }
           }
@@ -1764,9 +1759,9 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       return null;
     });
     if (spec) {
-      answer = spec.answer;
+      answer = spec!.answer;
       stageTiming.speculative = Date.now() - tGen;
-      console.log("speculative:", spec.nDrafts, "drafts,", spec.chosen, "viable — verified");
+      console.log("speculative:", spec!.nDrafts, "drafts,", spec!.chosen, "viable — verified");
     }
   }
   if (!answer) answer = await generateOnce(env, model, messages, routeEffort(routed.route));
@@ -1795,9 +1790,9 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     // both generations failed — the honest line reaches the user (live)
     // or the json error shape (the API), never a dropped stream
     if (live) {
-      live.send({ type: "token", v: "The generation model is unavailable; please retry." });
-      live.send({ type: "done", model: MODELS.member, query_hash: "", context_applied: NO_CONTEXT });
-      live.close();
+      live!.send({ type: "token", v: "The generation model is unavailable; please retry." });
+      live!.send({ type: "done", model: MODELS.member, query_hash: "", context_applied: NO_CONTEXT });
+      live!.close();
       return null;
     }
     telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, undefined, telemetryMeta());
@@ -1808,14 +1803,14 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // line it just composed (observed live: 'TOOL db.find …' opened a
   // served answer). Stripped here and on the streamed path.
   const scrubToolLines = (t: string) => t.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, "");
-  if (answer) answer = scrubToolLines(answer);
-  if (answer) answer = canonicalRefusal(answer, refusalScope(answerCites(answer)));
-  if (answer) answer = scrubToolLines(answer);
+  if (answer) answer = scrubToolLines(answer!);
+  if (answer) answer = canonicalRefusal(answer!, refusalScope(answerCites(answer!)));
+  if (answer) answer = scrubToolLines(answer!);
   // the misplaced-pin wall: a CITED answer is not a refusal — excise
   // the pinned sentence if the model dropped it in as a disclaimer
   // (measured on chip-scoped asks: correct cited answers carrying the
   // pin mid-text, read by users and graders as total refusals)
-  if (answer) answer = exciseMisplacedPin(answer, answerCites(answer));
+  if (answer) answer = exciseMisplacedPin(answer!, answerCites(answer!));
   // the tool-narration leak (2026-10-14, the R 134-1 probe): the answer
   // model sometimes NARRATES the agent loop's call in prose — 'The
   // db.find tool returned, for the query "…": {…json…}' — instead of
@@ -1829,15 +1824,15 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // the passages or a typed table was retyped as markdown; the retry
   // wins only if it verifies better.
   let used = usedHits;
-  if (answer && !answer.includes(refusalAnswer())) {
-    const anchors = checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
+  if (answer && !answer!.includes(refusalAnswer())) {
+    const anchors = checkQuoteAnchors(answer!, used.map((h: Hit) => h.text));
     const hasTableUnit = used.some((h: Hit) => h.metadata.unit_id && h.metadata.block === "table");
     const retyped = tableRetyped(answer, hasTableUnit);
     // presenting a served table's DATA without its unit reference is the
     // same contract violation as retyping it — the HARD RULE wants the
     // token wherever the table's values carry the answer
     const unreferenced = (() => {
-      if (!hasTableUnit || answer.includes("[[u:")) return false;
+      if (!hasTableUnit || answer!.includes("[[u:")) return false;
       const norm = (s: string) => (s.match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, ""));
       const nums = norm(answer);
       if (nums.length < 2) return false;
@@ -1888,16 +1883,16 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // The model critiques its own answer; if claims are ungrounded, retry
   // retrieval with the missing-info hint (max one retry).
   // Ref: selfrag.github.io; arXiv 2606.05658 bounded reflection
-  if (answer && !answer.includes(refusalAnswer())) {
+  if (answer && !answer!.includes(refusalAnswer())) {
     const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h: Hit) => h.text));
-    console.log("reflection:", reflection ? (reflection.grounded ? "grounded" : "ungrounded") : "null");
-    if (reflection && !reflection.grounded && reflection.missing_info) {
+    console.log("reflection:", reflection ? (reflection!.grounded ? "grounded" : "ungrounded") : "null");
+    if (reflection && !reflection!.grounded && reflection!.missing_info) {
       // re-retrieve targeting what was missing — the declared context's
       // hard seal binds the retry exactly as the first pass
       // (TODO.ai-platform/02)
       const retryRetrieve = await retrieve(env, q.query, {
         prev,
-        understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` } as any,
+        understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection!.missing_info}` } as any,
         sealScope: declaredScoped ? docScope : null,
         datasetScope: narrowed ? corpora : null,
         standardKeys,
@@ -1920,13 +1915,13 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
   const finalCites = boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used);
-  const c2ns = answer.includes(refusalAnswer())
+  const c2ns = answer!.includes(refusalAnswer())
     ? { text: answer, blocks: [] as Awaited<ReturnType<typeof contractV2>>["blocks"], dropped: [] as string[] }
-    : await contractV2(env.DB, answer, used);
+    : await contractV2(env.DB, answer!, used);
   answer = c2ns.text;
-  const finalAnchors = answer.includes(refusalAnswer())
+  const finalAnchors = answer!.includes(refusalAnswer())
     ? { total: 0, violations: [] as string[] }
-    : checkQuoteAnchors(answer, used.map((h: Hit) => h.text));
+    : checkQuoteAnchors(answer!, used.map((h: Hit) => h.text));
   if (finalAnchors.violations.length > 0) {
     console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified — not caching");
   }
@@ -1938,8 +1933,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // fallback) but contractV2 then dropped the reference because the unit
   // wasn't in the used passages — leaving no block and no token.
   let completionBlocks: Awaited<ReturnType<typeof completeTables>> = [];
-  if (!answer.includes(refusalAnswer()) && !c2ns.blocks.some((b: any) => b.type === "table")) {
-    completionBlocks = await completeTables(env.DB, answer, used);
+  if (!answer!.includes(refusalAnswer()) && !c2ns.blocks.some((b: any) => b.type === "table")) {
+    completionBlocks = await completeTables(env.DB, answer!, used);
     if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
   }
 
@@ -1951,7 +1946,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // text claims nothing was provided — while the bridge succeeded and the
   // register note carries actual rows. One bounded regeneration, decided on
   // that exact signature; the retry carries a sterner ground instruction.
-  if (withImage && register?.rows?.length && answer.includes(refusalAnswer())) {
+  if (withImage && register?.rows?.length && answer!.includes(refusalAnswer())) {
     console.log("blind-answer: the register note carried rows but the answer refused — regenerating once");
     mark("Re-answering from the register results");
     const regen = await generateOnce(env, model, [
@@ -1973,25 +1968,25 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // rung note untouched; refusals and uncited answers have nothing to gate.
   let entailment: { support: string; score: number; ungrounded?: string[] } | null = null;
   let entailmentNote = "";
-  if (THRESHOLDS.entailmentGate && jsonQuality && used.length && !answer.includes(refusalAnswer())) {
+  if (THRESHOLDS.entailmentGate && jsonQuality && used.length && !answer!.includes(refusalAnswer())) {
     const raced = await Promise.race([
       scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, (used as Hit[]).map((h: Hit) => h.text)),
       new Promise<null>((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs)),
     ]);
     if (raced) {
-      const v = entailmentVerdict(raced.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
-      entailment = { support: v.support, score: Math.round(raced.score * 100) / 100, ...(raced.ungrounded_claims?.length ? { ungrounded: raced.ungrounded_claims.slice(0, 3) } : {}) };
+      const v = entailmentVerdict(raced!.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
+      entailment = { support: v.support, score: Math.round(raced!.score * 100) / 100, ...(raced!.ungrounded_claims?.length ? { ungrounded: raced!.ungrounded_claims.slice(0, 3) } : {}) };
       entailmentNote = v.note;
-      if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
+      if (v.support !== "supported") console.log("entailment:", v.support, raced!.score, raced!.ungrounded_claims?.slice(0, 2));
     }
   }
-  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer, refusalScope(answerCites(answer))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
-  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer))) && finalAnchors.violations.length === 0;
+  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer, refusalScope(answerCites(answer!))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
+  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer!))) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
   }
-  telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang, undefined, telemetryMeta());
+  telemetry(env, ctx, tier, "ask", model, true, answer!.length, queryHash, q.lang, undefined, telemetryMeta());
   // grounding transparency for integrators (and the eval battery): the
   // passages the answer was actually built from — response-only, never
   // stored in the answer cache
@@ -2001,7 +1996,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     text: h.text.slice(0, 1200),
     ...((h.metadata as any).table_selection ? { sel: (h.metadata as any).table_selection } : {}),
   }));
-  const tq = await chargeAnswerTokens(env, bucketId, undefined, messageChars(messages), answer.length, probeTokensUsed);
+  const tq = await chargeAnswerTokens(env, bucketId, undefined, messageChars(messages!), answer!.length, probeTokensUsed);
   return json({ ...out, context: contextOut, read: readAs(), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
   }
 
@@ -2009,10 +2004,10 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // pipeline has been feeding it live. The json lane awaits the pipeline
   // and returns its aggregate.
   if (liveResponse) {
-    void pipeline().catch(() => { try { live!.close(); } catch { /* the client went away */ } });
+    void pipeline(live).catch(() => { try { live!.close(); } catch { /* the client went away */ } });
     return liveResponse;
   }
-  return await pipeline();
+  return await pipeline(null);
 }
 
 function sseResponse(events: unknown[], cors: Record<string, string>): Response {
