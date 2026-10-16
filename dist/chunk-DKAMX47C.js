@@ -75,7 +75,7 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-XH5QGX2O.js";
+} from "./chunk-LODMGQE7.js";
 import {
   embed,
   generateOnce
@@ -1936,6 +1936,8 @@ async function handleAsk(env, ctx, req, tier, key) {
     }
   }
   const effectiveImage = userImage ?? storedImage;
+  const nameplateBridgeWanted = /certificate|certified|certification/i.test(q.query);
+  const nameplateP = effectiveImage && nameplateBridgeWanted ? extractNameplate(env.AI, MODELS.member, effectiveImage).catch(() => null) : null;
   const budget = num(env, "INPUT_TOKEN_BUDGET", LIMITS.inputTokenBudget);
   const { kept: keptHistory, overflow } = splitHistory(history, budget);
   const summary = overflow.length >= 2 ? await summarizeHistory(env, MODELS.understand, overflow) ?? void 0 : void 0;
@@ -2075,9 +2077,9 @@ async function handleAsk(env, ctx, req, tier, key) {
   const eNote = await editionNote(env, understanding);
   let register = await searchRegister(env.DB, q.query);
   const bridgeImage = userImage ?? storedImage;
-  if (bridgeImage && /certificate|certified|certification/i.test(q.query)) {
+  if (bridgeImage && nameplateBridgeWanted && nameplateP) {
     mark("Reading the nameplate photograph");
-    const np = await extractNameplate(env.AI, MODELS.member, bridgeImage);
+    const np = await nameplateP;
     if (np?.manufacturer) {
       const bridged = await searchRegister(env.DB, nameplateRegisterQuery(np, q.query), true);
       if (bridged?.rows?.length) {
