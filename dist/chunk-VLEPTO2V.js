@@ -1837,14 +1837,6 @@ async function handleAsk(env, ctx, req, tier, key) {
   const telemetryMeta = () => ({ durationMs: Date.now() - tStart, keyId: key?.id ?? null, retries: generateRetries });
   const stageTiming = {};
   let generateRetries = 0;
-  const readAs = () => understanding ? {
-    intent: understanding.intent,
-    doc: understanding.docidentifier,
-    edition: understanding.edition ?? null,
-    term: understanding.term,
-    terms: (understanding.defined_terms ?? []).slice(0, 4),
-    lang: q?.lang ?? null
-  } : void 0;
   const serverTiming = () => Object.entries(stageTiming).map(([k, v]) => `${k};dur=${v}`).concat([`generate-retries;desc=count;dur=${generateRetries ?? 0}`, `total;dur=${Date.now() - tStart}`]).join(", ");
   const body = await readJson(req);
   const q = validateQuery(body);
@@ -1891,10 +1883,40 @@ async function handleAsk(env, ctx, req, tier, key) {
     return err(503, "generation_disabled", "Generation is temporarily paused; search remains available.");
   }
   const agentSteps = [];
+  let live = null;
+  let liveResponse = null;
   const mark = (step) => {
-    agentSteps.push(step);
+    if (live) live.send({ type: "agent", step });
+    else agentSteps.push(step);
     console.log(`agent-step: ${step}`);
   };
+  const wantsStream = body?.stream === true || tier === "anon" && body?.stream !== false;
+  if (wantsStream) {
+    const encoder = new TextEncoder();
+    let ctrl = null;
+    const sse = new ReadableStream({
+      start(c) {
+        ctrl = c;
+      }
+    });
+    live = {
+      send: (ev) => {
+        try {
+          ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(ev)}
+
+`));
+        } catch {
+        }
+      },
+      close: () => {
+        try {
+          ctrl.close();
+        } catch {
+        }
+      }
+    };
+    liveResponse = new Response(sse, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "x-accel-buffering": "no", ...corsHeaders(req) } });
+  }
   const service = env.INTERNAL_SERVICE;
   const fedAuth = {
     cookie: req.headers.get("cookie") ?? "",
@@ -1953,941 +1975,948 @@ async function handleAsk(env, ctx, req, tier, key) {
   const gen = await corpusGen(env.CACHE);
   const withImage = effectiveImage || storedImage;
   const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage || ablate ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
-  const wantsStream = body?.stream === true || tier === "anon" && body?.stream !== false;
-  if (cached) {
-    telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q.lang, "exact", telemetryMeta());
-    const cctx = cached.value.context_applied ?? NO_CONTEXT;
-    if (wantsStream) {
-      return sseResponse([
-        { type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx, ...cached.value.source_quality ? { source_quality: cached.value.source_quality, confidence_note: cached.value.confidence_note ?? null, ...cached.value.experimental_sources ? { experimental_sources: cached.value.experimental_sources } : {}, ...cached.value.entailment ? { entailment: cached.value.entailment } : {} } : {} },
-        { type: "token", v: cached.value.answer ?? "" },
-        { type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, served_from: "cache", context_applied: cctx }
-      ], corsHeaders(req));
+  let probeTokensUsed = 0;
+  const pipeline = async (channel, qq) => {
+    const live2 = channel;
+    const q2 = qq;
+    const finishLine = (message) => {
+      if (live2) {
+        live2.send({ type: "token", v: message });
+        live2.send({ type: "done", model: MODELS.member, query_hash: "", context_applied: NO_CONTEXT });
+        live2.close();
+        return null;
+      }
+      return err(503, "serving_busy", message);
+    };
+    const readAs = () => understanding ? {
+      intent: understanding.intent,
+      doc: understanding.docidentifier,
+      edition: understanding.edition ?? null,
+      term: understanding.term,
+      terms: (understanding.defined_terms ?? []).slice(0, 4),
+      lang: q2?.lang ?? null
+    } : void 0;
+    if (cached) {
+      telemetry(env, ctx, tier, "ask", null, true, (cached.value.answer ?? "").length, cached.value.query_hash, q2.lang, "exact", telemetryMeta());
+      const cctx = cached.value.context_applied ?? NO_CONTEXT;
+      if (live2) {
+        live2.send({ type: "citations", citations: cached.value.citations ?? [], quota, context_applied: cctx, ...cached.value.source_quality ? { source_quality: cached.value.source_quality, confidence_note: cached.value.confidence_note ?? null, ...cached.value.experimental_sources ? { experimental_sources: cached.value.experimental_sources } : {}, ...cached.value.entailment ? { entailment: cached.value.entailment } : {} } : {} });
+        live2.send({ type: "token", v: cached.value.answer ?? "" });
+        live2.send({ type: "done", model: cached.value.model ?? MODELS.member, query_hash: cached.value.query_hash, served_from: "cache", context_applied: cctx });
+        live2.close();
+        return null;
+      }
+      return json({ ...cached.value, cached: true, quota, context_applied: cctx });
     }
-    return json({ ...cached.value, cached: true, quota, context_applied: cctx });
-  }
-  const warmQuery = retrievalQuery(q.query, prev);
-  const warmEmbed = embedWarm(env, warmQuery);
-  const conversationId = typeof body?.conversation_id === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(body.conversation_id) ? body.conversation_id : null;
-  try {
-    if (!effectiveImage && !attachIds.length && conversationId && env.DB && member) {
-      const prior = await env.DB.prepare(
-        "SELECT m.attachment_id AS aid, a.mime, a.r2_key FROM messages m JOIN attachments a ON a.id = m.attachment_id JOIN conversations c ON c.id = m.conversation_id AND c.sub = ?2 WHERE m.conversation_id = ?1 AND m.role = 'user' AND m.attachment_id IS NOT NULL ORDER BY m.created_at DESC LIMIT 1"
-      ).bind(conversationId, member.sub).first();
-      if (prior) {
-        const obj = await env.CHAT_UPLOADS.get(prior.r2_key);
-        if (obj) {
-          const bytes = new Uint8Array(await obj.arrayBuffer());
-          let bin = "";
-          for (let i = 0; i < bytes.length; i += 32768) bin += String.fromCharCode(...bytes.subarray(i, i + 32768));
-          storedImage = `data:${prior.mime};base64,${btoa(bin)}`;
+    const warmQuery = retrievalQuery(q2.query, prev);
+    const warmEmbed = embedWarm(env, warmQuery);
+    const conversationId = typeof body?.conversation_id === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(body.conversation_id) ? body.conversation_id : null;
+    try {
+      if (!effectiveImage && !attachIds.length && conversationId && env.DB && member) {
+        const prior = await env.DB.prepare(
+          "SELECT m.attachment_id AS aid, a.mime, a.r2_key FROM messages m JOIN attachments a ON a.id = m.attachment_id JOIN conversations c ON c.id = m.conversation_id AND c.sub = ?2 WHERE m.conversation_id = ?1 AND m.role = 'user' AND m.attachment_id IS NOT NULL ORDER BY m.created_at DESC LIMIT 1"
+        ).bind(conversationId, member.sub).first();
+        if (prior) {
+          const obj = await env.CHAT_UPLOADS.get(prior.r2_key);
+          if (obj) {
+            const bytes = new Uint8Array(await obj.arrayBuffer());
+            let bin = "";
+            for (let i = 0; i < bytes.length; i += 32768) bin += String.fromCharCode(...bytes.subarray(i, i + 32768));
+            storedImage = `data:${prior.mime};base64,${btoa(bin)}`;
+          }
         }
       }
-    }
-  } catch {
-  }
-  let convEntities = [];
-  if (conversationId) {
-    try {
-      const rows = await env.DB.prepare("SELECT entity, kind FROM conversation_entities WHERE conversation_id = ?1 LIMIT 12").bind(conversationId).all();
-      convEntities = rows.results ?? [];
-      if (convEntities.length) console.log("entity map:", convEntities.length, "entries");
     } catch {
     }
-  }
-  let understanding = null;
-  const answerCites = (t) => /\[[^\]]+\]/.test(t);
-  const refusalScope = (cited) => ({ cited, conversational: understanding?.intent === "conversational" });
-  let optimisticVec = null;
-  let optimisticHits = [];
-  const t0 = Date.now();
-  if (!cached) {
-    const understandingP = understandQuery(portModelRunner(env), roleModel(env, "understand"), q.query, history, convEntities);
-    try {
-      optimisticVec = await warmEmbed ?? null;
-      if (optimisticVec) {
-        const ores = await env.VECTORIZE.query(optimisticVec, { topK: LIMITS.retrieveK, returnMetadata: "all" });
-        optimisticHits = (ores.matches ?? []).map((m) => ({
-          id: m.id,
-          score: m.score,
-          metadata: m.metadata,
-          text: m.metadata?.chunk_text ?? ""
-        }));
+    let convEntities = [];
+    if (conversationId) {
+      try {
+        const rows = await env.DB.prepare("SELECT entity, kind FROM conversation_entities WHERE conversation_id = ?1 LIMIT 12").bind(conversationId).all();
+        convEntities = rows.results ?? [];
+        if (convEntities.length) console.log("entity map:", convEntities.length, "entries");
+      } catch {
       }
-    } catch {
     }
-    understanding = await understandingP;
-    stageTiming.understand = Date.now() - t0;
-    console.log("stage: understand+optimistic", Date.now() - t0, "ms");
-  }
-  const docScope = declaredCtx && declaredCtx.kind !== "account" ? await resolveDocScope(env, declaredCtx) : null;
-  const named = declaredCtx && declaredCtx.kind !== "account" ? namedDocumentIn(q.query) : null;
-  let ctxApplied;
-  let declaredScoped = false;
-  if (!declaredCtx) {
-    ctxApplied = NO_CONTEXT;
-    const bare = understanding?.process_intent ? null : namedDocumentIn(q.query);
-    if (bare && understanding?.doc_number !== bare.doc_number) {
+    let understanding = null;
+    const answerCites = (t) => /\[[^\]]+\]/.test(t);
+    const refusalScope = (cited) => ({ cited, conversational: understanding?.intent === "conversational" });
+    let optimisticVec = null;
+    let optimisticHits = [];
+    const t0 = Date.now();
+    if (!cached) {
+      const understandingP = understandQuery(portModelRunner(env), roleModel(env, "understand"), q2.query, history, convEntities);
+      try {
+        optimisticVec = await warmEmbed ?? null;
+        if (optimisticVec) {
+          const ores = await env.VECTORIZE.query(optimisticVec, { topK: LIMITS.retrieveK, returnMetadata: "all" });
+          optimisticHits = (ores.matches ?? []).map((m) => ({
+            id: m.id,
+            score: m.score,
+            metadata: m.metadata,
+            text: m.metadata?.chunk_text ?? ""
+          }));
+        }
+      } catch {
+      }
+      understanding = await understandingP;
+      stageTiming.understand = Date.now() - t0;
+      console.log("stage: understand+optimistic", Date.now() - t0, "ms");
+    }
+    const docScope = declaredCtx && declaredCtx.kind !== "account" ? await resolveDocScope(env, declaredCtx) : null;
+    const named = declaredCtx && declaredCtx.kind !== "account" ? namedDocumentIn(q2.query) : null;
+    let ctxApplied;
+    let declaredScoped = false;
+    if (!declaredCtx) {
+      ctxApplied = NO_CONTEXT;
+      const bare = understanding?.process_intent ? null : namedDocumentIn(q2.query);
+      if (bare && understanding?.doc_number !== bare.doc_number) {
+        understanding = {
+          ...understanding ?? syntheticUnderstanding(bare),
+          docidentifier: bare.label,
+          doc_number: bare.doc_number,
+          edition: bare.edition ?? understanding?.edition ?? null
+        };
+        console.log("question names", bare.label, "\u2014 scoping retrieval from the text");
+      }
+    } else if (declaredCtx.kind === "account") {
+      ctxApplied = appliedContext(declaredCtx, null);
+    } else if (docScope && (!named || named.doc_number === docScope.doc_number)) {
+      if (understanding?.doc_number && understanding.doc_number !== docScope.doc_number) {
+        console.log("context scope: understand's doc#" + understanding.doc_number, "is inferred, not named in the question \u2014 the declared", docScope.label, "scopes");
+      }
       understanding = {
-        ...understanding ?? syntheticUnderstanding(bare),
-        docidentifier: bare.label,
-        doc_number: bare.doc_number,
-        edition: bare.edition ?? understanding?.edition ?? null
+        ...understanding ?? syntheticUnderstanding(docScope),
+        docidentifier: docScope.label,
+        doc_number: docScope.doc_number,
+        edition: docScope.edition ?? understanding?.edition ?? null
       };
-      console.log("question names", bare.label, "\u2014 scoping retrieval from the text");
+      ctxApplied = appliedContext(declaredCtx, docScope);
+      declaredScoped = true;
+      console.log("context scope:", docScope.label, `(${declaredCtx.kind})`);
+    } else if (docScope && named) {
+      if (understanding?.doc_number !== named.doc_number) {
+        understanding = {
+          ...understanding ?? syntheticUnderstanding(named),
+          docidentifier: named.label,
+          doc_number: named.doc_number,
+          edition: named.edition ?? null
+        };
+      }
+      ctxApplied = appliedContext(declaredCtx, null, "question-document-wins");
+      console.log("context scope: the question names", named.label, "\u2014 it wins over the declared", docScope.label);
+    } else if (declaredCtx.doc) {
+      ctxApplied = appliedContext(declaredCtx, null, "document-not-in-corpus");
+      console.log("context scope:", declaredCtx.doc, "not in the corpus \u2014 the general corpus answers");
+    } else {
+      ctxApplied = appliedContext(declaredCtx, null);
     }
-  } else if (declaredCtx.kind === "account") {
-    ctxApplied = appliedContext(declaredCtx, null);
-  } else if (docScope && (!named || named.doc_number === docScope.doc_number)) {
-    if (understanding?.doc_number && understanding.doc_number !== docScope.doc_number) {
-      console.log("context scope: understand's doc#" + understanding.doc_number, "is inferred, not named in the question \u2014 the declared", docScope.label, "scopes");
+    if (conversationId && understanding) {
+      const now = Date.now();
+      const ents = [];
+      if (understanding.docidentifier) ents.push([understanding.docidentifier, "document"]);
+      for (const t of understanding.defined_terms) ents.push([t, "term"]);
+      if (ents.length) {
+        const upsert = (e, k) => env.DB.prepare("INSERT OR REPLACE INTO conversation_entities (conversation_id, entity, kind, ts) VALUES (?1, ?2, ?3, ?4)").bind(conversationId, e, k, now).run();
+        ctx.waitUntil(Promise.allSettled(ents.map(([e, k]) => upsert(e, k))));
+      }
     }
-    understanding = {
-      ...understanding ?? syntheticUnderstanding(docScope),
-      docidentifier: docScope.label,
-      doc_number: docScope.doc_number,
-      edition: docScope.edition ?? understanding?.edition ?? null
-    };
-    ctxApplied = appliedContext(declaredCtx, docScope);
-    declaredScoped = true;
-    console.log("context scope:", docScope.label, `(${declaredCtx.kind})`);
-  } else if (docScope && named) {
-    if (understanding?.doc_number !== named.doc_number) {
-      understanding = {
-        ...understanding ?? syntheticUnderstanding(named),
-        docidentifier: named.label,
-        doc_number: named.doc_number,
-        edition: named.edition ?? null
-      };
+    console.log("understand:", understanding?.intent ?? "null", understanding?.doc_number ? `doc#${understanding.doc_number}${understanding.edition ? "@" + understanding.edition : ""}` : "nodoc", "|", q2.query.slice(0, 50));
+    const graphDocNumbers = await graphExpand(env, understanding);
+    const eNote = await editionNote(env, understanding);
+    let register = await searchRegister(env.DB, q2.query);
+    if (nameplate?.manufacturer) {
+      mark(`certificates.search \u2014 ${nameplate.manufacturer}${nameplate.model ? ` ${nameplate.model}` : ""}`.slice(0, 140));
+      const bridged = await searchRegister(env.DB, nameplateRegisterQuery(nameplate, q2.query), true);
+      if (bridged?.rows?.length) {
+        register = bridged;
+        console.log("nameplate-bridge:", nameplate.manufacturer, nameplate.model ?? "", "\u2192", bridged.rows.length, "register rows");
+      }
     }
-    ctxApplied = appliedContext(declaredCtx, null, "question-document-wins");
-    console.log("context scope: the question names", named.label, "\u2014 it wins over the declared", docScope.label);
-  } else if (declaredCtx.doc) {
-    ctxApplied = appliedContext(declaredCtx, null, "document-not-in-corpus");
-    console.log("context scope:", declaredCtx.doc, "not in the corpus \u2014 the general corpus answers");
-  } else {
-    ctxApplied = appliedContext(declaredCtx, null);
-  }
-  if (conversationId && understanding) {
-    const now = Date.now();
-    const ents = [];
-    if (understanding.docidentifier) ents.push([understanding.docidentifier, "document"]);
-    for (const t of understanding.defined_terms) ents.push([t, "term"]);
-    if (ents.length) {
-      const upsert = (e, k) => env.DB.prepare("INSERT OR REPLACE INTO conversation_entities (conversation_id, entity, kind, ts) VALUES (?1, ?2, ?3, ?4)").bind(conversationId, e, k, now).run();
-      ctx.waitUntil(Promise.allSettled(ents.map(([e, k]) => upsert(e, k))));
+    console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
+    function queryFamilyForAggregate(query) {
+      return queryFamily(query);
     }
-  }
-  console.log("understand:", understanding?.intent ?? "null", understanding?.doc_number ? `doc#${understanding.doc_number}${understanding.edition ? "@" + understanding.edition : ""}` : "nodoc", "|", q.query.slice(0, 50));
-  const graphDocNumbers = await graphExpand(env, understanding);
-  const eNote = await editionNote(env, understanding);
-  let register = await searchRegister(env.DB, q.query);
-  if (nameplate?.manufacturer) {
-    const bridged = await searchRegister(env.DB, nameplateRegisterQuery(nameplate, q.query), true);
-    if (bridged?.rows?.length) {
-      register = bridged;
-      console.log("nameplate-bridge:", nameplate.manufacturer, nameplate.model ?? "", "\u2192", bridged.rows.length, "register rows");
-    }
-  }
-  console.log("register-search:", JSON.stringify({ shaped: !!register, tokens: register?.tokens ?? null, rows: register?.rows?.length ?? null, first: register?.rows?.[0]?.num ?? null }));
-  function queryFamilyForAggregate(query) {
-    return queryFamily(query);
-  }
-  let registerBlock = null;
-  let aggregateNoteText;
-  const aggIntent = registerAggregateIntent(q.query);
-  if (aggIntent) {
-    const fam = queryFamilyForAggregate(q.query);
-    if (fam) {
-      const agg = await registerAggregate(env.DB, fam);
-      if (agg) {
-        const latestLine = agg.latest ? `The latest certificate in the snapshot is ${agg.latest.num} \u2014 holder ${agg.latest.holder}, model "${agg.latest.model}"${agg.latest.year ? `, issued ${agg.latest.year}` : ""}, status ${agg.latest.status}.` : "No certificate rows are present in the snapshot.";
-        const linkLine = agg.latest?.pdf_key ? `
+    let registerBlock = null;
+    let aggregateNoteText;
+    const aggIntent = registerAggregateIntent(q2.query);
+    if (aggIntent) {
+      const fam = queryFamilyForAggregate(q2.query);
+      if (fam) {
+        const agg = await registerAggregate(env.DB, fam);
+        if (agg) {
+          const latestLine = agg.latest ? `The latest certificate in the snapshot is ${agg.latest.num} \u2014 holder ${agg.latest.holder}, model "${agg.latest.model}"${agg.latest.year ? `, issued ${agg.latest.year}` : ""}, status ${agg.latest.status}.` : "No certificate rows are present in the snapshot.";
+          const linkLine = agg.latest?.pdf_key ? `
 
 [The latest certificate's document](${`/cert-pdf/${agg.latest.pdf_key}`}) is on file.` : "";
-        const series = agg.latest?.num?.match(/^[A-Za-z]+/)?.[0] ?? "R";
-        const answer2 = aggIntent === "count" ? `The ${P().publisher.name} ${series} ${agg.family} family holds **${agg.count} certificate${agg.count === 1 ? "" : "s"}** in the ${P().publisher.name}-CS register snapshot (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).
+          const series = agg.latest?.num?.match(/^[A-Za-z]+/)?.[0] ?? "R";
+          const answer2 = aggIntent === "count" ? `The ${P().publisher.name} ${series} ${agg.family} family holds **${agg.count} certificate${agg.count === 1 ? "" : "s"}** in the ${P().publisher.name}-CS register snapshot (${agg.valid} valid${agg.suspended ? `, ${agg.suspended} suspended` : ""}).
 
 Certificates are issued per recommendation family \u2014 the register carries no edition dimension, so the 2021 you named does not narrow the count. The register is a snapshot rather than live certification status.` : `${latestLine}${linkLine}
 
 Certificates are issued per recommendation family \u2014 the register carries no edition dimension. The register is a snapshot rather than live certification status.`;
-        const block = aggregateBlock(agg);
-        registerBlock = block;
-        aggregateNoteText = aggregateNote(agg);
-        const queryHash2 = await sha256Hex(q.query);
-        telemetry(env, ctx, tier, "ask", MODELS.member, true, answer2.length, queryHash2, q.lang, void 0, telemetryMeta());
-        const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q.query.length, answer2.length);
-        return json({
-          answer: answer2,
-          citations: [{ docidentifier: `${P().publisher.name}-CS certificate register (family ${agg.family})`, corpus: "register" }],
-          model: MODELS.member,
-          query_hash: queryHash2,
-          follow_ups: [],
-          blocks: [block],
-          context_applied: NO_CONTEXT,
-          read: readAs(),
-          ...ablate ? { ablate } : {},
-          quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview }
-        });
+          const block = aggregateBlock(agg);
+          registerBlock = block;
+          aggregateNoteText = aggregateNote(agg);
+          const queryHash2 = await sha256Hex(q2.query);
+          telemetry(env, ctx, tier, "ask", MODELS.member, true, answer2.length, queryHash2, q2.lang, void 0, telemetryMeta());
+          const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q2.query.length, answer2.length);
+          const payload = {
+            answer: answer2,
+            citations: [{ docidentifier: `${P().publisher.name}-CS certificate register (family ${agg.family})`, corpus: "register" }],
+            model: MODELS.member,
+            query_hash: queryHash2,
+            follow_ups: [],
+            blocks: [block],
+            context_applied: NO_CONTEXT,
+            read: readAs(),
+            ...ablate ? { ablate } : {},
+            quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview }
+          };
+          if (live2) {
+            live2.send({ type: "citations", citations: payload.citations, quota: payload.quota, context_applied: NO_CONTEXT });
+            live2.send({ type: "token", v: answer2 });
+            live2.send({ type: "done", model: MODELS.member, query_hash: queryHash2, blocks: [block], follow_ups: [], context_applied: NO_CONTEXT, read: readAs() });
+            live2.send({ type: "quota", quota: payload.quota });
+            live2.close();
+            return null;
+          }
+          return json(payload);
+        }
       }
     }
-  }
-  const regNote = aggregateNoteText ?? (register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : void 0);
-  const ops = await operationsLane(env.DB, q.query);
-  if (understanding?.intent === "conversational") {
-    const queryHash2 = await sha256Hex(q.query);
-    const messages2 = [
-      { role: "system", content: identityNote(!!member) },
-      ...summary ? [{ role: "system", content: `Earlier in this conversation (summarized for continuity):
+    const regNote = aggregateNoteText ?? (register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : void 0);
+    const ops = await operationsLane(env.DB, q2.query);
+    if (understanding?.intent === "conversational") {
+      const queryHash2 = await sha256Hex(q2.query);
+      const messages2 = [
+        { role: "system", content: identityNote(!!member) },
+        ...summary ? [{ role: "system", content: `Earlier in this conversation (summarized for continuity):
 ${summary}` }] : [],
-      ...keptHistory.slice(-6),
-      { role: "user", content: q.query }
-    ];
-    if (wantsStream) {
-      const stream = await generateStream(env, model, messages2, effort);
+        ...keptHistory.slice(-6),
+        { role: "user", content: q2.query }
+      ];
+      if (live2) {
+        if (readAs()) live2.send({ type: "read", read: readAs() });
+        live2.send({ type: "citations", citations: [], context_applied: NO_CONTEXT, quota });
+        const stats = {};
+        let full = "";
+        const stream = await generateStream(env, model, messages2, effort);
+        try {
+          if (stream) {
+            for await (const tok of sseTokens(stream, stats)) {
+              full += tok;
+              live2.send({ type: "token", v: tok });
+            }
+          } else {
+            live2.send({ type: "token", v: "The generation model is unavailable; please retry." });
+          }
+        } catch {
+        }
+        const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages2), full.length, probeTokensUsed);
+        live2.send({ type: "quota", quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+        live2.send({ type: "done", model, query_hash: queryHash2, context_applied: NO_CONTEXT, read: readAs() });
+        telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash2, q2.lang, void 0, telemetryMeta());
+        live2.close();
+        return null;
+      }
+      let answer2 = await generateOnce(env, model, messages2, effort);
+      if (answer2 === null) answer2 = await generateOnce(env, MODELS.fallback, messages2, effort);
+      if (answer2 === null) {
+        telemetry(env, ctx, tier, "ask", model, false, 0, queryHash2, q2.lang, void 0, telemetryMeta());
+        return err(502, "generation_failed", "The generation model is unavailable; please retry.");
+      }
+      telemetry(env, ctx, tier, "ask", model, true, answer2.length, queryHash2, q2.lang, void 0, telemetryMeta());
+      return json({ answer: answer2, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: NO_CONTEXT, read: readAs(), quota });
+    }
+    if (draftAct) {
+      const draftCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
+      const queryHash2 = await sha256Hex(q2.query);
+      const liveCfg = liveDataConfig(env);
+      const sessionRaw = rawSessionToken(req);
+      let delegation;
+      if (!member || !sessionRaw) delegation = { status: "unsigned" };
+      else if (!liveCfg) delegation = { status: "not_configured" };
+      else {
+        const exchanged = await liveTokenFor(env, sessionRaw, member);
+        delegation = exchanged.ok ? { status: "ok", token: exchanged.token } : { status: exchanged.reason };
+      }
+      const verdict = await prepareDraft(env, {
+        act: draftAct,
+        query: q2.query,
+        history: keptHistory,
+        member,
+        delegation,
+        platformClientId: liveCfg?.platformClientId,
+        model: roleModel(env, "understand")
+      });
+      console.log("draft act:", draftAct, "\u2192", verdict.status === "draft" ? `draft (${Object.keys(verdict.draft.fields).length} fields)` : `refused (${verdict.reason})`);
+      const citations2 = verdict.citation ? [{ ...verdict.citation, corpus: P().publisher.id }] : [];
+      const draftPayload = verdict.status === "draft" ? verdict.draft : void 0;
+      telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash2, q2.lang, void 0, telemetryMeta());
+      if (live2) {
+        if (readAs()) live2.send({ type: "read", read: readAs() });
+        live2.send({ type: "citations", citations: citations2, context_applied: draftCtxApplied, ...draftPayload ? { draft: draftPayload } : {}, quota });
+        live2.send({ type: "token", v: verdict.answer });
+        live2.send({ type: "done", model, query_hash: queryHash2, context_applied: draftCtxApplied, read: readAs(), ...ablate ? { ablate } : {} });
+        live2.close();
+        return null;
+      }
+      const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q2.query.length, verdict.answer.length);
+      return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, ...ablate ? { ablate } : {}, quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+    }
+    if (apiCallIntent) {
+      const callCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
+      const queryHash2 = await sha256Hex(q2.query);
+      const verdict = await prepareApiCall(env, {
+        intent: apiCallIntent,
+        query: q2.query,
+        history: keptHistory,
+        member,
+        declared: declaredCtx,
+        model: roleModel(env, "acts")
+      });
+      console.log("api_call draft:", apiCallIntent, "\u2192", verdict.status === "draft" ? `draft (${verdict.draft.call.method} ${verdict.draft.call.path})` : `refused (${verdict.reason})`);
+      const draftPayload = verdict.status === "draft" ? verdict.draft : void 0;
+      telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash2, q2.lang, void 0, telemetryMeta());
+      if (live2) {
+        if (readAs()) live2.send({ type: "read", read: readAs() });
+        live2.send({ type: "citations", citations: [], context_applied: callCtxApplied, ...draftPayload ? { draft: draftPayload } : {}, quota });
+        live2.send({ type: "token", v: verdict.answer });
+        live2.send({ type: "done", model, query_hash: queryHash2, context_applied: callCtxApplied, read: readAs(), ...ablate ? { ablate } : {} });
+        live2.close();
+        return null;
+      }
+      const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q2.query.length, verdict.answer.length);
+      return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, ...ablate ? { ablate } : {}, quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+    }
+    let liveRecords;
+    let accountNote;
+    const modelDocHint = named ?? docScope ?? namedDocumentIn(q2.query);
+    const boundModel = P().publisher.features?.model_plane ? await bindModelNode(env, {
+      label: declaredCtx?.label,
+      query: q2.query,
+      standard: standardForDocNumber(modelDocHint?.doc_number),
+      standardKeys
+    }) ?? await bindConstraintByQuantities(env, q2.query, standardKeys) : null;
+    if (boundModel) {
+      ctxApplied = { ...ctxApplied, model: modelEcho(boundModel) };
+      console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause", boundModel.gated ? "(gated: license)" : "");
+    }
+    const modelNote = boundModel && !boundModel.gated ? modelGroundingBlock(boundModel) : void 0;
+    let machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? evaluate(boundModel.content, q2.query) : null;
+    if (machineVerdict === null && boundModel && !boundModel.gated) {
+      try {
+        const unitTokens = [...new Set(Object.values(extractParamsWithUnits(q2.query, symbolsIn(extractChecks(boundModel.content))).units).map((u) => u.toLowerCase()))];
+        if (unitTokens.length) {
+          const marks = unitTokens.map(() => "?").join(",");
+          const rows = await env.DB.prepare(
+            `SELECT lower(coalesce(json_extract(symbols, '$.ascii'), json_extract(symbols, '$.unicode'))) AS sym, dimension_ascii FROM units_db WHERE lower(coalesce(json_extract(symbols, '$.ascii'), json_extract(symbols, '$.unicode'))) IN (${marks})`
+          ).bind(...unitTokens).all().catch(() => ({ results: [] }));
+          const dimensions = {};
+          for (const r of rows.results ?? []) dimensions[String(r.sym)] = String(r.dimension_ascii ?? "");
+          machineVerdict = evaluate(boundModel.content, q2.query, { dimensions });
+        }
+      } catch {
+      }
+    }
+    const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : void 0;
+    const modelNodeRows = async (kind, docNum) => {
+      const attempt = (num3) => {
+        const sql = num3 ? `SELECT standard, node_id, content FROM model_nodes WHERE kind = '${kind}' AND standard LIKE '%' || ?1` : `SELECT standard, node_id, content FROM model_nodes WHERE kind = '${kind}'`;
+        return num3 ? env.DB.prepare(sql).bind(num3) : env.DB.prepare(sql);
+      };
+      let rows = await attempt(docNum).all().catch(() => ({ results: [] }));
+      if (!(rows.results ?? []).length && docNum && docNum.includes("-")) {
+        rows = await attempt(docNum.replace(/-\d+$/, "")).all().catch(() => ({ results: [] }));
+      }
+      return rows;
+    };
+    let conditionVerdict = null;
+    let conditionStandard = null;
+    if (!machineVerdict && !boundModel && !ablate?.noVerdict && P().publisher.features?.model_plane) {
+      const ql = q2.query.toLowerCase();
+      const severityWord = /\b(severity|test|valid|tolerance|condition|within)\b/.test(ql);
+      const stated = quantitiesIn(q2.query);
+      if (severityWord && Object.keys(stated).length >= 1) {
+        const docNum = modelDocHint?.doc_number;
+        const rows = await modelNodeRows("condition_set", docNum);
+        const candidates = (rows.results ?? []).filter((r) => {
+          const entry = licensedEntryForPackage(String(r.standard));
+          return !entry || (standardKeys?.has(entry.key) ?? false);
+        });
+        const v = evaluateConditionSets(
+          candidates.map((r) => ({ node_id: String(r.node_id), content: JSON.parse(String(r.content ?? "{}")) })),
+          q2.query
+        );
+        if (v) {
+          conditionVerdict = v;
+          conditionStandard = String(rows.results?.[0]?.standard ?? "");
+        }
+      }
+    }
+    const conditionNote = conditionVerdict && conditionStandard ? `${conditionVerdict.note} (computed from the ${conditionStandard} condition sets \u2014 machine evaluation, cite the package's clause.)` : void 0;
+    const verdictBlock = machineVerdict ? {
+      unit_id: boundModel.node_id,
+      type: "verdict",
+      docidentifier: `${P().publisher.name} model (${boundModel.standard})`,
+      payload: {
+        verdict: machineVerdict.verdict,
+        on_violation: machineVerdict.on_violation,
+        violation_meaning: machineVerdict.violation_meaning,
+        missing: machineVerdict.missing,
+        checks: machineVerdict.checks
+      }
+    } : null;
+    if (machineVerdict) console.log("verdict engine:", boundModel.node_id, "\u2192", machineVerdict.verdict.toUpperCase(), machineVerdict.missing.length ? `(missing ${machineVerdict.missing.join(",")})` : "");
+    const conditionBlock = conditionVerdict ? {
+      unit_id: conditionVerdict.matched[0] ?? conditionVerdict.nearest.node_id,
+      type: "verdict",
+      docidentifier: `${P().publisher.name} model (${conditionStandard})`,
+      payload: {
+        verdict: conditionVerdict.verdict,
+        missing: [],
+        checks: conditionVerdict.checks.map((c) => ({
+          expression: `${c.quantity_kind} within ${c.band}`,
+          values: { stated: c.stated },
+          result: c.in_band
+        })),
+        ...conditionVerdict.nearest ? { nearest: conditionVerdict.nearest } : { matched: conditionVerdict.matched }
+      }
+    } : null;
+    if (conditionVerdict) console.log("condition engine:", conditionVerdict.matched.join("|") || conditionVerdict.nearest.node_id, "\u2192", conditionVerdict.verdict.toUpperCase());
+    let aggregationVerdict = null;
+    let aggregationStandard = null;
+    if (!machineVerdict && !boundModel && !conditionVerdict && P().publisher.features?.model_plane) {
+      const docNum = modelDocHint?.doc_number;
+      const rows = await modelNodeRows("table", docNum);
+      const candidates = (rows.results ?? []).filter((r) => {
+        const entry = licensedEntryForPackage(String(r.standard));
+        return !entry || (standardKeys?.has(entry.key) ?? false);
+      });
+      const v = evaluateAggregation(
+        candidates.map((r) => ({ node_id: String(r.node_id), content: JSON.parse(String(r.content ?? "{}")) })),
+        q2.query
+      );
+      if (v) {
+        aggregationVerdict = v;
+        aggregationStandard = String(rows.results?.[0]?.standard ?? "");
+      }
+    }
+    const aggregationNote = aggregationVerdict ? `${aggregationVerdict.note}${aggregationStandard ? ` (standard ${aggregationStandard}.)` : ""}` : void 0;
+    const aggregationBlock = aggregationVerdict ? {
+      unit_id: aggregationVerdict.table,
+      type: "verdict",
+      docidentifier: `${P().publisher.name} model table${aggregationStandard ? ` (${aggregationStandard})` : ""}`,
+      payload: {
+        check: `${aggregationVerdict.operation}: ${aggregationVerdict.column ?? aggregationVerdict.table_title ?? aggregationVerdict.table} = ${aggregationVerdict.value}${aggregationVerdict.unit ? ` ${aggregationVerdict.unit}` : ""}`,
+        meaning: aggregationVerdict.table_title,
+        operation: aggregationVerdict.operation,
+        value: aggregationVerdict.value,
+        unit: aggregationVerdict.unit,
+        row: aggregationVerdict.row
+      }
+    } : null;
+    if (aggregationVerdict) console.log("aggregation engine:", aggregationVerdict.operation, aggregationVerdict.table, "\u2192", aggregationVerdict.value);
+    let boundaryNote = null;
+    let boundaryBoost;
+    let licensedDocNumbers;
+    let editionBoost;
+    try {
+      const fam = understanding?.doc ? refCodec().familyOf(understanding.doc) : null;
+      if (fam) {
+        const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(fam).first().catch(() => null);
+        if (row?.edition) editionBoost = String(row.edition);
+      }
+    } catch {
+    }
+    const lexicalBoost = [boundaryBoost, editionBoost].filter(Boolean).join(" ") || void 0;
+    if (P().sources?.licensed?.length) {
+      const match = matchLicensedTopic(q2.query, P().sources.licensed);
+      if (match && (standardKeys?.has(match.entry.key) ?? false)) {
+        licensedDocNumbers = match.entry.package ? [match.entry.package] : void 0;
+      } else if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
+        const docNum = match.entry.doc_number ?? "";
+        boundaryBoost = docNum || void 0;
+        let citing = [];
+        if (docNum) {
+          const rows = await env.DB.prepare(
+            "SELECT n.label AS label FROM graph_edges e JOIN graph_nodes n ON e.src = n.id WHERE e.kind = 'cites' AND e.dst LIKE ?1 LIMIT 4"
+          ).bind(`%${docNum}%`).all().catch(() => ({ results: [] }));
+          citing = (rows.results ?? []).map((r) => String(r.label ?? "").replace(/^doc:/, ""));
+        }
+        boundaryNote = boundaryNoteText(match, citing);
+      }
+    }
+    const routeMode = ablate?.route ?? "adaptive";
+    const routed = routeMode === "adaptive" ? routeFor(understanding, q2.query) : { route: routeMode, features: [`forced-${routeMode}`] };
+    const routeSubset = ablate?.stages ?? (routed.route === "fast" ? fastRouteStages(STAGE_NAMES) : null);
+    if (routeSubset) console.log("route:", routed.route, routed.features.join("+"), "\u2014", STAGE_NAMES.length - routeSubset.length, "lanes dropped");
+    try {
+      const tR = Date.now();
+      if (declaredCtx?.kind === "account") {
+        const live3 = await resolveLiveAccount(env, rawSessionToken(req), member);
+        if (live3.status === "ok") {
+          liveRecords = live3.records;
+          ctxApplied = appliedContext(declaredCtx, null, void 0, {
+            read_at: live3.readAt,
+            stores: live3.stores,
+            records: live3.records.length
+          });
+          const lines = live3.records.map(
+            (r) => `- ${r.label} [${[r.status, r.detail].filter(Boolean).join("; ")}] ${r.url}`
+          );
+          accountNote = `Live account data (read ${live3.readAt} from ${P().prompts.vars.account_note_source ?? `the user's own ${P().publisher.product_name} account`} \u2014 exactly what they may see, never more):
+` + (lines.length ? lines.join("\n") : "(the account surfaces answered empty)") + `
+Answer account questions from these records ONLY: name the record when you use it, never invent one, and say honestly when they do not hold the answer. The corpus passages still ground the regulatory claims (the requirements, the procedures); the records are the user's own work.`;
+          console.log("live data:", live3.records.length, "records from", live3.stores.join("+") || "none");
+        } else {
+          const note = live3.reason === "sign_in_required" ? "sign-in-required" : live3.reason === "window_expired" ? "live-window-expired" : "live-unavailable";
+          ctxApplied = appliedContext(declaredCtx, null, note);
+          accountNote = live3.reason === "sign_in_required" ? "Context note: the user asked with the 'my account' context but is not signed in \u2014 the account data was NOT read; answer from the corpus and say so." : live3.reason === "window_expired" ? "Context note: the user's live access window lapsed \u2014 the account data was NOT read; answer from the corpus, say the live read did not happen, and suggest signing in again to refresh it." : "Context note: the live account read was refused or unreachable \u2014 the account data was NOT read; answer from the corpus and say so honestly.";
+          console.log("live data: not read \u2014", live3.reason);
+        }
+      }
+      retrieved = await retrieve(env, q2.query, {
+        prev,
+        understanding,
+        federate,
+        warmEmbed,
+        graphDocNumbers,
+        sealScope: declaredScoped ? docScope : null,
+        optimisticHits,
+        optimisticVec,
+        datasetScope: narrowed ? corpora : null,
+        standardKeys,
+        lexicalBoost,
+        licensedDocNumbers,
+        ...routeSubset ? { stageSubset: routeSubset } : {}
+      });
+      stageTiming["retrieve-core"] = Date.now() - tR;
+      console.log("stage: retrieve", Date.now() - tR, "ms");
+      const docScoped = !!understanding?.doc_number;
+      const gradePromise = docScoped ? Promise.resolve("skipped-doc-scoped") : (() => {
+        const tg = Date.now();
+        return gradeRetrieval(env.AI, roleModel(env, "grader"), q2.query, retrieved.hits.map((h) => h.text)).catch(() => null).finally(() => stageTiming["grade"] = Date.now() - tg);
+      })();
+      if (retrieved.hits.length >= 4 && (member || understanding?.complexity === "complex")) {
+        const tl = Date.now();
+        const reordered = await listwiseRerank(env, MODELS.listwise, understanding?.standalone_query || q2.query, retrieved.hits);
+        stageTiming.listwise = Date.now() - tl;
+        if (reordered) {
+          console.log("listwise: reordered", reordered[0]?.metadata?.docidentifier ?? "?", "to top");
+          retrieved = { ...retrieved, hits: reordered };
+        }
+      }
+      const grade = await gradePromise;
+      stageTiming.retrieve = Date.now() - tR;
+      console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
+      if (grade === "weak" && understanding?.docidentifier) {
+        const broaden = `${understanding.standalone_query || q2.query} ${understanding.docidentifier}`.trim();
+        const tc = Date.now();
+        const second = await retrieve(env, q2.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...routeSubset ? { stageSubset: routeSubset } : {} });
+        const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q2.query, second.hits.map((h) => h.text));
+        stageTiming.corrective = Date.now() - tc;
+        if (grade2 === "good") retrieved = second;
+      }
+    } catch (e) {
+      console.log("ask: retrieval failed:", String(e).slice(0, 300));
+      telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q2.query), q2.lang, void 0, telemetryMeta());
+      return finishLine("Search is briefly busy \u2014 please retry in a moment.");
+    }
+    const { hits } = retrieved;
+    if (hits.length === 0 && !liveRecords?.length && (!boundModel || boundModel.gated)) {
+      const answer2 = licenseBoundaryRefusal(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys) ?? refusalAnswer();
+      const out2 = { answer: answer2, citations: [], model, query_hash: await sha256Hex(q2.query), context_applied: ctxApplied, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
+      telemetry(env, ctx, tier, "ask", model, true, answer2.length, out2.query_hash, q2.lang, void 0, telemetryMeta());
+      return json({ ...out2, quota });
+    }
+    const processNote = understanding?.process_intent ? P().retrieval.process_note : void 0;
+    const licenseNote = licenseBoundaryNote(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys);
+    const glossaryForNote = (() => {
+      const g = retrieved.glossary ?? [];
+      if (!g.length) return g;
+      const dt = (understanding?.defined_terms ?? []).map((s) => s.toLowerCase());
+      if (!dt.length) return g;
+      const matched = g.filter((x) => dt.some((d) => x.term.toLowerCase().includes(d.split(" ")[0]) || d.includes(x.term.toLowerCase().split(" ")[0])));
+      return matched.length ? matched : g;
+    })();
+    const vocabNote = glossaryForNote.length ? "Vocabulary binding \u2014 defined terms in the indexed corpus that may name this question's subject:\n" + glossaryForNote.map((g) => `- ${g.term} (${g.docidentifier}): ${g.definition}`).join("\n") + "\nIf the question describes a symptom or behavior in everyday words, OPEN the answer by naming the matching defined term, quote its definition, and cite its defining publication; keep using that term throughout. Match TIME SCALE carefully: change under a constant load over minutes/hours is creep; change over months/years of use is span stability or durability \u2014 do not call long-term drift creep." : void 0;
+    const opsHits = ops.matched.map((m) => ({
+      id: `ops:${m.anchor}`,
+      score: 0.999,
+      metadata: {
+        doc_id: "smart-ops:catalog",
+        docidentifier: m.docidentifier ?? "Platform API",
+        doctype: "api-operation",
+        doc_number: "",
+        edition: "",
+        language: "en",
+        clause_anchor: m.anchor,
+        clause_title: `Platform operation ${m.anchor}`,
+        tier: "curated",
+        corpus: "smart-ops",
+        text_ref: ""
+      },
+      text: `${m.anchor} \u2014 ${m.text}`
+    }));
+    const { messages, usedHits } = buildMessages(
+      q2.query,
+      [...opsHits, ...hits],
+      q2.lang,
+      keptHistory,
+      // stage-extracted graph facts (GraphRAG) ride the same note channel
+      [ops.note, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
+      summary,
+      budget
+    );
+    await attachFigureImages(env, messages, usedHits, q2.query);
+    const pendingTools = [];
+    if (multiTurn && env.DB && !nameplate?.manufacturer) {
+      try {
+        const imageTurn = typeof withImage === "string";
+        if (imageTurn) mark("Reading the photograph to identify the instrument");
+        for (let round = 0; round < 3; round++) {
+          const imageNote = imageTurn && round === 0 ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query \u2014 never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : "";
+          const continueNote = round > 0 ? "The tool results above are in hand. Answer now without a TOOL line, or issue exactly one more TOOL line if one more query is genuinely needed." : "";
+          const probeMessages = [...messages.slice(0, -1), { role: "user", content: [TOOL_DECLARATION, imageNote, continueNote, q2.query].filter(Boolean).join("\n\n") }];
+          if (imageTurn && round === 0) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
+          const probe = await env.AI.run(model, {
+            messages: probeMessages,
+            max_tokens: 700,
+            reasoning_effort: imageTurn && round === 0 ? "high" : "low"
+          });
+          const probeText = typeof probe?.response === "string" ? probe?.response : probe?.choices?.[0]?.message?.content ?? "";
+          probeTokensUsed += usageTotal(probe?.usage) ?? 0;
+          const nativeCall = Array.isArray(probe?.tool_calls) ? probe.tool_calls[0]?.function : null;
+          const call = nativeCall ? {
+            name: String(nativeCall.name ?? ""),
+            args: (() => {
+              try {
+                return typeof nativeCall.arguments === "string" ? JSON.parse(nativeCall.arguments) : nativeCall.arguments ?? {};
+              } catch {
+                return {};
+              }
+            })()
+          } : parseToolCall(probeText);
+          if (!call || !call.name) break;
+          const result = await runTool(env, call);
+          if (!result) break;
+          mark(`${result.name} \u2014 ${result.query}`.slice(0, 140));
+          messages.push({ role: "system", content: toolNote(result) });
+          pendingTools.push(result);
+          console.log("agent-tool:", result.name, JSON.stringify(result.query), "->", result.output.slice(0, 80));
+        }
+      } catch {
+      }
+    }
+    if (withImage) {
+      const wantsMarkings = /\b(mark(ing|ings)?|nameplate|label|inscription|engrav|sticker|plate)\b|certificat/i.test(q2.query);
+      const last = messages[messages.length - 1];
+      const note = wantsMarkings ? "\n\n(The user attached a photo with this question. First transcribe every inscription you can actually read in the image \u2014 names, model references, accuracy classes, numeric values with their units, certificate or approval numbers \u2014 quoting them verbatim. Then answer the question from the numbered passages, citing the requirement each interpretation rests on. If an inscription is unreadable, say so; never invent a marking.)" : "\n\n(The user attached an image with this question; interpret it directly when answering.)";
+      if (typeof last.content === "string") {
+        last.content = last.content + note;
+      } else {
+        const textPart = last.content.find((p) => p.type === "text");
+        if (textPart) textPart.text += note;
+      }
+      messages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
+      console.log("user image attached to generation");
+    }
+    const queryHash = await sha256Hex(q2.query);
+    const cites = boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits);
+    if (live2) {
+      const stream = await generateStream(env, model, messages, routeEffort(routed.route));
       if (stream) {
-        const encoder = new TextEncoder();
-        const sse = new ReadableStream({
-          async start(controller) {
-            const send = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}
-
-`));
-            if (readAs()) send({ type: "read", read: readAs() });
-            send({ type: "citations", citations: [], context_applied: NO_CONTEXT, quota });
-            const stats = {};
-            let full = "";
+        const send = (obj) => live2.send(obj);
+        for (const step of agentSteps) {
+          try {
+            send({ type: "agent", step });
+          } catch {
+          }
+        }
+        for (const t of pendingTools) {
+          try {
+            send({ type: "tool", name: t.name, query: t.query });
+          } catch {
+          }
+        }
+        send({ type: "read", read: readAs() });
+        const sourceQuality = answerQuality(cites.map((c) => c.quality));
+        send({ type: "citations", citations: cites, context_applied: ctxApplied, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: qualityNote(sourceQuality), ...sourceQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(cites) } : {} } : {}, ...liveRecords ? { records: liveRecords } : {}, quota });
+        const stats = {};
+        let full = "";
+        try {
+          let headSettled = false;
+          for await (const tok of sseTokens(stream, stats)) {
+            full += tok;
+            if (headSettled) {
+              send({ type: "token", v: tok });
+              continue;
+            }
+            if (full.length < 80) continue;
+            headSettled = true;
+            if (toolNarration(full)) {
+              console.log("tool-narration(stream): regenerating once");
+              send({ type: "retry" });
+              const regen = await generateStream(env, model, [
+                ...messages,
+                { role: "system", content: TOOL_NARRATION_NOTICE }
+              ], routeEffort(routed.route));
+              if (regen) {
+                full = "";
+                for await (const tok2 of sseTokens(regen, stats)) {
+                  full += tok2;
+                  send({ type: "token", v: tok2 });
+                }
+              } else {
+                send({ type: "token", v: full });
+              }
+              break;
+            }
+            send({ type: "token", v: full });
+          }
+          if (!headSettled) {
+            headSettled = true;
+            if (!toolNarration(full)) send({ type: "token", v: full });
+          }
+        } catch {
+        }
+        const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length, probeTokensUsed);
+        send({ type: "quota", quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+        if (withImage && register?.rows?.length && full.includes(refusalAnswer())) {
+          console.log("blind-answer(stream): regenerating once");
+          mark("Re-answering from the register results");
+          send({ type: "retry" });
+          const regen = await generateStream(env, model, [
+            ...messages.slice(0, -1),
+            { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
+            messages[messages.length - 1]
+          ], routeEffort(routed.route));
+          if (regen) {
+            full = "";
             try {
-              for await (const tok of sseTokens(stream, stats)) {
+              for await (const tok of sseTokens(regen)) {
                 full += tok;
                 send({ type: "token", v: tok });
               }
             } catch {
             }
-            const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages2), full.length, probeTokensUsed);
-            send({ type: "quota", quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
-            send({ type: "done", model, query_hash: queryHash2, context_applied: NO_CONTEXT, read: readAs() });
-            telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash2, q.lang, void 0, telemetryMeta());
-            controller.close();
           }
+        }
+        const canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
+        const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
+        send({
+          type: "done",
+          model,
+          query_hash: queryHash,
+          follow_ups: refusalShaped(canonical0, refusalScope(answerCites(full))) ? [] : understanding?.follow_ups ?? [],
+          blocks: [...c2.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : []],
+          context_applied: ctxApplied,
+          read: readAs(),
+          // the evidence view's ground truth: the exact passages this
+          // answer was built from, compact — cache hits carry none,
+          // because the cache stores the answer and never the passages
+          passages: usedHits.slice(0, 8).map((h) => ({ d: h.metadata.docidentifier ?? "", a: h.metadata.clause_anchor ?? "", t: (h.text ?? "").slice(0, h.metadata.block === "table" ? 1400 : 600), b: h.metadata.block === "table" || void 0, ...h.metadata.table_selection ? { s: h.metadata.table_selection } : {} }))
         });
-        return new Response(sse, {
-          headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "x-accel-buffering": "no", ...corsHeaders(req) }
-        });
+        telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q2.lang, void 0, telemetryMeta());
+        const canonical = c2.text;
+        let streamedEntailment = null;
+        let streamedNote = "";
+        if (THRESHOLDS.entailmentGate && sourceQuality && usedHits.length && !canonical.includes(refusalAnswer())) {
+          const raced = await Promise.race([
+            scoreFaithfulness(env.AI, roleModel(env, "grader"), canonical, usedHits.map((h) => h.text)),
+            new Promise((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs))
+          ]);
+          if (raced) {
+            const v = entailmentVerdict(raced.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
+            streamedEntailment = { support: v.support, score: Math.round(raced.score * 100) / 100, ...raced.ungrounded_claims?.length ? { ungrounded: raced.ungrounded_claims.slice(0, 3) } : {} };
+            streamedNote = v.note;
+            if (v.support !== "supported") console.log("entailment(stream):", v.support, raced.score);
+            send({ type: "confidence", source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality), ...streamedEntailment ? { entailment: streamedEntailment } : {} });
+          }
+        }
+        const streamedAnchors = checkQuoteAnchors(canonical, usedHits.map((h) => h.text));
+        const streamedRetyped = tableRetyped(canonical, usedHits.some((h) => h.metadata.unit_id && h.metadata.block === "table"));
+        const streamed = { total: streamedAnchors.total, violations: streamedRetyped ? ["table-retyped"] : streamedAnchors.violations };
+        if (streamed.violations.length > 0) {
+          console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified \u2014 not caching");
+        }
+        if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
+          ctx.waitUntil(
+            env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q2.query, q2.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}, ...streamedEntailment ? { entailment: streamedEntailment } : {} }), { expirationTtl: LIMITS.cacheTtlSec })
+          );
+        }
+        live2.close();
+      } else {
+        live2.send({ type: "token", v: "The generation model is unavailable; please retry." });
+        live2.send({ type: "done", model: MODELS.member, query_hash: "", context_applied: NO_CONTEXT });
+        live2.close();
+        return null;
+      }
+      return null;
+    }
+    const tGen = Date.now();
+    let answer = null;
+    if (ablate?.speculative) {
+      const spec = await speculativeDraftVerify(env, {
+        query: q2.query,
+        hits: usedHits,
+        lang: q2.lang,
+        draftModel: MODELS.member,
+        verifierModel: roleModel(env, "verifier")
+      }).catch((e) => {
+        console.log("speculative: failed, falling through \u2014", String(e).slice(0, 120));
+        return null;
+      });
+      if (spec) {
+        answer = spec.answer;
+        stageTiming.speculative = Date.now() - tGen;
+        console.log("speculative:", spec.nDrafts, "drafts,", spec.chosen, "viable \u2014 verified");
       }
     }
-    let answer2 = await generateOnce(env, model, messages2, effort);
-    if (answer2 === null) answer2 = await generateOnce(env, MODELS.fallback, messages2, effort);
-    if (answer2 === null) {
-      telemetry(env, ctx, tier, "ask", model, false, 0, queryHash2, q.lang, void 0, telemetryMeta());
+    if (!answer) answer = await generateOnce(env, model, messages, routeEffort(routed.route));
+    if (answer === null) {
+      generateRetries += 1;
+      const isFigureAttachMessage = (m) => Array.isArray(m.content) && m.content.some((part) => part?.type === "text" && /^The original image of figure unit /.test(part.text ?? ""));
+      const flat = messages.filter((m) => !isFigureAttachMessage(m)).map(
+        (m) => typeof m.content === "string" ? m : { ...m, content: m.content.filter((p) => p?.type === "text").map((p) => (p?.text ?? "").replace(/\n?\(The user attached an image with this question; interpret it directly when answering\.\)/, "")).join("\n") }
+      );
+      answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
+    }
+    if (answer === null) {
+      telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q2.lang, void 0, telemetryMeta());
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
-    telemetry(env, ctx, tier, "ask", model, true, answer2.length, queryHash2, q.lang, void 0, telemetryMeta());
-    return json({ answer: answer2, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: NO_CONTEXT, read: readAs(), quota });
-  }
-  if (draftAct) {
-    const draftCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
-    const queryHash2 = await sha256Hex(q.query);
-    const liveCfg = liveDataConfig(env);
-    const sessionRaw = rawSessionToken(req);
-    let delegation;
-    if (!member || !sessionRaw) delegation = { status: "unsigned" };
-    else if (!liveCfg) delegation = { status: "not_configured" };
-    else {
-      const exchanged = await liveTokenFor(env, sessionRaw, member);
-      delegation = exchanged.ok ? { status: "ok", token: exchanged.token } : { status: exchanged.reason };
-    }
-    const verdict = await prepareDraft(env, {
-      act: draftAct,
-      query: q.query,
-      history: keptHistory,
-      member,
-      delegation,
-      platformClientId: liveCfg?.platformClientId,
-      model: roleModel(env, "understand")
-    });
-    console.log("draft act:", draftAct, "\u2192", verdict.status === "draft" ? `draft (${Object.keys(verdict.draft.fields).length} fields)` : `refused (${verdict.reason})`);
-    const citations2 = verdict.citation ? [{ ...verdict.citation, corpus: P().publisher.id }] : [];
-    const draftPayload = verdict.status === "draft" ? verdict.draft : void 0;
-    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash2, q.lang, void 0, telemetryMeta());
-    if (wantsStream) {
-      return sseResponse(
-        [
-          ...readAs() ? [{ type: "read", read: readAs() }] : [],
-          { type: "citations", citations: citations2, context_applied: draftCtxApplied, ...draftPayload ? { draft: draftPayload } : {}, quota },
-          { type: "token", v: verdict.answer },
-          { type: "done", model, query_hash: queryHash2, context_applied: draftCtxApplied, read: readAs(), ...ablate ? { ablate } : {} }
-        ],
-        corsHeaders(req)
-      );
-    }
-    const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q.query.length, verdict.answer.length);
-    return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, ...ablate ? { ablate } : {}, quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
-  }
-  if (apiCallIntent) {
-    const callCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
-    const queryHash2 = await sha256Hex(q.query);
-    const verdict = await prepareApiCall(env, {
-      intent: apiCallIntent,
-      query: q.query,
-      history: keptHistory,
-      member,
-      declared: declaredCtx,
-      model: roleModel(env, "acts")
-    });
-    console.log("api_call draft:", apiCallIntent, "\u2192", verdict.status === "draft" ? `draft (${verdict.draft.call.method} ${verdict.draft.call.path})` : `refused (${verdict.reason})`);
-    const draftPayload = verdict.status === "draft" ? verdict.draft : void 0;
-    telemetry(env, ctx, tier, "ask", model, true, verdict.answer.length, queryHash2, q.lang, void 0, telemetryMeta());
-    if (wantsStream) {
-      return sseResponse(
-        [
-          ...readAs() ? [{ type: "read", read: readAs() }] : [],
-          { type: "citations", citations: [], context_applied: callCtxApplied, ...draftPayload ? { draft: draftPayload } : {}, quota },
-          { type: "token", v: verdict.answer },
-          { type: "done", model, query_hash: queryHash2, context_applied: callCtxApplied, read: readAs(), ...ablate ? { ablate } : {} }
-        ],
-        corsHeaders(req)
-      );
-    }
-    const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q.query.length, verdict.answer.length);
-    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, ...ablate ? { ablate } : {}, quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
-  }
-  let liveRecords;
-  let accountNote;
-  const modelDocHint = named ?? docScope ?? namedDocumentIn(q.query);
-  const boundModel = P().publisher.features?.model_plane ? await bindModelNode(env, {
-    label: declaredCtx?.label,
-    query: q.query,
-    standard: standardForDocNumber(modelDocHint?.doc_number),
-    standardKeys
-  }) ?? await bindConstraintByQuantities(env, q.query, standardKeys) : null;
-  if (boundModel) {
-    ctxApplied = { ...ctxApplied, model: modelEcho(boundModel) };
-    console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause", boundModel.gated ? "(gated: license)" : "");
-  }
-  const modelNote = boundModel && !boundModel.gated ? modelGroundingBlock(boundModel) : void 0;
-  let machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? evaluate(boundModel.content, q.query) : null;
-  if (machineVerdict === null && boundModel && !boundModel.gated) {
-    try {
-      const unitTokens = [...new Set(Object.values(extractParamsWithUnits(q.query, symbolsIn(extractChecks(boundModel.content))).units).map((u) => u.toLowerCase()))];
-      if (unitTokens.length) {
-        const marks = unitTokens.map(() => "?").join(",");
-        const rows = await env.DB.prepare(
-          `SELECT lower(coalesce(json_extract(symbols, '$.ascii'), json_extract(symbols, '$.unicode'))) AS sym, dimension_ascii FROM units_db WHERE lower(coalesce(json_extract(symbols, '$.ascii'), json_extract(symbols, '$.unicode'))) IN (${marks})`
-        ).bind(...unitTokens).all().catch(() => ({ results: [] }));
-        const dimensions = {};
-        for (const r of rows.results ?? []) dimensions[String(r.sym)] = String(r.dimension_ascii ?? "");
-        machineVerdict = evaluate(boundModel.content, q.query, { dimensions });
-      }
-    } catch {
-    }
-  }
-  const machineNote = machineVerdict && boundModel ? verdictNote(machineVerdict, boundModel) : void 0;
-  const modelNodeRows = async (kind, docNum) => {
-    const attempt = (num3) => {
-      const sql = num3 ? `SELECT standard, node_id, content FROM model_nodes WHERE kind = '${kind}' AND standard LIKE '%' || ?1` : `SELECT standard, node_id, content FROM model_nodes WHERE kind = '${kind}'`;
-      return num3 ? env.DB.prepare(sql).bind(num3) : env.DB.prepare(sql);
-    };
-    let rows = await attempt(docNum).all().catch(() => ({ results: [] }));
-    if (!(rows.results ?? []).length && docNum && docNum.includes("-")) {
-      rows = await attempt(docNum.replace(/-\d+$/, "")).all().catch(() => ({ results: [] }));
-    }
-    return rows;
-  };
-  let conditionVerdict = null;
-  let conditionStandard = null;
-  if (!machineVerdict && !boundModel && !ablate?.noVerdict && P().publisher.features?.model_plane) {
-    const ql = q.query.toLowerCase();
-    const severityWord = /\b(severity|test|valid|tolerance|condition|within)\b/.test(ql);
-    const stated = quantitiesIn(q.query);
-    if (severityWord && Object.keys(stated).length >= 1) {
-      const docNum = modelDocHint?.doc_number;
-      const rows = await modelNodeRows("condition_set", docNum);
-      const candidates = (rows.results ?? []).filter((r) => {
-        const entry = licensedEntryForPackage(String(r.standard));
-        return !entry || (standardKeys?.has(entry.key) ?? false);
-      });
-      const v = evaluateConditionSets(
-        candidates.map((r) => ({ node_id: String(r.node_id), content: JSON.parse(String(r.content ?? "{}")) })),
-        q.query
-      );
-      if (v) {
-        conditionVerdict = v;
-        conditionStandard = String(rows.results?.[0]?.standard ?? "");
-      }
-    }
-  }
-  const conditionNote = conditionVerdict && conditionStandard ? `${conditionVerdict.note} (computed from the ${conditionStandard} condition sets \u2014 machine evaluation, cite the package's clause.)` : void 0;
-  const verdictBlock = machineVerdict ? {
-    unit_id: boundModel.node_id,
-    type: "verdict",
-    docidentifier: `${P().publisher.name} model (${boundModel.standard})`,
-    payload: {
-      verdict: machineVerdict.verdict,
-      on_violation: machineVerdict.on_violation,
-      violation_meaning: machineVerdict.violation_meaning,
-      missing: machineVerdict.missing,
-      checks: machineVerdict.checks
-    }
-  } : null;
-  if (machineVerdict) console.log("verdict engine:", boundModel.node_id, "\u2192", machineVerdict.verdict.toUpperCase(), machineVerdict.missing.length ? `(missing ${machineVerdict.missing.join(",")})` : "");
-  const conditionBlock = conditionVerdict ? {
-    unit_id: conditionVerdict.matched[0] ?? conditionVerdict.nearest.node_id,
-    type: "verdict",
-    docidentifier: `${P().publisher.name} model (${conditionStandard})`,
-    payload: {
-      verdict: conditionVerdict.verdict,
-      missing: [],
-      checks: conditionVerdict.checks.map((c) => ({
-        expression: `${c.quantity_kind} within ${c.band}`,
-        values: { stated: c.stated },
-        result: c.in_band
-      })),
-      ...conditionVerdict.nearest ? { nearest: conditionVerdict.nearest } : { matched: conditionVerdict.matched }
-    }
-  } : null;
-  if (conditionVerdict) console.log("condition engine:", conditionVerdict.matched.join("|") || conditionVerdict.nearest.node_id, "\u2192", conditionVerdict.verdict.toUpperCase());
-  let aggregationVerdict = null;
-  let aggregationStandard = null;
-  if (!machineVerdict && !boundModel && !conditionVerdict && P().publisher.features?.model_plane) {
-    const docNum = modelDocHint?.doc_number;
-    const rows = await modelNodeRows("table", docNum);
-    const candidates = (rows.results ?? []).filter((r) => {
-      const entry = licensedEntryForPackage(String(r.standard));
-      return !entry || (standardKeys?.has(entry.key) ?? false);
-    });
-    const v = evaluateAggregation(
-      candidates.map((r) => ({ node_id: String(r.node_id), content: JSON.parse(String(r.content ?? "{}")) })),
-      q.query
-    );
-    if (v) {
-      aggregationVerdict = v;
-      aggregationStandard = String(rows.results?.[0]?.standard ?? "");
-    }
-  }
-  const aggregationNote = aggregationVerdict ? `${aggregationVerdict.note}${aggregationStandard ? ` (standard ${aggregationStandard}.)` : ""}` : void 0;
-  const aggregationBlock = aggregationVerdict ? {
-    unit_id: aggregationVerdict.table,
-    type: "verdict",
-    docidentifier: `${P().publisher.name} model table${aggregationStandard ? ` (${aggregationStandard})` : ""}`,
-    payload: {
-      check: `${aggregationVerdict.operation}: ${aggregationVerdict.column ?? aggregationVerdict.table_title ?? aggregationVerdict.table} = ${aggregationVerdict.value}${aggregationVerdict.unit ? ` ${aggregationVerdict.unit}` : ""}`,
-      meaning: aggregationVerdict.table_title,
-      operation: aggregationVerdict.operation,
-      value: aggregationVerdict.value,
-      unit: aggregationVerdict.unit,
-      row: aggregationVerdict.row
-    }
-  } : null;
-  if (aggregationVerdict) console.log("aggregation engine:", aggregationVerdict.operation, aggregationVerdict.table, "\u2192", aggregationVerdict.value);
-  let boundaryNote = null;
-  let boundaryBoost;
-  let licensedDocNumbers;
-  let editionBoost;
-  try {
-    const fam = understanding?.doc ? refCodec().familyOf(understanding.doc) : null;
-    if (fam) {
-      const row = await env.DB.prepare("SELECT edition FROM documents WHERE family = ?1 AND active = 1 ORDER BY edition DESC LIMIT 1").bind(fam).first().catch(() => null);
-      if (row?.edition) editionBoost = String(row.edition);
-    }
-  } catch {
-  }
-  const lexicalBoost = [boundaryBoost, editionBoost].filter(Boolean).join(" ") || void 0;
-  if (P().sources?.licensed?.length) {
-    const match = matchLicensedTopic(q.query, P().sources.licensed);
-    if (match && (standardKeys?.has(match.entry.key) ?? false)) {
-      licensedDocNumbers = match.entry.package ? [match.entry.package] : void 0;
-    } else if (match && !(standardKeys?.has(match.entry.key) ?? false)) {
-      const docNum = match.entry.doc_number ?? "";
-      boundaryBoost = docNum || void 0;
-      let citing = [];
-      if (docNum) {
-        const rows = await env.DB.prepare(
-          "SELECT n.label AS label FROM graph_edges e JOIN graph_nodes n ON e.src = n.id WHERE e.kind = 'cites' AND e.dst LIKE ?1 LIMIT 4"
-        ).bind(`%${docNum}%`).all().catch(() => ({ results: [] }));
-        citing = (rows.results ?? []).map((r) => String(r.label ?? "").replace(/^doc:/, ""));
-      }
-      boundaryNote = boundaryNoteText(match, citing);
-    }
-  }
-  const routeMode = ablate?.route ?? "adaptive";
-  const routed = routeMode === "adaptive" ? routeFor(understanding, q.query) : { route: routeMode, features: [`forced-${routeMode}`] };
-  const routeSubset = ablate?.stages ?? (routed.route === "fast" ? fastRouteStages(STAGE_NAMES) : null);
-  if (routeSubset) console.log("route:", routed.route, routed.features.join("+"), "\u2014", STAGE_NAMES.length - routeSubset.length, "lanes dropped");
-  try {
-    const tR = Date.now();
-    if (declaredCtx?.kind === "account") {
-      const live = await resolveLiveAccount(env, rawSessionToken(req), member);
-      if (live.status === "ok") {
-        liveRecords = live.records;
-        ctxApplied = appliedContext(declaredCtx, null, void 0, {
-          read_at: live.readAt,
-          stores: live.stores,
-          records: live.records.length
-        });
-        const lines = live.records.map(
-          (r) => `- ${r.label} [${[r.status, r.detail].filter(Boolean).join("; ")}] ${r.url}`
+    const scrubToolLines = (t) => t.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, "");
+    if (answer) answer = scrubToolLines(answer);
+    if (answer) answer = canonicalRefusal(answer, refusalScope(answerCites(answer)));
+    if (answer) answer = scrubToolLines(answer);
+    if (answer) answer = exciseMisplacedPin(answer, answerCites(answer));
+    stageTiming.generate = Date.now() - tGen;
+    let used = usedHits;
+    if (answer && !answer.includes(refusalAnswer())) {
+      const anchors = checkQuoteAnchors(answer, used.map((h) => h.text));
+      const hasTableUnit = used.some((h) => h.metadata.unit_id && h.metadata.block === "table");
+      const retyped = tableRetyped(answer, hasTableUnit);
+      const unreferenced = (() => {
+        if (!hasTableUnit || answer.includes("[[u:")) return false;
+        const norm2 = (s) => (s.match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, ""));
+        const nums = norm2(answer);
+        if (nums.length < 2) return false;
+        const tableNums = new Set(
+          norm2(used.filter((h) => h.metadata.unit_id && h.metadata.block === "table").map((h) => h.text).join(" "))
         );
-        accountNote = `Live account data (read ${live.readAt} from ${P().prompts.vars.account_note_source ?? `the user's own ${P().publisher.product_name} account`} \u2014 exactly what they may see, never more):
-` + (lines.length ? lines.join("\n") : "(the account surfaces answered empty)") + `
-Answer account questions from these records ONLY: name the record when you use it, never invent one, and say honestly when they do not hold the answer. The corpus passages still ground the regulatory claims (the requirements, the procedures); the records are the user's own work.`;
-        console.log("live data:", live.records.length, "records from", live.stores.join("+") || "none");
-      } else {
-        const note = live.reason === "sign_in_required" ? "sign-in-required" : live.reason === "window_expired" ? "live-window-expired" : "live-unavailable";
-        ctxApplied = appliedContext(declaredCtx, null, note);
-        accountNote = live.reason === "sign_in_required" ? "Context note: the user asked with the 'my account' context but is not signed in \u2014 the account data was NOT read; answer from the corpus and say so." : live.reason === "window_expired" ? "Context note: the user's live access window lapsed \u2014 the account data was NOT read; answer from the corpus, say the live read did not happen, and suggest signing in again to refresh it." : "Context note: the live account read was refused or unreachable \u2014 the account data was NOT read; answer from the corpus and say so honestly.";
-        console.log("live data: not read \u2014", live.reason);
+        return nums.filter((n) => tableNums.has(n)).length >= 2;
+      })();
+      if (anchors.violations.length > 0 || retyped || unreferenced || toolNarration(answer)) {
+        console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "; toolNarration:", toolNarration(answer), "\u2014 regenerating");
+        const tableUnitId = unreferenced ? used.find((h) => h.metadata.unit_id && h.metadata.block === "table")?.metadata.unit_id : void 0;
+        const note = toolNarration(answer) ? TOOL_NARRATION_NOTICE : retyped || unreferenced ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.` : ANCHOR_CORRECTION_NOTE;
+        generateRetries += 1;
+        const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], routeEffort(routed.route));
+        if (corrected) {
+          const correctedAnswer = canonicalRefusal(corrected, refusalScope(answerCites(corrected)));
+          const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h) => h.text));
+          const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
+          if (retryAnchors.violations.length < anchors.violations.length || !retryRetyped && retyped || unreferenced && correctedAnswer.includes("[[u:") || !toolNarration(correctedAnswer)) {
+            answer = correctedAnswer;
+          }
+        }
       }
     }
-    retrieved = await retrieve(env, q.query, {
-      prev,
-      understanding,
-      federate,
-      warmEmbed,
-      graphDocNumbers,
-      sealScope: declaredScoped ? docScope : null,
-      optimisticHits,
-      optimisticVec,
-      datasetScope: narrowed ? corpora : null,
-      standardKeys,
-      lexicalBoost,
-      licensedDocNumbers,
-      ...routeSubset ? { stageSubset: routeSubset } : {}
-    });
-    stageTiming["retrieve-core"] = Date.now() - tR;
-    console.log("stage: retrieve", Date.now() - tR, "ms");
-    const docScoped = !!understanding?.doc_number;
-    const gradePromise = docScoped ? Promise.resolve("skipped-doc-scoped") : (() => {
-      const tg = Date.now();
-      return gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, retrieved.hits.map((h) => h.text)).catch(() => null).finally(() => stageTiming["grade"] = Date.now() - tg);
-    })();
-    if (retrieved.hits.length >= 4 && (member || understanding?.complexity === "complex")) {
-      const tl = Date.now();
-      const reordered = await listwiseRerank(env, MODELS.listwise, understanding?.standalone_query || q.query, retrieved.hits);
-      stageTiming.listwise = Date.now() - tl;
-      if (reordered) {
-        console.log("listwise: reordered", reordered[0]?.metadata?.docidentifier ?? "?", "to top");
-        retrieved = { ...retrieved, hits: reordered };
-      }
-    }
-    const grade = await gradePromise;
-    stageTiming.retrieve = Date.now() - tR;
-    console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
-    if (grade === "weak" && understanding?.docidentifier) {
-      const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
-      const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...routeSubset ? { stageSubset: routeSubset } : {} });
-      const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h) => h.text));
-      stageTiming.corrective = Date.now() - tc;
-      if (grade2 === "good") retrieved = second;
-    }
-  } catch (e) {
-    console.log("ask: retrieval failed:", String(e).slice(0, 300));
-    telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q.query), q.lang, void 0, telemetryMeta());
-    return err(503, "retrieval_unavailable", "Search is briefly busy \u2014 please retry in a moment.");
-  }
-  const { hits } = retrieved;
-  if (hits.length === 0 && !liveRecords?.length && (!boundModel || boundModel.gated)) {
-    const answer2 = licenseBoundaryRefusal(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys) ?? refusalAnswer();
-    const out2 = { answer: answer2, citations: [], model, query_hash: await sha256Hex(q.query), context_applied: ctxApplied, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
-    telemetry(env, ctx, tier, "ask", model, true, answer2.length, out2.query_hash, q.lang, void 0, telemetryMeta());
-    return json({ ...out2, quota });
-  }
-  const processNote = understanding?.process_intent ? P().retrieval.process_note : void 0;
-  const licenseNote = licenseBoundaryNote(modelDocHint?.doc_number ?? understanding?.doc_number ?? null, standardKeys);
-  const glossaryForNote = (() => {
-    const g = retrieved.glossary ?? [];
-    if (!g.length) return g;
-    const dt = (understanding?.defined_terms ?? []).map((s) => s.toLowerCase());
-    if (!dt.length) return g;
-    const matched = g.filter((x) => dt.some((d) => x.term.toLowerCase().includes(d.split(" ")[0]) || d.includes(x.term.toLowerCase().split(" ")[0])));
-    return matched.length ? matched : g;
-  })();
-  const vocabNote = glossaryForNote.length ? "Vocabulary binding \u2014 defined terms in the indexed corpus that may name this question's subject:\n" + glossaryForNote.map((g) => `- ${g.term} (${g.docidentifier}): ${g.definition}`).join("\n") + "\nIf the question describes a symptom or behavior in everyday words, OPEN the answer by naming the matching defined term, quote its definition, and cite its defining publication; keep using that term throughout. Match TIME SCALE carefully: change under a constant load over minutes/hours is creep; change over months/years of use is span stability or durability \u2014 do not call long-term drift creep." : void 0;
-  const opsHits = ops.matched.map((m) => ({
-    id: `ops:${m.anchor}`,
-    score: 0.999,
-    metadata: {
-      doc_id: "smart-ops:catalog",
-      docidentifier: m.docidentifier ?? "Platform API",
-      doctype: "api-operation",
-      doc_number: "",
-      edition: "",
-      language: "en",
-      clause_anchor: m.anchor,
-      clause_title: `Platform operation ${m.anchor}`,
-      tier: "curated",
-      corpus: "smart-ops",
-      text_ref: ""
-    },
-    text: `${m.anchor} \u2014 ${m.text}`
-  }));
-  const { messages, usedHits } = buildMessages(
-    q.query,
-    [...opsHits, ...hits],
-    q.lang,
-    keptHistory,
-    // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [ops.note, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
-    summary,
-    budget
-  );
-  await attachFigureImages(env, messages, usedHits, q.query);
-  const pendingTools = [];
-  let probeTokensUsed = 0;
-  if (multiTurn && env.DB) {
-    try {
-      const imageTurn = typeof withImage === "string";
-      if (imageTurn) mark("Reading the photograph to identify the instrument");
-      for (let round = 0; round < 3; round++) {
-        const imageNote = imageTurn && round === 0 ? "A photograph of the instrument is attached after this message. Transcribe the maker, model and any printed certificate number you can read FROM THE PHOTOGRAPH ITSELF, then emit the TOOL line with those tokens as the query \u2014 never invented, and never tokens taken from any register content elsewhere in the context (a register row's holder is not the plate's maker; observed live 2026-10-04)." : "";
-        const continueNote = round > 0 ? "The tool results above are in hand. Answer now without a TOOL line, or issue exactly one more TOOL line if one more query is genuinely needed." : "";
-        const probeMessages = [...messages.slice(0, -1), { role: "user", content: [TOOL_DECLARATION, imageNote, continueNote, q.query].filter(Boolean).join("\n\n") }];
-        if (imageTurn && round === 0) probeMessages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
-        const probe = await env.AI.run(model, {
-          messages: probeMessages,
-          max_tokens: 700,
-          reasoning_effort: imageTurn && round === 0 ? "high" : "low"
+    if (answer && !answer.includes(refusalAnswer())) {
+      const reflection = await reflect(env.AI, MODELS.grader, q2.query, answer, hits.map((h) => h.text));
+      console.log("reflection:", reflection ? reflection.grounded ? "grounded" : "ungrounded" : "null");
+      if (reflection && !reflection.grounded && reflection.missing_info) {
+        const retryRetrieve = await retrieve(env, q2.query, {
+          prev,
+          understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q2.query} ${reflection.missing_info}` },
+          sealScope: declaredScoped ? docScope : null,
+          datasetScope: narrowed ? corpora : null,
+          standardKeys,
+          ...routeSubset ? { stageSubset: routeSubset ?? void 0 } : {}
         });
-        const probeText = typeof probe?.response === "string" ? probe?.response : probe?.choices?.[0]?.message?.content ?? "";
-        probeTokensUsed += usageTotal(probe?.usage) ?? 0;
-        const nativeCall = Array.isArray(probe?.tool_calls) ? probe.tool_calls[0]?.function : null;
-        const call = nativeCall ? {
-          name: String(nativeCall.name ?? ""),
-          args: (() => {
-            try {
-              return typeof nativeCall.arguments === "string" ? JSON.parse(nativeCall.arguments) : nativeCall.arguments ?? {};
-            } catch {
-              return {};
-            }
-          })()
-        } : parseToolCall(probeText);
-        if (!call || !call.name) break;
-        const result = await runTool(env, call);
-        if (!result) break;
-        mark(`${result.name} \u2014 ${result.query}`.slice(0, 140));
-        messages.push({ role: "system", content: toolNote(result) });
-        pendingTools.push(result);
-        console.log("agent-tool:", result.name, JSON.stringify(result.query), "->", result.output.slice(0, 80));
+        if (retryRetrieve.hits.length > 0) {
+          const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q2.query, retryRetrieve.hits, q2.lang, keptHistory, void 0, summary, budget);
+          const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
+          if (retryAnswer) {
+            answer = canonicalRefusal(retryAnswer, refusalScope(answerCites(retryAnswer)));
+            used = retryUsed;
+          }
+        }
       }
-    } catch {
     }
-  }
-  if (withImage) {
-    const wantsMarkings = /\b(mark(ing|ings)?|nameplate|label|inscription|engrav|sticker|plate)\b|certificat/i.test(q.query);
-    const last = messages[messages.length - 1];
-    const note = wantsMarkings ? "\n\n(The user attached a photo with this question. First transcribe every inscription you can actually read in the image \u2014 names, model references, accuracy classes, numeric values with their units, certificate or approval numbers \u2014 quoting them verbatim. Then answer the question from the numbered passages, citing the requirement each interpretation rests on. If an inscription is unreadable, say so; never invent a marking.)" : "\n\n(The user attached an image with this question; interpret it directly when answering.)";
-    if (typeof last.content === "string") {
-      last.content = last.content + note;
-    } else {
-      const textPart = last.content.find((p) => p.type === "text");
-      if (textPart) textPart.text += note;
+    if (answer === null) {
+      telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q2.lang, void 0, telemetryMeta());
+      return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
-    messages.push({ role: "user", content: [{ type: "image_url", image_url: { url: withImage } }] });
-    console.log("user image attached to generation");
-  }
-  const queryHash = await sha256Hex(q.query);
-  const cites = boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits);
-  if (wantsStream) {
-    const stream = await generateStream(env, model, messages, routeEffort(routed.route));
-    if (stream) {
-      const encoder = new TextEncoder();
-      const sse = new ReadableStream({
-        async start(controller) {
-          const send = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}
-
-`));
-          for (const step of agentSteps) {
-            try {
-              send({ type: "agent", step });
-            } catch {
-            }
-          }
-          for (const t of pendingTools) {
-            try {
-              send({ type: "tool", name: t.name, query: t.query });
-            } catch {
-            }
-          }
-          send({ type: "read", read: readAs() });
-          const sourceQuality = answerQuality(cites.map((c) => c.quality));
-          send({ type: "citations", citations: cites, context_applied: ctxApplied, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: qualityNote(sourceQuality), ...sourceQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(cites) } : {} } : {}, ...liveRecords ? { records: liveRecords } : {}, quota });
-          const stats = {};
-          let full = "";
-          try {
-            let headSettled = false;
-            for await (const tok of sseTokens(stream, stats)) {
-              full += tok;
-              if (headSettled) {
-                send({ type: "token", v: tok });
-                continue;
-              }
-              if (full.length < 80) continue;
-              headSettled = true;
-              if (toolNarration(full)) {
-                console.log("tool-narration(stream): regenerating once");
-                send({ type: "retry" });
-                const regen = await generateStream(env, model, [
-                  ...messages,
-                  { role: "system", content: TOOL_NARRATION_NOTICE }
-                ], routeEffort(routed.route));
-                if (regen) {
-                  full = "";
-                  for await (const tok2 of sseTokens(regen, stats)) {
-                    full += tok2;
-                    send({ type: "token", v: tok2 });
-                  }
-                } else {
-                  send({ type: "token", v: full });
-                }
-                break;
-              }
-              send({ type: "token", v: full });
-            }
-            if (!headSettled) {
-              headSettled = true;
-              if (!toolNarration(full)) send({ type: "token", v: full });
-            }
-          } catch {
-          }
-          const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length, probeTokensUsed);
-          send({ type: "quota", quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
-          if (withImage && register?.rows?.length && full.includes(refusalAnswer())) {
-            console.log("blind-answer(stream): regenerating once");
-            mark("Re-answering from the register results");
-            send({ type: "retry" });
-            const regen = await generateStream(env, model, [
-              ...messages.slice(0, -1),
-              { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
-              messages[messages.length - 1]
-            ], routeEffort(routed.route));
-            if (regen) {
-              full = "";
-              try {
-                for await (const tok of sseTokens(regen)) {
-                  full += tok;
-                  send({ type: "token", v: tok });
-                }
-              } catch {
-              }
-            }
-          }
-          const canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
-          const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
-          send({
-            type: "done",
-            model,
-            query_hash: queryHash,
-            follow_ups: refusalShaped(canonical0, refusalScope(answerCites(full))) ? [] : understanding?.follow_ups ?? [],
-            blocks: [...c2.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : []],
-            context_applied: ctxApplied,
-            read: readAs(),
-            // the evidence view's ground truth: the exact passages this
-            // answer was built from, compact — cache hits carry none,
-            // because the cache stores the answer and never the passages
-            passages: usedHits.slice(0, 8).map((h) => ({ d: h.metadata.docidentifier ?? "", a: h.metadata.clause_anchor ?? "", t: (h.text ?? "").slice(0, h.metadata.block === "table" ? 1400 : 600), b: h.metadata.block === "table" || void 0, ...h.metadata.table_selection ? { s: h.metadata.table_selection } : {} }))
-          });
-          telemetry(env, ctx, tier, "ask", model, true, c2.text.length, queryHash, q.lang, void 0, telemetryMeta());
-          const canonical = c2.text;
-          let streamedEntailment = null;
-          let streamedNote = "";
-          if (THRESHOLDS.entailmentGate && sourceQuality && usedHits.length && !canonical.includes(refusalAnswer())) {
-            const raced = await Promise.race([
-              scoreFaithfulness(env.AI, roleModel(env, "grader"), canonical, usedHits.map((h) => h.text)),
-              new Promise((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs))
-            ]);
-            if (raced) {
-              const v = entailmentVerdict(raced.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
-              streamedEntailment = { support: v.support, score: Math.round(raced.score * 100) / 100, ...raced.ungrounded_claims?.length ? { ungrounded: raced.ungrounded_claims.slice(0, 3) } : {} };
-              streamedNote = v.note;
-              if (v.support !== "supported") console.log("entailment(stream):", v.support, raced.score);
-              send({ type: "confidence", source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality), ...streamedEntailment ? { entailment: streamedEntailment } : {} });
-            }
-          }
-          const streamedAnchors = checkQuoteAnchors(canonical, usedHits.map((h) => h.text));
-          const streamedRetyped = tableRetyped(canonical, usedHits.some((h) => h.metadata.unit_id && h.metadata.block === "table"));
-          const streamed = { total: streamedAnchors.total, violations: streamedRetyped ? ["table-retyped"] : streamedAnchors.violations };
-          if (streamed.violations.length > 0) {
-            console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified \u2014 not caching");
-          }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
-            ctx.waitUntil(
-              env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}, ...streamedEntailment ? { entailment: streamedEntailment } : {} }), { expirationTtl: LIMITS.cacheTtlSec })
-            );
-          }
-          controller.close();
-        }
-      });
-      return new Response(sse, {
-        headers: {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          "x-accel-buffering": "no",
-          ...corsHeaders(req)
-        }
-      });
+    const finalCites = boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used);
+    const c2ns = answer.includes(refusalAnswer()) ? { text: answer, blocks: [], dropped: [] } : await contractV2(env.DB, answer, used);
+    answer = c2ns.text;
+    const finalAnchors = answer.includes(refusalAnswer()) ? { total: 0, violations: [] } : checkQuoteAnchors(answer, used.map((h) => h.text));
+    if (finalAnchors.violations.length > 0) {
+      console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified \u2014 not caching");
     }
-  }
-  const tGen = Date.now();
-  let answer = null;
-  if (ablate?.speculative) {
-    const spec = await speculativeDraftVerify(env, {
-      query: q.query,
-      hits: usedHits,
-      lang: q.lang,
-      draftModel: MODELS.member,
-      verifierModel: roleModel(env, "verifier")
-    }).catch((e) => {
-      console.log("speculative: failed, falling through \u2014", String(e).slice(0, 120));
-      return null;
+    let completionBlocks = [];
+    if (!answer.includes(refusalAnswer()) && !c2ns.blocks.some((b) => b.type === "table")) {
+      completionBlocks = await completeTables(env.DB, answer, used);
+      if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
+    }
+    completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
+    if (withImage && register?.rows?.length && answer.includes(refusalAnswer())) {
+      console.log("blind-answer: the register note carried rows but the answer refused \u2014 regenerating once");
+      mark("Re-answering from the register results");
+      const regen = await generateOnce(env, model, [
+        ...messages.slice(0, -1),
+        { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
+        messages[messages.length - 1]
+      ], effort);
+      if (regen && !regen.includes(refusalAnswer())) {
+        answer = canonicalRefusal(regen, refusalScope(answerCites(regen)));
+        console.log("blind-answer: regeneration grounded");
+      }
+    }
+    const jsonQuality = answerQuality(finalCites.map((c) => c.quality));
+    let entailment = null;
+    let entailmentNote = "";
+    if (THRESHOLDS.entailmentGate && jsonQuality && used.length && !answer.includes(refusalAnswer())) {
+      const raced = await Promise.race([
+        scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, used.map((h) => h.text)),
+        new Promise((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs))
+      ]);
+      if (raced) {
+        const v = entailmentVerdict(raced.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
+        entailment = { support: v.support, score: Math.round(raced.score * 100) / 100, ...raced.ungrounded_claims?.length ? { ungrounded: raced.ungrounded_claims.slice(0, 3) } : {} };
+        entailmentNote = v.note;
+        if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
+      }
+    }
+    const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer, refusalScope(answerCites(answer))) ? [] : understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
+    const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer))) && finalAnchors.violations.length === 0;
+    if (cacheable) {
+      const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q2.query, q2.lang, salt)));
+      ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
+    }
+    telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q2.lang, void 0, telemetryMeta());
+    const contextOut = used.map((h) => ({
+      doc_id: h.metadata.doc_id,
+      clause_anchor: h.metadata.clause_anchor,
+      text: h.text.slice(0, 1200),
+      ...h.metadata.table_selection ? { sel: h.metadata.table_selection } : {}
+    }));
+    const tq = await chargeAnswerTokens(env, bucketId, void 0, messageChars(messages), answer.length, probeTokensUsed);
+    return json({ ...out, context: contextOut, read: readAs(), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
+  };
+  if (liveResponse) {
+    void pipeline(live, q).catch(() => {
+      try {
+        live.close();
+      } catch {
+      }
     });
-    if (spec) {
-      answer = spec.answer;
-      stageTiming.speculative = Date.now() - tGen;
-      console.log("speculative:", spec.nDrafts, "drafts,", spec.chosen, "viable \u2014 verified");
-    }
+    return liveResponse;
   }
-  if (!answer) answer = await generateOnce(env, model, messages, routeEffort(routed.route));
-  if (answer === null) {
-    generateRetries += 1;
-    const isFigureAttachMessage = (m) => Array.isArray(m.content) && m.content.some((part) => part?.type === "text" && /^The original image of figure unit /.test(part.text ?? ""));
-    const flat = messages.filter((m) => !isFigureAttachMessage(m)).map(
-      (m) => typeof m.content === "string" ? m : { ...m, content: m.content.filter((p) => p?.type === "text").map((p) => (p?.text ?? "").replace(/\n?\(The user attached an image with this question; interpret it directly when answering\.\)/, "")).join("\n") }
-    );
-    answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
-  }
-  const scrubToolLines = (t) => t.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, "");
-  if (answer) answer = scrubToolLines(answer);
-  if (answer) answer = canonicalRefusal(answer, refusalScope(answerCites(answer)));
-  if (answer) answer = scrubToolLines(answer);
-  if (answer) answer = exciseMisplacedPin(answer, answerCites(answer));
-  stageTiming.generate = Date.now() - tGen;
-  let used = usedHits;
-  if (answer && !answer.includes(refusalAnswer())) {
-    const anchors = checkQuoteAnchors(answer, used.map((h) => h.text));
-    const hasTableUnit = used.some((h) => h.metadata.unit_id && h.metadata.block === "table");
-    const retyped = tableRetyped(answer, hasTableUnit);
-    const unreferenced = (() => {
-      if (!hasTableUnit || answer.includes("[[u:")) return false;
-      const norm2 = (s) => (s.match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, ""));
-      const nums = norm2(answer);
-      if (nums.length < 2) return false;
-      const tableNums = new Set(
-        norm2(used.filter((h) => h.metadata.unit_id && h.metadata.block === "table").map((h) => h.text).join(" "))
-      );
-      return nums.filter((n) => tableNums.has(n)).length >= 2;
-    })();
-    if (anchors.violations.length > 0 || retyped || unreferenced || toolNarration(answer)) {
-      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "; toolNarration:", toolNarration(answer), "\u2014 regenerating");
-      const tableUnitId = unreferenced ? used.find((h) => h.metadata.unit_id && h.metadata.block === "table")?.metadata.unit_id : void 0;
-      const note = toolNarration(answer) ? TOOL_NARRATION_NOTICE : retyped || unreferenced ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.` : ANCHOR_CORRECTION_NOTE;
-      generateRetries += 1;
-      const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], routeEffort(routed.route));
-      if (corrected) {
-        const correctedAnswer = canonicalRefusal(corrected, refusalScope(answerCites(corrected)));
-        const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h) => h.text));
-        const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
-        if (retryAnchors.violations.length < anchors.violations.length || !retryRetyped && retyped || unreferenced && correctedAnswer.includes("[[u:") || !toolNarration(correctedAnswer)) {
-          answer = correctedAnswer;
-        }
-      }
-    }
-  }
-  if (answer && !answer.includes(refusalAnswer())) {
-    const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h) => h.text));
-    console.log("reflection:", reflection ? reflection.grounded ? "grounded" : "ungrounded" : "null");
-    if (reflection && !reflection.grounded && reflection.missing_info) {
-      const retryRetrieve = await retrieve(env, q.query, {
-        prev,
-        understanding: { ...understanding, standalone_query: `${understanding?.standalone_query || q.query} ${reflection.missing_info}` },
-        sealScope: declaredScoped ? docScope : null,
-        datasetScope: narrowed ? corpora : null,
-        standardKeys,
-        ...routeSubset ? { stageSubset: routeSubset } : {}
-      });
-      if (retryRetrieve.hits.length > 0) {
-        const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, void 0, summary, budget);
-        const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
-        if (retryAnswer) {
-          answer = canonicalRefusal(retryAnswer, refusalScope(answerCites(retryAnswer)));
-          used = retryUsed;
-        }
-      }
-    }
-  }
-  if (answer === null) {
-    telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, void 0, telemetryMeta());
-    return err(502, "generation_failed", "The generation model is unavailable; please retry.");
-  }
-  const finalCites = boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used);
-  const c2ns = answer.includes(refusalAnswer()) ? { text: answer, blocks: [], dropped: [] } : await contractV2(env.DB, answer, used);
-  answer = c2ns.text;
-  const finalAnchors = answer.includes(refusalAnswer()) ? { total: 0, violations: [] } : checkQuoteAnchors(answer, used.map((h) => h.text));
-  if (finalAnchors.violations.length > 0) {
-    console.log("anchors:", finalAnchors.violations.length, "of", finalAnchors.total, "unverified \u2014 not caching");
-  }
-  let completionBlocks = [];
-  if (!answer.includes(refusalAnswer()) && !c2ns.blocks.some((b) => b.type === "table")) {
-    completionBlocks = await completeTables(env.DB, answer, used);
-    if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
-  }
-  completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
-  if (withImage && register?.rows?.length && answer.includes(refusalAnswer())) {
-    console.log("blind-answer: the register note carried rows but the answer refused \u2014 regenerating once");
-    mark("Re-answering from the register results");
-    const regen = await generateOnce(env, model, [
-      ...messages.slice(0, -1),
-      { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
-      messages[messages.length - 1]
-    ], effort);
-    if (regen && !regen.includes(refusalAnswer())) {
-      answer = canonicalRefusal(regen, refusalScope(answerCites(regen)));
-      console.log("blind-answer: regeneration grounded");
-    }
-  }
-  const jsonQuality = answerQuality(finalCites.map((c) => c.quality));
-  let entailment = null;
-  let entailmentNote = "";
-  if (THRESHOLDS.entailmentGate && jsonQuality && used.length && !answer.includes(refusalAnswer())) {
-    const raced = await Promise.race([
-      scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, used.map((h) => h.text)),
-      new Promise((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs))
-    ]);
-    if (raced) {
-      const v = entailmentVerdict(raced.score, THRESHOLDS.entailmentSupportedFloor, THRESHOLDS.entailmentPartialFloor);
-      entailment = { support: v.support, score: Math.round(raced.score * 100) / 100, ...raced.ungrounded_claims?.length ? { ungrounded: raced.ungrounded_claims.slice(0, 3) } : {} };
-      entailmentNote = v.note;
-      if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
-    }
-  }
-  const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer, refusalScope(answerCites(answer))) ? [] : understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
-  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer))) && finalAnchors.violations.length === 0;
-  if (cacheable) {
-    const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
-    ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
-  }
-  telemetry(env, ctx, tier, "ask", model, true, answer.length, queryHash, q.lang, void 0, telemetryMeta());
-  const contextOut = used.map((h) => ({
-    doc_id: h.metadata.doc_id,
-    clause_anchor: h.metadata.clause_anchor,
-    text: h.text.slice(0, 1200),
-    ...h.metadata.table_selection ? { sel: h.metadata.table_selection } : {}
-  }));
-  const tq = await chargeAnswerTokens(env, bucketId, void 0, messageChars(messages), answer.length, probeTokensUsed);
-  return json({ ...out, context: contextOut, read: readAs(), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
-}
-function sseResponse(events, cors) {
-  const encoder = new TextEncoder();
-  const body = events.map((e) => `data: ${JSON.stringify(e)}
-
-`).join("");
-  return new Response(encoder.encode(body), {
-    headers: {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      "x-accel-buffering": "no",
-      ...cors
-    }
-  });
+  return await pipeline(null, q);
 }
 
 export {

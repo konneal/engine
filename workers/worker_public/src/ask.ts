@@ -468,6 +468,26 @@ async function handleAsk(
     console.log(`agent-step: ${step}`);
   };
 
+  // THE STREAM-FIRST HOIST (the owner's directive: users see every call as
+  // it runs): the SSE response returns NOW — before the vision step, the
+  // understanding, the register bridge — so every agent step streams to
+  // the user at the moment it runs, never replayed from a buffer. The json
+  // lane leaves the channel null and the buffer still collects for its
+  // single response.
+  const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
+  if (wantsStream) {
+    const encoder = new TextEncoder();
+    let ctrl: ReadableStreamDefaultController<Uint8Array> | null = null;
+    const sse = new ReadableStream({
+      start(c) { ctrl = c; },
+    });
+    live = {
+      send: (ev: unknown) => { try { ctrl!.enqueue(encoder.encode(`data: ${JSON.stringify(ev)}\n\n`)); } catch { /* the client went away */ } },
+      close: () => { try { ctrl!.close(); } catch { /* closed */ } },
+    };
+    liveResponse = new Response(sse, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "x-accel-buffering": "no", ...corsHeaders(req) } });
+  }
+
   // Members get federated retrieval (OIML + ISO/IEC) merged into the same
   // pipeline via the service binding; rag-public never touches the
   // internal index itself, and generation/rerank stay in ONE pipeline.
@@ -582,23 +602,7 @@ async function handleAsk(
   const gen = await corpusGen(env.CACHE);
   const withImage = effectiveImage || storedImage;
   const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage || ablate ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
-  const wantsStream = body?.stream === true || (tier === "anon" && body?.stream !== false);
-
   let probeTokensUsed = 0;
-  // THE STREAM-FIRST HOIST: the SSE response returns NOW — the pipeline
-  // below runs inside it, and every step and token streams as it happens.
-  if (wantsStream) {
-    const encoder = new TextEncoder();
-    let ctrl: ReadableStreamDefaultController<Uint8Array> | null = null;
-    const sse = new ReadableStream({
-      start(c) { ctrl = c; },
-    });
-    live = {
-      send: (ev: unknown) => { try { ctrl!.enqueue(encoder.encode(`data: ${JSON.stringify(ev)}\n\n`)); } catch { /* the client went away */ } },
-      close: () => { try { ctrl!.close(); } catch { /* closed */ } },
-    };
-    liveResponse = new Response(sse, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "x-accel-buffering": "no", ...corsHeaders(req) } });
-  }
 
   // THE PIPELINE: one body, two deliveries. Every `return` inside is an
   // exit — for the streamed lane each exit converts to its live events
@@ -844,6 +848,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // own reading is authoritative over the text lane's tokens ("this",
   // "have" — stopwords that can match an unrelated holder)
   if (nameplate?.manufacturer) {
+    mark(`certificates.search — ${nameplate.manufacturer}${nameplate.model ? ` ${nameplate.model}` : ""}`.slice(0, 140));
     const bridged = await searchRegister(env.DB, nameplateRegisterQuery(nameplate, q.query), true);
     if (bridged?.rows?.length) {
       register = bridged;
@@ -930,7 +935,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       ...keptHistory.slice(-6),
       { role: "user", content: q.query },
     ];
-    if (wantsStream && live) {
+    if (live) {
       // the reading arrives first — a conversational turn is still a reading
       if (readAs()) live!.send({ type: "read", read: readAs() });
       live!.send({ type: "citations", citations: [], context_applied: NO_CONTEXT, quota, });
@@ -1006,7 +1011,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     const citations = verdict.citation ? [{ ...verdict.citation, corpus: P().publisher.id }] : [];
     const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
     telemetry(env, ctx, tier, "ask", model, true, verdict.answer!.length, queryHash, q.lang, undefined, telemetryMeta());
-    if (wantsStream && live) {
+    if (live) {
       if (readAs()) live!.send({ type: "read", read: readAs() });
       live!.send({ type: "citations", citations, context_applied: draftCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, });
       live!.send({ type: "token", v: verdict.answer });
@@ -1041,7 +1046,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     console.log("api_call draft:", apiCallIntent, "→", verdict.status === "draft" ? `draft (${verdict.draft.call.method} ${verdict.draft.call.path})` : `refused (${verdict.reason})`);
     const draftPayload = verdict.status === "draft" ? verdict.draft : undefined;
     telemetry(env, ctx, tier, "ask", model, true, verdict.answer!.length, queryHash, q.lang, undefined, telemetryMeta());
-    if (wantsStream && live) {
+    if (live) {
       if (readAs()) live!.send({ type: "read", read: readAs() });
       live!.send({ type: "citations", citations: [], context_applied: callCtxApplied, ...(draftPayload ? { draft: draftPayload } : {}), quota, });
       live!.send({ type: "token", v: verdict.answer });
@@ -1495,7 +1500,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // the tool call — one reader, one tool, no parallel extraction racing a
   // second vision pass that drifts hour to hour. The old probe dropped the
   // image-bearing message, which is why the private bridge had to exist.
-  if (multiTurn && env.DB) {
+  if (multiTurn && env.DB && !nameplate?.manufacturer) {
     try {
       const imageTurn = typeof withImage === "string";
       if (imageTurn) mark("Reading the photograph to identify the instrument");
@@ -1580,7 +1585,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // provenance — ahead of the prose passages.
   const cites = boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits);
 
-  if (wantsStream) {
+  if (live) {
     const stream = await generateStream(env, model, messages, routeEffort(routed.route));
     if (stream) {
       const send = (obj: unknown) => live!.send(obj);
@@ -1717,14 +1722,16 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
             );
           }
           live!.close();
+      } else {
+        // the streamed lane's generation is unavailable — the line goes
+        // out on the already-open SSE; the json lane never enters this block
+        live!.send({ type: "token", v: "The generation model is unavailable; please retry." });
+        live!.send({ type: "done", model: MODELS.member, query_hash: "", context_applied: NO_CONTEXT });
+        live!.close();
+        return null;
       }
-    } else {
-      live!.send({ type: "token", v: "The generation model is unavailable; please retry." });
-      live!.send({ type: "done", model: MODELS.member, query_hash: "", context_applied: NO_CONTEXT });
-      live!.close();
       return null;
     }
-    return null;
 
   const tGen = Date.now();
   // ── speculative draft-verify (TODO.sota/02 row 2): when the ablation
@@ -1771,14 +1778,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
   if (answer === null) {
-    // both generations failed — the honest line reaches the user (live)
-    // or the json error shape (the API), never a dropped stream
-    if (live) {
-      live!.send({ type: "token", v: "The generation model is unavailable; please retry." });
-      live!.send({ type: "done", model: MODELS.member, query_hash: "", context_applied: NO_CONTEXT });
-      live!.close();
-      return null;
-    }
+    // both generations failed — the json lane returns the error shape; the
+    // streamed lane's equivalent lives inside the streamed block above
     telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, undefined, telemetryMeta());
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
@@ -1811,28 +1812,28 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   if (answer && !answer!.includes(refusalAnswer())) {
     const anchors = checkQuoteAnchors(answer!, used.map((h: Hit) => h.text));
     const hasTableUnit = used.some((h: Hit) => h.metadata.unit_id && h.metadata.block === "table");
-    const retyped = tableRetyped(answer, hasTableUnit);
+    const retyped = tableRetyped(answer!, hasTableUnit);
     // presenting a served table's DATA without its unit reference is the
     // same contract violation as retyping it — the HARD RULE wants the
     // token wherever the table's values carry the answer
     const unreferenced = (() => {
       if (!hasTableUnit || answer!.includes("[[u:")) return false;
       const norm = (s: string) => (s.match(/\d[\d ,.]{1,8}\d/g) ?? []).map((x) => x.replace(/[ ,.]/g, ""));
-      const nums = norm(answer);
+      const nums = norm(answer!);
       if (nums.length < 2) return false;
       const tableNums = new Set(
         norm(used.filter((h: Hit) => h.metadata.unit_id && h.metadata.block === "table").map((h: Hit) => h.text).join(" ")),
       );
       return nums.filter((n) => tableNums.has(n)).length >= 2;
     })();
-    if (anchors.violations.length > 0 || retyped || unreferenced || toolNarration(answer)) {
-      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "; toolNarration:", toolNarration(answer), "— regenerating");
+    if (anchors.violations.length > 0 || retyped || unreferenced || toolNarration(answer!)) {
+      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "; toolNarration:", toolNarration(answer!), "— regenerating");
       // name the EXACT unit the token must reference — a generic note
       // leaves the model guessing which id to write
       const tableUnitId = unreferenced
         ? used.find((h: Hit) => h.metadata.unit_id && h.metadata.block === "table")?.metadata.unit_id
         : undefined;
-      const note = toolNarration(answer)
+      const note = toolNarration(answer!)
         ? TOOL_NARRATION_NOTICE
         : retyped || unreferenced
         ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.`
@@ -1840,7 +1841,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       generateRetries += 1;
       const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], routeEffort(routed.route));
       if (corrected) {
-        const correctedAnswer = canonicalRefusal(corrected, refusalScope(answerCites(corrected)));
+        const correctedAnswer = canonicalRefusal(corrected!, refusalScope(answerCites(corrected!)));
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
         const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
         if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped) || (unreferenced && correctedAnswer.includes("[[u:")) || !toolNarration(correctedAnswer)) {
@@ -1866,7 +1867,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // retrieval with the missing-info hint (max one retry).
   // Ref: selfrag.github.io; arXiv 2606.05658 bounded reflection
   if (answer && !answer!.includes(refusalAnswer())) {
-    const reflection = await reflect(env.AI, MODELS.grader, q.query, answer, hits.map((h: Hit) => h.text));
+    const reflection = await reflect(env.AI, MODELS.grader, q.query, answer!, hits.map((h: Hit) => h.text));
     console.log("reflection:", reflection ? (reflection!.grounded ? "grounded" : "ungrounded") : "null");
     if (reflection && !reflection!.grounded && reflection!.missing_info) {
       // re-retrieve targeting what was missing — the declared context's
@@ -1878,14 +1879,14 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         sealScope: declaredScoped ? docScope : null,
         datasetScope: narrowed ? corpora : null,
         standardKeys,
-        ...(routeSubset ? { stageSubset: routeSubset } : {}),
+        ...(routeSubset ? { stageSubset: routeSubset ?? undefined } : {}),
       });
       if (retryRetrieve.hits.length > 0) {
         const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
         const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
         // the answer now comes from the retry passages — citations must follow
         if (retryAnswer) {
-          answer = canonicalRefusal(retryAnswer, refusalScope(answerCites(retryAnswer)));
+          answer = canonicalRefusal(retryAnswer!, refusalScope(answerCites(retryAnswer!)));
           used = retryUsed;
         }
       }
@@ -1896,7 +1897,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, undefined, telemetryMeta());
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
-  const finalCites = boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used);
+  const finalCites = boundModel ? [modelCitation(boundModel!), ...citations(used)] : citations(used);
   const c2ns = answer!.includes(refusalAnswer())
     ? { text: answer, blocks: [] as Awaited<ReturnType<typeof contractV2>>["blocks"], dropped: [] as string[] }
     : await contractV2(env.DB, answer!, used);
@@ -1921,7 +1922,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   }
 
   // figure completion (#172) — see ./completion for the rationale
-  completionBlocks.push(...(await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used)));
+  completionBlocks.push(...(await completeFigures(env.DB, answer!, [...c2ns.blocks, ...completionBlocks], used)));
 
   // the blind-answer regeneration (2026-10-03, live on the photo case):
   // the multimodal call can answer AROUND an attached image — a 200 whose
@@ -1936,8 +1937,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows — number, holder, model, status, and every document link — as the answer. Do not claim that nothing was provided." },
       messages[messages.length - 1],
     ], effort);
-    if (regen && !regen.includes(refusalAnswer())) {
-      answer = canonicalRefusal(regen, refusalScope(answerCites(regen)));
+    if (regen && !regen!.includes(refusalAnswer())) {
+      answer = canonicalRefusal(regen!, refusalScope(answerCites(regen!)));
       console.log("blind-answer: regeneration grounded");
     }
   }
@@ -1952,7 +1953,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   let entailmentNote = "";
   if (THRESHOLDS.entailmentGate && jsonQuality && used.length && !answer!.includes(refusalAnswer())) {
     const raced = await Promise.race([
-      scoreFaithfulness(env.AI, roleModel(env, "grader"), answer, (used as Hit[]).map((h: Hit) => h.text)),
+      scoreFaithfulness(env.AI, roleModel(env, "grader"), answer!, (used as Hit[]).map((h: Hit) => h.text)),
       new Promise<null>((r) => setTimeout(() => r(null), THRESHOLDS.entailmentBudgetMs)),
     ]);
     if (raced) {
@@ -1962,8 +1963,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       if (v.support !== "supported") console.log("entailment:", v.support, raced!.score, raced!.ungrounded_claims?.slice(0, 2));
     }
   }
-  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer, refusalScope(answerCites(answer!))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
-  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer!))) && finalAnchors.violations.length === 0;
+  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality!, confidence_note: entailmentNote || qualityNote(jsonQuality!), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer!, refusalScope(answerCites(answer!))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
+  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer!, refusalScope(answerCites(answer!))) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));
@@ -1985,25 +1986,13 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // THE DISPATCH: the streamed lane's response went out at the top — the
   // pipeline has been feeding it live. The json lane awaits the pipeline
   // and returns its aggregate.
-  if (liveResponse) {
-    void pipeline(live).catch(() => { try { live!.close(); } catch { /* the client went away */ } });
+    if (liveResponse) {
+    void pipeline(live!, q).catch(() => { try { live!.close(); } catch { /* the client went away */ } });
     return liveResponse;
   }
-  return await pipeline(null);
+  return (await pipeline(null, q))!;
 }
 
-function sseResponse(events: unknown[], cors: Record<string, string>): Response {
-  const encoder = new TextEncoder();
-  const body = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
-  return new Response(encoder.encode(body), {
-    headers: {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      "x-accel-buffering": "no",
-      ...cors,
-    },
-  });
-}
 
 
 
