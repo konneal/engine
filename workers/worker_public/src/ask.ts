@@ -1791,6 +1791,18 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       );
     answer = await generateOnce(env, MODELS.fallback, flat, routeEffort(routed.route));
   }
+  if (answer === null) {
+    // both generations failed — the honest line reaches the user (live)
+    // or the json error shape (the API), never a dropped stream
+    if (live) {
+      live.send({ type: "token", v: "The generation model is unavailable; please retry." });
+      live.send({ type: "done", model: MODELS.member, query_hash: "", context_applied: NO_CONTEXT });
+      live.close();
+      return null;
+    }
+    telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, undefined, telemetryMeta());
+    return err(502, "generation_failed", "The generation model is unavailable; please retry.");
+  }
   // the protocol scrub: a TOOL line is the agent loop's wire protocol,
   // never user-facing prose — the answer model occasionally echoes the
   // line it just composed (observed live: 'TOOL db.find …' opened a
