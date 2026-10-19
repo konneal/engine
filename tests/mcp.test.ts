@@ -97,3 +97,48 @@ test("tools/list carries the DEPLOYMENT's prefix — the profile is read per cal
     setProfile(PROFILE); // the fixture default back for the other tests
   }
 });
+
+// ── the tool-result budget (the cloudflare/mcp pattern): oversized
+//    results come back size-bounded, still valid JSON, cuts marked ──
+
+import { capToolResult, TOOL_RESULT_CHAR_CAP, TRUNCATION_MARK } from "../workers/worker_public/src/mcp-proto.ts";
+
+test("a tool result under the cap passes through untouched", () => {
+  const p = { answer: "a", citations: [{ ref: "R 60:1994 3.7.1" }] };
+  assert.equal(capToolResult(p), p);
+});
+
+test("an oversized result clips its long strings, keeps short fields, stays valid JSON", () => {
+  const p = { tool: "certificates.search", query: "Acme", result: "x".repeat(100_000) };
+  const capped = capToolResult(p) as any;
+  const text = JSON.stringify(capped);
+  assert.ok(text.length <= TOOL_RESULT_CHAR_CAP, `serialized ${text.length} > cap`);
+  assert.deepEqual(JSON.parse(text), capped);
+  assert.equal(capped.tool, "certificates.search");
+  assert.equal(capped.query, "Acme");
+  assert.ok(capped.result.endsWith(TRUNCATION_MARK));
+});
+
+test("a list result keeps every row and clips only the long texts", () => {
+  const rows = Array.from({ length: 25 }, (_, i) => ({ n: `OIML-${i}`, text: "y".repeat(8_000) }));
+  const capped = capToolResult({ tool: "db.find", result: rows }) as any;
+  assert.ok(JSON.stringify(capped).length <= TOOL_RESULT_CHAR_CAP);
+  assert.equal(capped.result.length, 25);
+  for (const r of capped.result) assert.ok(r.text.includes(TRUNCATION_MARK));
+  assert.equal(capped.result[0].n, "OIML-0");
+});
+
+test("an absurdly small cap still returns valid JSON", () => {
+  const capped = capToolResult({ result: "z".repeat(1000) }, 50) as any;
+  const text = JSON.stringify(capped);
+  assert.deepEqual(JSON.parse(text), capped);
+  assert.ok("truncation" in capped);
+});
+
+test("tools/call applies the cap to the wrapped content", async () => {
+  const r = await dispatch("tools/call", { name: mcpName("ask"), arguments: { query: "x" } }, async () => ({ answer: "a".repeat(100_000), citations: [] })) as any;
+  assert.ok(r.ok);
+  const text = r.result.content[0].text as string;
+  assert.ok(text.length <= TOOL_RESULT_CHAR_CAP + 100, `content ${text.length}`);
+  assert.equal(JSON.parse(text).answer.includes(TRUNCATION_MARK), true);
+});

@@ -94,6 +94,44 @@ export function buildTools(): McpTool[] {
   ];
 }
 
+// The tool-result budget (the cloudflare/mcp pattern, 2026-10-19): an
+// MCP client spends its own context reading tool results, so an
+// unbounded payload (a broad db.find over the register, a large
+// retrieve) can eat an agent's window. An oversized result comes back
+// size-bounded and still valid JSON: short fields (names, numbers,
+// metadata) stay whole, long strings clip, every cut is marked.
+export const TOOL_RESULT_CHAR_CAP = 24000; // ≈6k tokens
+export const TRUNCATION_MARK = "--- TRUNCATED ---";
+
+const jsonLen = (x: unknown): number => JSON.stringify(x)?.length ?? 0;
+
+function clipStrings(value: unknown, budget: number): unknown {
+  if (typeof value === "string") return value.length <= budget ? value : `${value.slice(0, budget)}\n${TRUNCATION_MARK}`;
+  if (Array.isArray(value)) return value.map((v) => clipStrings(v, budget));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, clipStrings(v, budget)]));
+  return value;
+}
+
+export function capToolResult(payload: unknown, cap: number = TOOL_RESULT_CHAR_CAP): unknown {
+  if (jsonLen(payload) <= cap) return payload;
+  // the per-string budget shrinks until the whole payload fits
+  let lo = 200;
+  let hi = cap;
+  let best = clipStrings(payload, lo);
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const candidate = clipStrings(payload, mid);
+    if (jsonLen(candidate) <= cap) {
+      best = candidate;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (jsonLen(best) <= cap) return best;
+  return { truncation: `the tool result exceeded the ${cap}-character budget and was withheld` };
+}
+
 export type McpResult =
   | { ok: true; result: unknown }
   | { ok: true; accepted: true }
@@ -120,7 +158,7 @@ export function dispatch(
         return Promise.resolve({ ok: false, code: -32602, message: `unknown tool: ${name}` });
       }
       return callTool(registryName(name), params?.arguments ?? {}).then(
-        (payload) => ({ ok: true, result: { content: [{ type: "text", text: JSON.stringify(payload) }] } }) as McpResult,
+        (payload) => ({ ok: true, result: { content: [{ type: "text", text: JSON.stringify(capToolResult(payload)) }] } }) as McpResult,
       );
     }
     default:
