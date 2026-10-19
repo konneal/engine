@@ -1021,6 +1021,34 @@ function buildTools() {
     }))
   ];
 }
+var TOOL_RESULT_CHAR_CAP = 24e3;
+var TRUNCATION_MARK = "--- TRUNCATED ---";
+var jsonLen = (x) => JSON.stringify(x)?.length ?? 0;
+function clipStrings(value, budget) {
+  if (typeof value === "string") return value.length <= budget ? value : `${value.slice(0, budget)}
+${TRUNCATION_MARK}`;
+  if (Array.isArray(value)) return value.map((v) => clipStrings(v, budget));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, clipStrings(v, budget)]));
+  return value;
+}
+function capToolResult(payload, cap = TOOL_RESULT_CHAR_CAP) {
+  if (jsonLen(payload) <= cap) return payload;
+  let lo = 200;
+  let hi = cap;
+  let best = clipStrings(payload, lo);
+  while (lo <= hi) {
+    const mid = lo + hi >> 1;
+    const candidate = clipStrings(payload, mid);
+    if (jsonLen(candidate) <= cap) {
+      best = candidate;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (jsonLen(best) <= cap) return best;
+  return { truncation: `the tool result exceeded the ${cap}-character budget and was withheld` };
+}
 function dispatch(method, params, callTool) {
   switch (method) {
     case "initialize":
@@ -1036,7 +1064,7 @@ function dispatch(method, params, callTool) {
         return Promise.resolve({ ok: false, code: -32602, message: `unknown tool: ${name}` });
       }
       return callTool(registryName(name), params?.arguments ?? {}).then(
-        (payload) => ({ ok: true, result: { content: [{ type: "text", text: JSON.stringify(payload) }] } })
+        (payload) => ({ ok: true, result: { content: [{ type: "text", text: JSON.stringify(capToolResult(payload)) }] } })
       );
     }
     default:

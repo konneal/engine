@@ -15,6 +15,9 @@ export interface McpTool {
     };
 }
 export declare function buildTools(): McpTool[];
+export declare const TOOL_RESULT_CHAR_CAP = 24000;
+export declare const TRUNCATION_MARK = "--- TRUNCATED ---";
+export declare function capToolResult(payload: unknown, cap?: number): unknown;
 export type McpResult = {
     ok: true;
     result: unknown;
