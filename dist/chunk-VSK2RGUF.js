@@ -1642,6 +1642,13 @@ function toolNarration(t) {
   return /^(?:the\s+)?[a-z][a-z_.]*\.[a-z_]+ tool returned\b/i.test(t.slice(0, 200)) || /tool returned,? for the query\b/i.test(t.slice(0, 300));
 }
 var TOOL_NARRATION_NOTICE = "Correction notice: your draft narrated an internal tool call ('the \u2026 tool returned \u2026') instead of answering. Rewrite: answer the question directly from the retrieved passages, cite the clauses, and never mention tools, queries, wire formats, or JSON.";
+function intentPreamble(t) {
+  const s = (t ?? "").trim();
+  if (s.length > 240) return false;
+  if (!/^(?:i'll|i will|let me|let's|i'm going to|i am going to)\b/i.test(s)) return false;
+  return !/\[\[u:|\[\^?\d+\]|\b\d+\.\d+\b/.test(s);
+}
+var INTENT_PREAMBLE_NOTICE = "Correction notice: your draft announced a plan ('I'll look up \u2026') instead of answering. Do not narrate intent \u2014 answer the question NOW from the retrieved passages: give the values, clause references and citations the question asks for.";
 function userImageDataUrl(body) {
   const img = body?.image;
   if (img == null) return null;
@@ -2623,12 +2630,12 @@ Answer account questions from these records ONLY: name the record when you use i
               }
               if (full.length < 80) continue;
               headSettled = true;
-              if (toolNarration(full)) {
-                console.log("tool-narration(stream): regenerating once");
+              if (toolNarration(full) || intentPreamble(full)) {
+                console.log(toolNarration(full) ? "tool-narration(stream): regenerating once" : "intent-preamble(stream): regenerating once");
                 send({ type: "retry" });
                 const regen = await generateStream(env, model, [
                   ...messages,
-                  { role: "system", content: TOOL_NARRATION_NOTICE }
+                  { role: "system", content: toolNarration(full) ? TOOL_NARRATION_NOTICE : INTENT_PREAMBLE_NOTICE }
                 ], routeEffort(routed.route));
                 if (regen) {
                   full = "";
@@ -2645,7 +2652,7 @@ Answer account questions from these records ONLY: name the record when you use i
             }
             if (!headSettled) {
               headSettled = true;
-              if (!toolNarration(full)) send({ type: "token", v: full });
+              if (!toolNarration(full) && !intentPreamble(full)) send({ type: "token", v: full });
             }
           } catch {
           }
@@ -2776,17 +2783,17 @@ Answer account questions from these records ONLY: name the record when you use i
       );
       return nums.filter((n) => tableNums.has(n)).length >= 2;
     })();
-    if (anchors.violations.length > 0 || retyped || unreferenced || toolNarration(answer)) {
-      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "; toolNarration:", toolNarration(answer), "\u2014 regenerating");
+    if (anchors.violations.length > 0 || retyped || unreferenced || toolNarration(answer) || intentPreamble(answer)) {
+      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "; toolNarration:", toolNarration(answer), "; intentPreamble:", intentPreamble(answer), "\u2014 regenerating");
       const tableUnitId = unreferenced ? used.find((h) => h.metadata.unit_id && h.metadata.block === "table")?.metadata.unit_id : void 0;
-      const note = toolNarration(answer) ? TOOL_NARRATION_NOTICE : retyped || unreferenced ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.` : ANCHOR_CORRECTION_NOTE;
+      const note = toolNarration(answer) ? TOOL_NARRATION_NOTICE : intentPreamble(answer) ? INTENT_PREAMBLE_NOTICE : retyped || unreferenced ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.` : ANCHOR_CORRECTION_NOTE;
       generateRetries += 1;
       const corrected = await generateOnce(env, model, [...messages, { role: "system", content: note }], routeEffort(routed.route));
       if (corrected) {
         const correctedAnswer = canonicalRefusal(corrected, refusalScope(answerCites(corrected)));
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h) => h.text));
         const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
-        if (retryAnchors.violations.length < anchors.violations.length || !retryRetyped && retyped || unreferenced && correctedAnswer.includes("[[u:") || !toolNarration(correctedAnswer)) {
+        if (retryAnchors.violations.length < anchors.violations.length || !retryRetyped && retyped || unreferenced && correctedAnswer.includes("[[u:") || !toolNarration(correctedAnswer) || !intentPreamble(correctedAnswer)) {
           answer = correctedAnswer;
         }
       }

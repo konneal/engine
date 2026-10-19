@@ -65,6 +65,22 @@ function toolNarration(t: string): boolean {
 const TOOL_NARRATION_NOTICE =
   "Correction notice: your draft narrated an internal tool call ('the … tool returned …') instead of answering. Rewrite: answer the question directly from the retrieved passages, cite the clauses, and never mention tools, queries, wire formats, or JSON.";
 
+// The intent preamble (2026-10-19, the ~200-word technical-file
+// question): the draft is a PLAN, not an answer — "I'll look up the R
+// 76-1 MPE clause and classification details in the corpus." — shipped
+// while ten citations rode the same response. Narrow by construction:
+// it must OPEN with a first-person intent verb AND carry no substance —
+// short, no clause citation, no normative numbers (a real answer's
+// opening names values or clauses).
+function intentPreamble(t: string): boolean {
+  const s = (t ?? "").trim();
+  if (s.length > 240) return false;
+  if (!/^(?:i'll|i will|let me|let's|i'm going to|i am going to)\b/i.test(s)) return false;
+  return !/\[\[u:|\[\^?\d+\]|\b\d+\.\d+\b/.test(s);
+}
+const INTENT_PREAMBLE_NOTICE =
+  "Correction notice: your draft announced a plan ('I'll look up …') instead of answering. Do not narrate intent — answer the question NOW from the retrieved passages: give the values, clause references and citations the question asks for.";
+
 /** User-uploaded image for multimodal questions: a data URL
  *  (data:image/(png|jpeg|webp|gif);base64,…) up to 6 MB of payload. The
  *  question text still drives retrieval; the image is CONTEXT for the
@@ -1570,12 +1586,12 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
               if (headSettled) { send({ type: "token", v: tok }); continue; }
               if (full.length < 80) continue;
               headSettled = true;
-              if (toolNarration(full)) {
-                console.log("tool-narration(stream): regenerating once");
+              if (toolNarration(full) || intentPreamble(full)) {
+                console.log(toolNarration(full) ? "tool-narration(stream): regenerating once" : "intent-preamble(stream): regenerating once");
                 send({ type: "retry" });
                 const regen = await generateStream(env, model, [
                   ...messages,
-                  { role: "system", content: TOOL_NARRATION_NOTICE },
+                  { role: "system", content: toolNarration(full) ? TOOL_NARRATION_NOTICE : INTENT_PREAMBLE_NOTICE },
                 ], routeEffort(routed.route));
                 if (regen) {
                   full = "";
@@ -1594,7 +1610,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
             }
             if (!headSettled) {
               headSettled = true;
-              if (!toolNarration(full)) send({ type: "token", v: full });
+              if (!toolNarration(full) && !intentPreamble(full)) send({ type: "token", v: full });
             }
           } catch {
             // stream ended prematurely — deliver what we have
@@ -1776,8 +1792,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       );
       return nums.filter((n) => tableNums.has(n)).length >= 2;
     })();
-    if (anchors.violations.length > 0 || retyped || unreferenced || toolNarration(answer)) {
-      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "; toolNarration:", toolNarration(answer), "— regenerating");
+    if (anchors.violations.length > 0 || retyped || unreferenced || toolNarration(answer) || intentPreamble(answer)) {
+      console.log("contract check:", anchors.violations.length, "anchor violations; tableRetyped:", retyped, "; tableDataUnreferenced:", unreferenced, "; toolNarration:", toolNarration(answer), "; intentPreamble:", intentPreamble(answer), "— regenerating");
       // name the EXACT unit the token must reference — a generic note
       // leaves the model guessing which id to write
       const tableUnitId = unreferenced
@@ -1785,6 +1801,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         : undefined;
       const note = toolNarration(answer)
         ? TOOL_NARRATION_NOTICE
+        : intentPreamble(answer)
+        ? INTENT_PREAMBLE_NOTICE
         : retyped || unreferenced
         ? `Correction notice: your draft reproduced a table as markdown or presented a served table's data without its reference. Rewrite the answer: describe the table in prose, cite the clause, and write the reference token [[u:${tableUnitId ?? "<unit id>"}]] exactly where the table belongs. Do not render any table as markdown.`
         : ANCHOR_CORRECTION_NOTE;
@@ -1794,7 +1812,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         const correctedAnswer = canonicalRefusal(corrected, refusalScope(answerCites(corrected)));
         const retryAnchors = checkQuoteAnchors(correctedAnswer, used.map((h: Hit) => h.text));
         const retryRetyped = tableRetyped(correctedAnswer, hasTableUnit);
-        if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped) || (unreferenced && correctedAnswer.includes("[[u:")) || !toolNarration(correctedAnswer)) {
+        if (retryAnchors.violations.length < anchors.violations.length || (!retryRetyped && retyped) || (unreferenced && correctedAnswer.includes("[[u:")) || !toolNarration(correctedAnswer) || !intentPreamble(correctedAnswer)) {
           answer = correctedAnswer;
         }
       }
