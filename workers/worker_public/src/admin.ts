@@ -6,6 +6,7 @@ import { embed } from "./ai";
 import { err, json, corsHeaders, readJson, authenticate } from "./lib/http";
 import type { Env } from "./env";
 import enrichmentPrompt from "../prompts/enrichment.md";
+import { normalizeContext, enrichOutcome } from "./enrichPolicy.ts";
 import docSummaryPrompt from "../prompts/doc-summary.md";
 import familySummaryPrompt from "../prompts/family-summary.md";
 import sectionSummaryPrompt from "../prompts/section-summary.md";
@@ -75,19 +76,14 @@ export async function handleEnrich(env: Env, ctx: ExecutionContext, req: Request
           const raw = typeof res?.response === "string" && res.response.trim()
             ? res.response
             : res?.choices?.[0]?.message?.content;
-          context = typeof raw === "string" ? raw.trim().replace(/^["\']|[\"']$/g, "").slice(0, 400) : "";
+          context = normalizeContext(raw);
           if (!context) {
             console.log("enrich raw keys:", Object.keys(res ?? {}), "sample:", JSON.stringify(res).slice(0, 300));
-            // The deterministic-empty class (observed 2026-10-20 on B 18's
-            // thin terms sections and two R 134-1 clauses — empty under
-            // BOTH the default and the alternate enrichment model): the
-            // chunk's own text is real corpus content, so the production
-            // flow serves it RAW rather than leaving a hole in the index
-            // — embed the original text without the context band, upsert
-            // without the ctx marker; a later forced re-enrich overwrites
-            // the vector in place. mode:"context" and "ab" keep failing:
-            // their builders want the signal, not a side-effecting write.
-            if (contextOnly || abMode) return { id: c.id, ok: false, error: "empty enrichment" };
+            // serve-raw: the chunk's own text is real corpus content —
+            // embed it without the context band, upsert without the ctx
+            // marker; a later forced re-enrich overwrites in place.
+            const outcome = enrichOutcome({ cached: null, generated: "", contextOnly, abMode });
+            if (outcome.action === "fail") return { id: c.id, ok: false, error: outcome.error };
             const rawText = typeof c.metadata.chunk_text === "string" && c.metadata.chunk_text ? c.metadata.chunk_text : c.text;
             const rawVector = await embed(portModelRunner(env), MODELS.embed, rawText.slice(0, 6000));
             await env.VECTORIZE.upsert([{ id: c.id, values: rawVector, metadata: { ...c.metadata, chunk_text: rawText } }]);
