@@ -411,7 +411,11 @@ ${c.text.slice(0, 1500)}` }
           context = typeof raw === "string" ? raw.trim().replace(/^["\']|[\"']$/g, "").slice(0, 400) : "";
           if (!context) {
             console.log("enrich raw keys:", Object.keys(res ?? {}), "sample:", JSON.stringify(res).slice(0, 300));
-            return { id: c.id, ok: false, error: "empty enrichment" };
+            if (contextOnly || abMode) return { id: c.id, ok: false, error: "empty enrichment" };
+            const rawText = typeof c.metadata.chunk_text === "string" && c.metadata.chunk_text ? c.metadata.chunk_text : c.text;
+            const rawVector = await embed(portModelRunner(env), MODELS.embed, rawText.slice(0, 6e3));
+            await env.VECTORIZE.upsert([{ id: c.id, values: rawVector, metadata: { ...c.metadata, chunk_text: rawText } }]);
+            return { id: c.id, ok: true, raw: true, cached: false, context: "" };
           }
           if (res?.usage) {
             usage.prompt_tokens += Number(res.usage.prompt_tokens ?? 0);
