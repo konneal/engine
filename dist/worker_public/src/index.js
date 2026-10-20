@@ -351,6 +351,18 @@ async function handleGetShared(env, slug) {
 // workers/worker_public/prompts/enrichment.md
 var enrichment_default = "You write a retrieval context for a passage from {{CORPUS_KIND}}. The context is prepended to the passage before embedding so a semantic search can locate the passage even when the query uses different vocabulary than the passage itself.\n\nWrite ONE concise sentence (at most 40 words) that situates the passage: name the publication by its exact {{PUBLISHER_NAME}} identifier (including part or annex when applicable) and what the passage covers \u2014 paraphrasing the topic in words DIFFERENT from the passage's own. Do not copy the passage verbatim, do not add facts that are not derivable from the passage or its header, do not answer or explain the content. Reply with the context sentence only \u2014 no quotes, no preamble.\n";
 
+// workers/worker_public/src/enrichPolicy.ts
+function normalizeContext(raw) {
+  return typeof raw === "string" ? raw.trim().replace(/^["\']|["']$/g, "").slice(0, 400) : "";
+}
+function enrichOutcome(opts) {
+  const fromCache = typeof opts.cached === "string" && opts.cached;
+  if (fromCache) return { action: "serve", context: fromCache, cached: true };
+  if (opts.generated) return { action: "serve", context: opts.generated, cached: false };
+  if (opts.contextOnly || opts.abMode) return { action: "fail", error: "empty enrichment" };
+  return { action: "serve-raw" };
+}
+
 // workers/worker_public/prompts/doc-summary.md
 var doc_summary_default = "You write the document-level summary for a legal-metrology publication in {{PUBLISHER_NAME}}'s retrieval index. The section summaries below cover the publication clause by clause. Write one compact abstract, three to five sentences: what the publication regulates or provides, its scope and applicability, and the structure a reader should know (parts, annexes, where the normative core sits). Use the publication's own terms exactly. No preamble, no headings.\n";
 
@@ -408,10 +420,11 @@ ${c.text.slice(0, 1500)}` }
             reasoning_effort: abMode ? effort : "high"
           });
           const raw = typeof res?.response === "string" && res.response.trim() ? res.response : res?.choices?.[0]?.message?.content;
-          context = typeof raw === "string" ? raw.trim().replace(/^["\']|[\"']$/g, "").slice(0, 400) : "";
+          context = normalizeContext(raw);
           if (!context) {
             console.log("enrich raw keys:", Object.keys(res ?? {}), "sample:", JSON.stringify(res).slice(0, 300));
-            if (contextOnly || abMode) return { id: c.id, ok: false, error: "empty enrichment" };
+            const outcome = enrichOutcome({ cached: null, generated: "", contextOnly, abMode });
+            if (outcome.action === "fail") return { id: c.id, ok: false, error: outcome.error };
             const rawText = typeof c.metadata.chunk_text === "string" && c.metadata.chunk_text ? c.metadata.chunk_text : c.text;
             const rawVector = await embed(portModelRunner(env), MODELS.embed, rawText.slice(0, 6e3));
             await env.VECTORIZE.upsert([{ id: c.id, values: rawVector, metadata: { ...c.metadata, chunk_text: rawText } }]);
