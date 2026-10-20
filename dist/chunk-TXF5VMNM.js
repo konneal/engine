@@ -1637,7 +1637,7 @@ async function extractNameplate(ai, model, image) {
   return null;
 }
 
-// workers/worker_public/src/ask.ts
+// workers/worker_public/src/answerGuards.ts
 function toolNarration(t) {
   return /^(?:the\s+)?[a-z][a-z_.]*\.[a-z_]+ tool returned\b/i.test(t.slice(0, 200)) || /tool returned,? for the query\b/i.test(t.slice(0, 300));
 }
@@ -1649,6 +1649,8 @@ function intentPreamble(t) {
   return !/\[\[u:|\[\^?\d+\]|\b\d+\.\d+\b/.test(s);
 }
 var INTENT_PREAMBLE_NOTICE = "Correction notice: your draft announced a plan ('I'll look up \u2026') instead of answering. Do not narrate intent \u2014 answer the question NOW from the retrieved passages: give the values, clause references and citations the question asks for.";
+
+// workers/worker_public/src/ask.ts
 function userImageDataUrl(body) {
   const img = body?.image;
   if (img == null) return null;
