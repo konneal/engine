@@ -190,3 +190,48 @@ test("uncertainty: a pm-stated tolerance evaluates across its band too", () => {
   const v = evaluate(deadLoad, "E_max 30000 v, D_max 27000 pm 100 v")!;
   assert.equal(v.verdict, "void");
 });
+
+// ── the GUM-style budget (TODO.sota/14.4)
+// ── the GUM-style budget (TODO.sota/14.4): a band-robust check reports
+//    how far the tolerance could grow before flipping, with the k=2
+//    coverage factor — the metrologist's safety factor, computed. ──
+
+test("budget: a band-robust check reports the flip tolerance and the k=2 safety factor", () => {
+  const v = evaluate(
+    { expression: "ocl{model.parameters.e_max > 100}", name: "budget probe" },
+    "with E_max 110 v ± 5 v, does the output exceed the limit?",
+  ) as any;
+  assert.equal(v.verdict, "pass");
+  const un = v.checks[0].uncertainty;
+  assert.ok(un, "the uncertainty object is present");
+  assert.equal(un.nominal, true);
+  // the flip: 110 − 5t ≤ 100 at t = 2 → the margin is ±10 v (the
+  // bisection converges to it within its 12-iteration grain)
+  assert.ok(Math.abs(un.margin_tol - 10) < 0.05, `margin_tol ${un.margin_tol}`);
+  assert.equal(un.margin_bounded, true);
+  assert.equal(un.coverage, "k=2");
+  // the safety factor: the margin over the expanded uncertainty (2u = 10 v)
+  assert.ok(Math.abs(un.safety_factor - 1) < 0.01, `safety_factor ${un.safety_factor}`);
+});
+
+test("budget: a check far from its boundary reports the unbounded floor", () => {
+  const v = evaluate(
+    { expression: "ocl{model.parameters.e_max > 5}", name: "budget probe far" },
+    "with E_max 110 v ± 5 v, does the output exceed the limit?",
+  ) as any;
+  assert.equal(v.verdict, "pass");
+  const un = v.checks[0].uncertainty;
+  assert.equal(un.margin_bounded, false);
+  assert.equal(un.margin_tol, 100); // the 20× search ceiling, in volts
+  assert.equal(un.safety_factor, 10);
+});
+
+test("budget: the spanning band still voids — the budget never masks undecidability", () => {
+  const v = evaluate(
+    { expression: "ocl{model.parameters.e_max > 100}", name: "budget probe spanning" },
+    "with E_max 110 v ± 20 v, does the output exceed the limit?",
+  ) as any;
+  assert.equal(v.verdict, "void");
+  assert.match(v.void_reason, /crosses the decision boundary/);
+  assert.equal(v.checks[0].uncertainty?.margin_tol, undefined);
+});

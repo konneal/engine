@@ -4,7 +4,13 @@ export interface MachineCheck {
     values: Record<string, number>;
     result: boolean | null;
     /** present when the question states a tolerance on a symbol this
-     *  check reads: the band's corner evaluations beside the nominal */
+     *  check reads: the band's corner evaluations beside the nominal,
+     *  and — when the band is robust (every corner agrees with the
+     *  nominal) — the GUM-style budget: the tolerance magnitude that
+     *  would flip the decision (bisected up to 20× the stated band;
+     *  margin_bounded false when even 20× does not flip), and the safety
+     *  factor of that margin over the k=2 expanded uncertainty
+     *  (U = 2u, the ≈95% coverage a metrologist reports). */
     uncertainty?: {
         symbol: string;
         stated: string;
@@ -12,6 +18,10 @@ export interface MachineCheck {
         unit?: string;
         nominal: boolean;
         corners: (boolean | null)[];
+        margin_tol?: number;
+        margin_bounded?: boolean;
+        coverage?: "k=2";
+        safety_factor?: number;
     };
 }
 export interface Verdict {

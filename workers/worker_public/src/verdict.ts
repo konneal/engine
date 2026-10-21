@@ -20,7 +20,13 @@ export interface MachineCheck {
   values: Record<string, number>;
   result: boolean | null; // null: could not evaluate (missing params)
   /** present when the question states a tolerance on a symbol this
-   *  check reads: the band's corner evaluations beside the nominal */
+   *  check reads: the band's corner evaluations beside the nominal,
+   *  and — when the band is robust (every corner agrees with the
+   *  nominal) — the GUM-style budget: the tolerance magnitude that
+   *  would flip the decision (bisected up to 20× the stated band;
+   *  margin_bounded false when even 20× does not flip), and the safety
+   *  factor of that margin over the k=2 expanded uncertainty
+   *  (U = 2u, the ≈95% coverage a metrologist reports). */
   uncertainty?: {
     symbol: string;
     stated: string;
@@ -28,6 +34,10 @@ export interface MachineCheck {
     unit?: string;
     nominal: boolean;
     corners: (boolean | null)[];
+    margin_tol?: number;
+    margin_bounded?: boolean;
+    coverage?: "k=2";
+    safety_factor?: number;
   };
 }
 
@@ -223,7 +233,10 @@ export interface StatedUncertainty {
 }
 
 const TOL_SEP_SRC = "\\u00b1|\\bpm\\b|\\+/-";
-const NUM_SRC = "[0-9][0-9 ,.]*[0-9]";
+// single digits bind too — a metrologist's "± 5 v" is a first-class
+// tolerance (the two-digit minimum silently dropped every one-digit
+// value and tolerance; found by the GUM-budget tests, 2026-10-20)
+const NUM_SRC = "[0-9]+(?:[0-9 ,.]*[0-9])?";
 const UNIT_SRC = "%|\\u00b0?[A-Za-z\\u00b5\\u03a9]{0,6}";
 
 function statedUncertainty(
@@ -392,6 +405,43 @@ export function evaluate(content: unknown, query: string, opts?: { dimensions?: 
               `the check evaluates ${result ? "true" : "false"} at the stated value but ` +
               `${decided.find((c) => c !== result) ? "true" : "false"} at the band edge; the question cannot be decided as stated`
             );
+          } else if (decided.length === corners.length && un.tol > 0) {
+            // the band is robust: report the GUM-style budget — bisect
+            // the tolerance scaling for the flip point (both directions,
+            // up to 20× the stated band), then state the safety factor
+            // over the k=2 expanded uncertainty (U = 2u)
+            const flipsAt = (scale: number): boolean => {
+              for (const dir of [1, -1]) {
+                const corner = { ...params, [first]: params[first]! + dir * scale * un.tol };
+                try {
+                  if (!!parseAndEval(expression, corner) !== result) return true;
+                } catch { return true; }
+              }
+              return false;
+            };
+            if (flipsAt(20)) {
+              let lo = 1, hi = 20;
+              for (let i = 0; i < 12; i++) {
+                const mid = (lo + hi) / 2;
+                if (flipsAt(mid)) hi = mid; else lo = mid;
+              }
+              const marginTol = hi * un.tol;
+              uncertainty = {
+                ...uncertainty!,
+                margin_tol: marginTol,
+                margin_bounded: true,
+                coverage: "k=2",
+                safety_factor: marginTol / (2 * un.tol),
+              };
+            } else {
+              uncertainty = {
+                ...uncertainty!,
+                margin_tol: 20 * un.tol,
+                margin_bounded: false,
+                coverage: "k=2",
+                safety_factor: (20 * un.tol) / (2 * un.tol),
+              };
+            }
           }
         }
       }
