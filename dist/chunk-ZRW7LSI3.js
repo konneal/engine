@@ -144,6 +144,38 @@ async function retrieveInternal(service, auth, query) {
 // workers/worker_public/prompts/grader.md
 var grader_default = 'You grade retrieval quality for a legal-metrology Q&A system.\nGiven the question and the retrieved passage summaries, reply with ONLY:\n{"grade": "good"}  \u2014 passages clearly contain the material to answer\n{"grade": "weak"}  \u2014 passages are on the right publication/topic but lack the specific material (a broader or differently-worded retrieval might find it)\n{"grade": "bad"}   \u2014 passages are unrelated to the question\n';
 
+// workers/worker_public/src/crag.ts
+async function gradePassage(ai, model, systemPrompt, query, passage, timeoutMs = 6e3) {
+  try {
+    const timeout = new Promise((r) => setTimeout(() => r(null), timeoutMs));
+    const call = (async () => {
+      const res = await ai.run(model, {
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `Question: ${query}
+
+Passage:
+${passage.replace(/\s+/g, " ").slice(0, 1200)}` }
+        ],
+        max_tokens: 6144,
+        reasoning_effort: "low",
+        // a measurement: greedy decoding, no sampling
+        temperature: 0,
+        top_p: 1
+      });
+      const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
+      const m = (text ?? "").match(/"grade"\s*:\s*"(correct|incorrect|ambiguous)"/);
+      return m ? m[1] : null;
+    })();
+    return await Promise.race([call, timeout]);
+  } catch {
+    return null;
+  }
+}
+
+// workers/worker_public/prompts/crag-passage.md
+var crag_passage_default = 'You judge the RELEVANCE of one retrieved passage to a question, for a\nlegal-metrology retrieval system (the CRAG per-document evaluator).\nVerdicts:\n- "correct": the passage contains information useful for answering the question.\n- "incorrect": the passage is unrelated to the question or would mislead.\n- "ambiguous": partially related \u2014 relevant subject, unclear usefulness.\nReply with ONLY: {"grade": "correct" | "incorrect" | "ambiguous"}\n';
+
 // workers/worker_public/src/grader.ts
 async function gradeRetrieval(ai, model, query, passages) {
   if (!passages.length) return "bad";
@@ -209,6 +241,12 @@ async function scoreJudge(ai, model, systemPrompt, userPrompt) {
   } catch {
     return null;
   }
+}
+function gradePassage2(ai, model, query, passage) {
+  return gradePassage(ai, model, crag_passage_default.trimEnd(), query, passage);
+}
+function gradePassages(ai, model, query, passages) {
+  return Promise.all(passages.map((p) => gradePassage2(ai, model, query, p)));
 }
 
 // workers/worker_public/prompts/summarize.md
@@ -2460,6 +2498,7 @@ ${summary}` }] : [],
     const routed = routeMode === "adaptive" ? routeFor(understanding, q2.query) : { route: routeMode, features: [`forced-${routeMode}`] };
     const routeSubset = ablate?.stages ?? (routed.route === "fast" ? fastRouteStages(STAGE_NAMES) : null);
     if (routeSubset) console.log("route:", routed.route, routed.features.join("+"), "\u2014", STAGE_NAMES.length - routeSubset.length, "lanes dropped");
+    const crag = { grade: null, corrective: null };
     try {
       const tR = Date.now();
       if (declaredCtx?.kind === "account") {
@@ -2517,6 +2556,7 @@ Answer account questions from these records ONLY: name the record when you use i
         }
       }
       const grade = await gradePromise;
+      crag.grade = grade;
       stageTiming.retrieve = Date.now() - tR;
       console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
       if (grade === "weak" && understanding?.docidentifier) {
@@ -2526,6 +2566,7 @@ Answer account questions from these records ONLY: name the record when you use i
         const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q2.query, second.hits.map((h) => h.text));
         stageTiming.corrective = Date.now() - tc;
         if (grade2 === "good") retrieved = second;
+        crag.corrective = { fired: true, accepted: grade2 === "good", grade: grade2 };
       }
     } catch (e) {
       console.log("ask: retrieval failed:", String(e).slice(0, 300));
@@ -2923,6 +2964,11 @@ Answer account questions from these records ONLY: name the record when you use i
       ...h.metadata.table_selection ? { sel: h.metadata.table_selection } : {}
     }));
     const tq = await chargeAnswerTokens(env, bucketId, void 0, messageChars(messages), answer.length, probeTokensUsed);
+    let cragPassages = null;
+    if (body?.manifest === true && used.length) {
+      const grades = await gradePassages(env.AI, roleModel(env, "grader"), q2.query, used.map((h) => h.text));
+      cragPassages = used.map((h, i) => ({ rank: i + 1, doc_id: h.metadata.doc_id, clause_anchor: h.metadata.clause_anchor ?? null, grade: grades[i] }));
+    }
     const manifestOut = body?.manifest === true ? { manifest: {
       index_version: env.INDEX_VERSION,
       corpus_gen: gen,
@@ -2939,6 +2985,8 @@ Answer account questions from these records ONLY: name the record when you use i
       })),
       stages: stageTiming,
       generate_retries: generateRetries,
+      crag: { retrieval_grade: crag.grade, corrective: crag.corrective, passages: cragPassages ?? [] },
+      entailment,
       total_ms: Date.now() - tStart
     } } : {};
     return json({ ...out, context: contextOut, read: readAs(), ...manifestOut, quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
