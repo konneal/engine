@@ -90,3 +90,30 @@ export async function scoreJudge(
     return null;
   }
 }
+
+// The CRAG per-passage binding (TODO.sota/14.6 v2): the dependency-free
+// core (crag.ts) takes the system prompt as a parameter; this module binds
+// the bundled prompt. Opt-in — only the reproducibility manifest requests
+// these grades, so the k calls never sit on the default serving path.
+import { gradePassage as gradePassageCore, type PassageGrade } from "./crag";
+import CRAG_PASSAGE from "../prompts/crag-passage.md";
+
+export type { PassageGrade };
+
+export function gradePassage(
+  ai: any,
+  model: string,
+  query: string,
+  passage: string,
+): Promise<PassageGrade | null> {
+  return gradePassageCore(ai, model, CRAG_PASSAGE.trimEnd(), query, passage);
+}
+
+export function gradePassages(
+  ai: any,
+  model: string,
+  query: string,
+  passages: string[],
+): Promise<(PassageGrade | null)[]> {
+  return Promise.all(passages.map((p) => gradePassage(ai, model, query, p)));
+}

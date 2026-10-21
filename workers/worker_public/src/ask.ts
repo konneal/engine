@@ -10,7 +10,7 @@ import { buildMessages, citations, fill, promptVars, retrieve, retrievalQuery, i
 import { sessionFrom } from "./auth";
 import { retrieveInternal } from "./internal_gateway";
 import { understandQuery } from "./understand";
-import { gradeRetrieval } from "./grader";
+import { gradePassages, gradeRetrieval } from "./grader";
 import summarizePrompt from "../prompts/summarize.md";
 import { embed, generateOnce } from "./ai";
 import { reflect } from "./reflect";
@@ -1295,6 +1295,10 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     : { route: routeMode, features: [`forced-${routeMode}`] };
   const routeSubset = ablate?.stages ?? (routed.route === "fast" ? fastRouteStages(STAGE_NAMES) : null);
   if (routeSubset) console.log("route:", routed.route, routed.features.join("+"), "—", STAGE_NAMES.length - routeSubset.length, "lanes dropped");
+  // the CRAG state, hoisted out of the retrieval try so the manifest can
+  // report it (TODO.sota/14.6 v2) — the coarse retrieval grade and the
+  // corrective retry's firing/acceptance
+  const crag: { grade: string | null; corrective: { fired: boolean; accepted: boolean; grade: string | null } | null } = { grade: null, corrective: null };
   try {
     const tR = Date.now();
     // ── The "my account" live read (TODO.ai-platform/03) — resolved
@@ -1381,6 +1385,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       }
     }
     const grade = await gradePromise;
+    crag.grade = grade;
     stageTiming.retrieve = Date.now() - tR;
     console.log("stage: grade+listwise", Date.now() - tR, "ms since retrieve start | grade:", grade);
     if (grade === "weak" && understanding?.docidentifier) {
@@ -1390,6 +1395,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h: Hit) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better
+      crag.corrective = { fired: true, accepted: grade2 === "good", grade: grade2 };
     }
   } catch (e) {
     console.log("ask: retrieval failed:", String(e).slice(0, 300));
@@ -1988,7 +1994,17 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // retrieval anatomy (rank, corpus score, rerank score per used passage),
   // the stage timings, and the enforcement counters. Everything here is
   // already computed; the flag only ASSEMBLES it for the harness and for
-  // external auditors. v2 names the CRAG grades per passage.
+  // external auditors. v2 added the CRAG grades: the retrieval grade and
+  // corrective-retry outcome (hoisted state) plus the per-passage grades
+  // (opt-in calls) and the entailment measurement.
+  // the per-passage CRAG grades run ONLY on the manifest path — the
+  // harness opted into the derivation, so it pays the k grader calls;
+  // the default serving path never waits on them
+  let cragPassages: { rank: number; doc_id: string; clause_anchor: string | null; grade: string | null }[] | null = null;
+  if (body?.manifest === true && used.length) {
+    const grades = await gradePassages(env.AI, roleModel(env, "grader"), q.query, (used as Hit[]).map((h: Hit) => h.text));
+    cragPassages = (used as Hit[]).map((h: Hit, i: number) => ({ rank: i + 1, doc_id: h.metadata.doc_id, clause_anchor: h.metadata.clause_anchor ?? null, grade: grades[i] }));
+  }
   const manifestOut = body?.manifest === true
     ? { manifest: {
         index_version: env.INDEX_VERSION,
@@ -2006,6 +2022,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         })),
         stages: stageTiming,
         generate_retries: generateRetries,
+        crag: { retrieval_grade: crag.grade, corrective: crag.corrective, passages: cragPassages ?? [] },
+        entailment,
         total_ms: Date.now() - tStart,
       } }
     : {};
