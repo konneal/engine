@@ -1702,6 +1702,20 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           const streamed = { total: streamedAnchors.total, violations: streamedRetyped ? ["table-retyped"] : streamedAnchors.violations };
           if (streamed.violations.length > 0) {
             console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified — not caching");
+            // the streaming-contract event (TODO.sota/14.5, v1 — the
+            // detection half): a mid-stream answer cannot regenerate, so
+            // the violations are reported to the client as they are —
+            // measured, never hidden — and the unverified answer never
+            // enters the cache. The bounded restart still covers the
+            // head class (narration, preamble).
+            try {
+              live!.send({
+                type: "contract",
+                verified: streamed.total - streamed.violations.length,
+                violations: streamed.violations.slice(0, 5),
+                note: "the streamed answer carried unverified quote anchors — the json lane enforces this contract by regeneration; treat the quoted spans as unverified",
+              });
+            } catch { /* the client may have closed; never block the close */ }
           }
           if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
             ctx.waitUntil(
