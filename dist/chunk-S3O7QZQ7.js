@@ -2914,7 +2914,25 @@ Answer account questions from these records ONLY: name the record when you use i
       ...h.metadata.table_selection ? { sel: h.metadata.table_selection } : {}
     }));
     const tq = await chargeAnswerTokens(env, bucketId, void 0, messageChars(messages), answer.length, probeTokensUsed);
-    return json({ ...out, context: contextOut, read: readAs(), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
+    const manifestOut = body?.manifest === true ? { manifest: {
+      index_version: env.INDEX_VERSION,
+      corpus_gen: gen,
+      model,
+      effort: answerEffort(env),
+      fresh,
+      citations: used.length,
+      retrieval: used.map((h, i) => ({
+        rank: i + 1,
+        doc_id: h.metadata.doc_id,
+        clause_anchor: h.metadata.clause_anchor ?? null,
+        score: h.score,
+        rerank_score: h.rerank_score ?? null
+      })),
+      stages: stageTiming,
+      generate_retries: generateRetries,
+      total_ms: Date.now() - tStart
+    } } : {};
+    return json({ ...out, context: contextOut, read: readAs(), ...manifestOut, quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
   };
   if (liveResponse) {
     void pipeline(live, q).catch(() => {

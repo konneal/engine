@@ -1969,7 +1969,33 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     ...((h.metadata as any).table_selection ? { sel: (h.metadata as any).table_selection } : {}),
   }));
   const tq = await chargeAnswerTokens(env, bucketId, undefined, messageChars(messages!), answer!.length, probeTokensUsed);
-  return json({ ...out, context: contextOut, read: readAs(), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
+  // the reproducibility manifest (TODO.sota/14.6, v1): an opt-in, one-object
+  // derivation record — the served snapshot identity, the answer model, the
+  // retrieval anatomy (rank, corpus score, rerank score per used passage),
+  // the stage timings, and the enforcement counters. Everything here is
+  // already computed; the flag only ASSEMBLES it for the harness and for
+  // external auditors. v2 names the CRAG grades per passage.
+  const manifestOut = body?.manifest === true
+    ? { manifest: {
+        index_version: env.INDEX_VERSION,
+        corpus_gen: gen,
+        model,
+        effort: answerEffort(env),
+        fresh,
+        citations: used.length,
+        retrieval: used.map((h: Hit, i: number) => ({
+          rank: i + 1,
+          doc_id: h.metadata.doc_id,
+          clause_anchor: h.metadata.clause_anchor ?? null,
+          score: h.score,
+          rerank_score: h.rerank_score ?? null,
+        })),
+        stages: stageTiming,
+        generate_retries: generateRetries,
+        total_ms: Date.now() - tStart,
+      } }
+    : {};
+  return json({ ...out, context: contextOut, read: readAs(), ...manifestOut, quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
   }
 
   // THE DISPATCH: the streamed lane's response went out at the top — the
