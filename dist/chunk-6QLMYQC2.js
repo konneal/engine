@@ -2695,6 +2695,7 @@ Answer account questions from these records ONLY: name the record when you use i
         send({ type: "citations", citations: cites, context_applied: ctxApplied, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: qualityNote(sourceQuality), ...sourceQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(cites) } : {} } : {}, ...liveRecords ? { records: liveRecords } : {}, quota });
         const stats = {};
         let full = "";
+        let streamRestarts = 0;
         try {
           let headSettled = false;
           for await (const tok of sseTokens(stream, stats)) {
@@ -2707,6 +2708,7 @@ Answer account questions from these records ONLY: name the record when you use i
             headSettled = true;
             if (toolNarration(full) || intentPreamble(full)) {
               console.log(toolNarration(full) ? "tool-narration(stream): regenerating once" : "intent-preamble(stream): regenerating once");
+              streamRestarts += 1;
               send({ type: "retry" });
               const regen = await generateStream(env, model, [
                 ...messages,
@@ -2735,6 +2737,7 @@ Answer account questions from these records ONLY: name the record when you use i
         send({ type: "quota", quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
         if (withImage && register?.rows?.length && full.includes(refusalAnswer())) {
           console.log("blind-answer(stream): regenerating once");
+          streamRestarts += 1;
           mark("Re-answering from the register results");
           send({ type: "retry" });
           const regen = await generateStream(env, model, [
@@ -2797,6 +2800,34 @@ Answer account questions from these records ONLY: name the record when you use i
               violations: streamed.violations.slice(0, 5),
               note: "the streamed answer carried unverified quote anchors \u2014 the json lane enforces this contract by regeneration; treat the quoted spans as unverified"
             });
+          } catch {
+          }
+        }
+        if (body?.manifest === true) {
+          try {
+            live2.send({ type: "manifest", manifest: {
+              index_version: env.INDEX_VERSION,
+              corpus_gen: gen,
+              model,
+              effort: answerEffort(env),
+              fresh,
+              lane: "stream",
+              citations: usedHits.length,
+              retrieval: usedHits.map((h, i) => ({
+                rank: i + 1,
+                doc_id: h.metadata.doc_id,
+                clause_anchor: h.metadata.clause_anchor ?? null,
+                score: h.score,
+                rerank_score: h.rerank_score ?? null
+              })),
+              stages: stageTiming,
+              generate_retries: generateRetries,
+              restarts: streamRestarts,
+              crag: { retrieval_grade: crag.grade, corrective: crag.corrective, passages: null, note: "per-passage grades ride the json lane's manifest" },
+              entailment: streamedEntailment,
+              contract: { verified: streamed.total - streamed.violations.length, violations: streamed.violations.slice(0, 5) },
+              total_ms: Date.now() - tStart
+            } });
           } catch {
           }
         }
