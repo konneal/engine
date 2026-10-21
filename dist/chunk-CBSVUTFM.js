@@ -2749,6 +2749,15 @@ Answer account questions from these records ONLY: name the record when you use i
         const streamed = { total: streamedAnchors.total, violations: streamedRetyped ? ["table-retyped"] : streamedAnchors.violations };
         if (streamed.violations.length > 0) {
           console.log("anchors:", streamed.violations.length, "of", streamed.total, "unverified \u2014 not caching");
+          try {
+            live2.send({
+              type: "contract",
+              verified: streamed.total - streamed.violations.length,
+              violations: streamed.violations.slice(0, 5),
+              note: "the streamed answer carried unverified quote anchors \u2014 the json lane enforces this contract by regeneration; treat the quoted spans as unverified"
+            });
+          } catch {
+          }
         }
         if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
           ctx.waitUntil(
