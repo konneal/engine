@@ -271,7 +271,7 @@ function parseNumber(raw) {
   return Number(s.replace(/,(?=\d{3}\b)/g, ""));
 }
 var TOL_SEP_SRC = "\\u00b1|\\bpm\\b|\\+/-";
-var NUM_SRC = "[0-9][0-9 ,.]*[0-9]";
+var NUM_SRC = "[0-9]+(?:[0-9 ,.]*[0-9])?";
 var UNIT_SRC = "%|\\u00b0?[A-Za-z\\u00b5\\u03a9]{0,6}";
 function statedUncertainty(value, tolRaw, tolUnitRaw, valueUnit) {
   const tolNum = parseNumber(tolRaw);
@@ -404,6 +404,42 @@ function evaluate(content, query, opts) {
           const decided = corners.filter((c2) => c2 !== null);
           if (decided.length && decided.some((c2) => c2 !== result)) {
             voidReason = voidReason ?? `the stated uncertainty (${un.stated}) on ${first.split(".").pop()} crosses the decision boundary \u2014 the check evaluates ${result ? "true" : "false"} at the stated value but ${decided.find((c2) => c2 !== result) ? "true" : "false"} at the band edge; the question cannot be decided as stated`;
+          } else if (decided.length === corners.length && un.tol > 0) {
+            const flipsAt = (scale) => {
+              for (const dir of [1, -1]) {
+                const corner = { ...params, [first]: params[first] + dir * scale * un.tol };
+                try {
+                  if (!!parseAndEval(expression, corner) !== result) return true;
+                } catch {
+                  return true;
+                }
+              }
+              return false;
+            };
+            if (flipsAt(20)) {
+              let lo = 1, hi = 20;
+              for (let i = 0; i < 12; i++) {
+                const mid = (lo + hi) / 2;
+                if (flipsAt(mid)) hi = mid;
+                else lo = mid;
+              }
+              const marginTol = hi * un.tol;
+              uncertainty = {
+                ...uncertainty,
+                margin_tol: marginTol,
+                margin_bounded: true,
+                coverage: "k=2",
+                safety_factor: marginTol / (2 * un.tol)
+              };
+            } else {
+              uncertainty = {
+                ...uncertainty,
+                margin_tol: 20 * un.tol,
+                margin_bounded: false,
+                coverage: "k=2",
+                safety_factor: 20 * un.tol / (2 * un.tol)
+              };
+            }
           }
         }
       }
