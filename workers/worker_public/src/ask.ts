@@ -1596,6 +1596,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           send({ type: "citations", citations: cites, context_applied: ctxApplied, ...(sourceQuality ? { source_quality: sourceQuality, confidence_note: qualityNote(sourceQuality), ...(sourceQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(cites) } : {}) } : {}), ...(liveRecords ? { records: liveRecords } : {}), quota, });
           const stats: { usage?: unknown } = {};
           let full = "";
+          let streamRestarts = 0; // the head restart + the blind-answer restart — the streamed manifest reports them
           try {
             // the head buffers until it can rule out the tool-narration
             // leak (the JSON lane's contract retry cannot run here — the
@@ -1611,6 +1612,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
               headSettled = true;
               if (toolNarration(full) || intentPreamble(full)) {
                 console.log(toolNarration(full) ? "tool-narration(stream): regenerating once" : "intent-preamble(stream): regenerating once");
+                streamRestarts += 1;
                 send({ type: "retry" });
                 const regen = await generateStream(env, model, [
                   ...messages,
@@ -1649,6 +1651,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           // tokens stream as the answer.
           if (withImage && register?.rows?.length && full.includes(refusalAnswer())) {
             console.log("blind-answer(stream): regenerating once");
+            streamRestarts += 1;
             mark("Re-answering from the register results");
             send({ type: "retry" });
             const regen = await generateStream(env, model, [
@@ -1721,6 +1724,40 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
                 violations: streamed.violations.slice(0, 5),
                 note: "the streamed answer carried unverified quote anchors — the json lane enforces this contract by regeneration; treat the quoted spans as unverified",
               });
+            } catch { /* the client may have closed; never block the close */ }
+          }
+          // the streamed lane's manifest (TODO.sota/14.5: the post-answer
+          // manifest reconciles what shipped): everything here is already
+          // computed — the derivation identity, the retrieval anatomy, the
+          // restart count (the restart cost's per-answer record) and the
+          // contract state. The per-passage CRAG grades stay the JSON
+          // lane's — post-answer dead air never justifies k grader calls
+          // on the stream.
+          if (body?.manifest === true) {
+            try {
+              live!.send({ type: "manifest", manifest: {
+                index_version: env.INDEX_VERSION,
+                corpus_gen: gen,
+                model,
+                effort: answerEffort(env),
+                fresh,
+                lane: "stream",
+                citations: usedHits.length,
+                retrieval: usedHits.map((h: Hit, i: number) => ({
+                  rank: i + 1,
+                  doc_id: h.metadata.doc_id,
+                  clause_anchor: h.metadata.clause_anchor ?? null,
+                  score: h.score,
+                  rerank_score: h.rerank_score ?? null,
+                })),
+                stages: stageTiming,
+                generate_retries: generateRetries,
+                restarts: streamRestarts,
+                crag: { retrieval_grade: crag.grade, corrective: crag.corrective, passages: null, note: "per-passage grades ride the json lane's manifest" },
+                entailment: streamedEntailment,
+                contract: { verified: streamed.total - streamed.violations.length, violations: streamed.violations.slice(0, 5) },
+                total_ms: Date.now() - tStart,
+              } });
             } catch { /* the client may have closed; never block the close */ }
           }
           if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
