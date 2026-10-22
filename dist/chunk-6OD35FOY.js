@@ -18,7 +18,10 @@ import {
 } from "./chunk-LSZTJI7V.js";
 
 // workers/worker_public/src/refs.ts
-var REF = /\[\[(u:[A-Za-z0-9_-]+)\]\]/g;
+var REF = /\[\[(u:(?:u:)?[A-Za-z0-9_-]+)\]\]/g;
+function normalizeRef(id) {
+  return id.startsWith("u:u:") ? id.slice(2) : id;
+}
 function availableUnitIds(hits) {
   const ids = /* @__PURE__ */ new Set();
   for (const h of hits) {
@@ -28,13 +31,14 @@ function availableUnitIds(hits) {
   return ids;
 }
 function parseRefs(text) {
-  return [...text.matchAll(REF)].map((m) => m[1]);
+  return [...text.matchAll(REF)].map((m) => normalizeRef(m[1]));
 }
 function sanitizeRefs(text, available) {
   const dropped = [];
-  const out = text.replace(REF, (full, id) => {
-    if (available.has(id)) return full;
-    dropped.push(id);
+  const out = text.replace(REF, (_full, id) => {
+    const normalized = normalizeRef(id);
+    if (available.has(normalized)) return `[[${normalized}]]`;
+    dropped.push(normalized);
     return "";
   });
   return { text: out, dropped };
