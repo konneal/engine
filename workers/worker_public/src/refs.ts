@@ -15,7 +15,18 @@ export interface ResolvedBlock {
   payload: Record<string, unknown>;
 }
 
-const REF = /\[\[(u:[A-Za-z0-9_-]+)\]\]/g;
+// The passage headers show `unit u:<id> (table)`, so the model copies
+// the WHOLE prefixed id into the token — `[[u:u:<id>]]` — and the inner
+// colon makes the strict grammar unparseable: neither resolved nor
+// sanitized, the raw token leaked to the client (observed live on the
+// R 134-2 figure question, 0.2.162). The grammar tolerates the doubled
+// prefix; normalizeRef folds it back to the single form every other
+// layer keys on.
+const REF = /\[\[(u:(?:u:)?[A-Za-z0-9_-]+)\]\]/g;
+
+function normalizeRef(id: string): string {
+  return id.startsWith("u:u:") ? id.slice(2) : id;
+}
 
 /** unit ids the passages actually contain (chunk metadata carries
  *  unit_id on typed MKO chunks). */
@@ -29,16 +40,19 @@ export function availableUnitIds(hits: ReadonlyArray<{ metadata: { unit_id?: str
 }
 
 export function parseRefs(text: string): string[] {
-  return [...text.matchAll(REF)].map((m) => m[1]);
+  return [...text.matchAll(REF)].map((m) => normalizeRef(m[1]));
 }
 
 /** Drop refs that don't resolve to a used passage unit — a dangling ref
  *  renders as nothing (the token removed), and the violation is logged. */
 export function sanitizeRefs(text: string, available: ReadonlySet<string>): { text: string; dropped: string[] } {
   const dropped: string[] = [];
-  const out = text.replace(REF, (full, id: string) => {
-    if (available.has(id)) return full;
-    dropped.push(id);
+  const out = text.replace(REF, (_full, id: string) => {
+    const normalized = normalizeRef(id);
+    // normalized already carries the single "u:" prefix — the template
+    // must not add another
+    if (available.has(normalized)) return `[[${normalized}]]`;
+    dropped.push(normalized);
     return "";
   });
   return { text: out, dropped };
