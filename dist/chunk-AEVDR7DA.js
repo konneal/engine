@@ -75,7 +75,7 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-G2RE4XRV.js";
+} from "./chunk-MTIAHAOK.js";
 import {
   embed,
   generateOnce
@@ -1760,6 +1760,7 @@ async function attachFigureImages(env, messages, usedHits, query) {
       const payload = row ? JSON.parse(String(row.payload)) : {};
       const uri = typeof payload.uri === "string" ? payload.uri : "";
       if (typeof payload.caption === "string" && payload.caption.trim()) figCaption = payload.caption.trim();
+      else if (typeof payload.description === "string" && payload.description.trim()) figCaption = payload.description.trim();
       const m = typeof uri === "string" ? uri.match(/^\/assets\/(.+)/) : null;
       if (!m) continue;
       const obj = await env.UNIT_ASSETS.get(m[1]);
@@ -2572,6 +2573,24 @@ Answer account questions from these records ONLY: name the record when you use i
       console.log("ask: retrieval failed:", String(e).slice(0, 300));
       telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q2.query), q2.lang, void 0, telemetryMeta());
       return finishLine("Search is briefly busy \u2014 please retry in a moment.");
+    }
+    {
+      const figs = retrieved.hits.filter((h) => h.metadata.block === "figure" && h.metadata.unit_id);
+      if (figs.length) {
+        try {
+          const ids = [...new Set(figs.map((h) => String(h.metadata.unit_id)))].slice(0, 20);
+          const ph = ids.map((_, i) => `?${i + 1}`).join(",");
+          const res = await env.DB.prepare(
+            `SELECT unit_id, json_extract(payload,'$.description') AS d FROM unit_payloads WHERE unit_id IN (${ph})`
+          ).bind(...ids).all();
+          const byId = new Map((res.results ?? []).map((r) => [r.unit_id, r.d]));
+          for (const h of figs) {
+            const d = byId.get(String(h.metadata.unit_id));
+            if (d) h.metadata.figure_description = String(d).slice(0, 600);
+          }
+        } catch {
+        }
+      }
     }
     const { hits } = retrieved;
     if (hits.length === 0 && !liveRecords?.length && (!boundModel || boundModel.gated)) {

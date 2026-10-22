@@ -23640,7 +23640,10 @@ Context passages:
     const tableSel = h.metadata.block === "table" ? tableSelection(h.metadata, query) : null;
     const pruned = tableSel?.text ?? null;
     if (tableSel) h.metadata.table_selection = { cols: tableSel.cols, rowsShown: tableSel.rowsShown, rowsTotal: tableSel.rowsTotal };
-    const body = clipToTokens(pruned ?? h.text, LIMITS.maxPassageTokens);
+    const figDesc = h.metadata.block === "figure" ? String(h.metadata.figure_description ?? "").trim() : "";
+    const raw = clipToTokens(pruned ?? h.text, LIMITS.maxPassageTokens);
+    const body = figDesc ? `${raw}
+Caption: ${figDesc}` : raw;
     const t = estTokens(head) + estTokens(body);
     if (t <= remain) {
       passageParts.push(head + body);

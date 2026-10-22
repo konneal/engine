@@ -173,7 +173,11 @@ async function attachFigureImages(env: Env, messages: { role: string; content: a
       const row = await env.DB.prepare("SELECT payload FROM unit_payloads WHERE unit_id = ?1").bind(h.metadata.unit_id!).first<any>();
       const payload = row ? JSON.parse(String(row.payload)) : {};
       const uri = typeof payload.uri === "string" ? payload.uri : "";
+      // the producer's caption first; the caption LANE's output (a
+      // generated description) second — the field drift that kept
+      // generated captions out of this context
       if (typeof payload.caption === "string" && payload.caption.trim()) figCaption = payload.caption.trim();
+      else if (typeof payload.description === "string" && payload.description.trim()) figCaption = payload.description.trim();
       const m = typeof uri === "string" ? uri.match(/^\/assets\/(.+)/) : null;
       if (!m) continue;
       const obj = await env.UNIT_ASSETS.get(m[1]);
@@ -1401,6 +1405,27 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     console.log("ask: retrieval failed:", String(e).slice(0, 300));
     telemetry(env, ctx, tier, "ask", MODELS.embed, false, 0, await sha256Hex(q.query), q.lang, undefined, telemetryMeta());
     return finishLine("Search is briefly busy — please retry in a moment.");
+  }
+  // the figure stratum (TODO.sota/14.10): figure payloads' generated
+  // captions ride their passages (buildMessages appends them) so the
+  // model has words for the drawing and a reason to cite the unit —
+  // one batched D1 read per turn that retrieved figures, fail-open
+  {
+    const figs = retrieved.hits.filter((h: Hit) => (h.metadata as any).block === "figure" && (h.metadata as any).unit_id);
+    if (figs.length) {
+      try {
+        const ids = [...new Set(figs.map((h: Hit) => String((h.metadata as any).unit_id)))].slice(0, 20);
+        const ph = ids.map((_, i) => `?${i + 1}`).join(",");
+        const res = await env.DB.prepare(
+          `SELECT unit_id, json_extract(payload,'$.description') AS d FROM unit_payloads WHERE unit_id IN (${ph})`,
+        ).bind(...ids).all<{ unit_id: string; d: string | null }>();
+        const byId = new Map((res.results ?? []).map((r) => [r.unit_id, r.d]));
+        for (const h of figs) {
+          const d = byId.get(String((h.metadata as any).unit_id));
+          if (d) (h.metadata as any).figure_description = String(d).slice(0, 600);
+        }
+      } catch { /* the caption is additive — the passage serves without it */ }
+    }
   }
   const { hits } = retrieved;
   if (hits.length === 0 && !liveRecords?.length && (!boundModel || boundModel.gated)) {
