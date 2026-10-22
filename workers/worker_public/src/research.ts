@@ -8,6 +8,7 @@ import { retrieve, buildMessages, citations } from "./pipeline";
 import { understandQuery } from "./understand";
 import { generateOnce } from "./ai";
 import { canonicalRefusal } from "./refusal";
+import { compressText } from "./compress";
 import { checkQuoteAnchors } from "./anchors";
 import { graphExpand, editionNote } from "./graph";
 import researchPromptText from "../prompts/research.md";
@@ -109,7 +110,7 @@ async function run(
     const older = passages.slice(0, Math.max(0, passages.length - KEEP_RECENT));
     const recent = passages.slice(-KEEP_RECENT);
     const digest = older.length
-      ? `Earlier evidence (digest, ${older.length} passages):\n${older.map((h) => `- ${h.metadata.docidentifier ?? ""} §${h.metadata.clause_anchor ?? ""}: ${h.text.replace(/\s+/g, " ").slice(0, 160)}`).join("\n")}\n\n`
+      ? `Earlier evidence (digest, ${older.length} passages):\n${older.map((h) => `- ${h.metadata.docidentifier ?? ""} §${h.metadata.clause_anchor ?? ""}: ${compressText(h.text, q.query, 160)}`).join("\n")}\n\n`
       : "";
     judge = await (async () => {
       try {
