@@ -4,20 +4,21 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-IT3MS476.js";
+} from "../../chunk-YIBHWKZV.js";
 import "../../chunk-ECOYO7EX.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
   modelGroundingBlock
-} from "../../chunk-6OD35FOY.js";
+} from "../../chunk-K5WL3DKH.js";
 import {
   handleSearch
-} from "../../chunk-IGAGXQHV.js";
+} from "../../chunk-K7UGBTBZ.js";
 import {
   buildMessages,
   citations,
   clientIp,
+  compressText,
   creditBudget,
   editionNote,
   fill,
@@ -37,11 +38,11 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-MTIAHAOK.js";
+} from "../../chunk-E74MNLBC.js";
 import {
   embed,
   generateOnce
-} from "../../chunk-NI4CIK6W.js";
+} from "../../chunk-FHRGC6TP.js";
 import {
   authenticate,
   corsHeaders,
@@ -50,14 +51,14 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-W7J5SFXJ.js";
+} from "../../chunk-GJATVGBS.js";
 import {
   canonicalRefusal
 } from "../../chunk-ETLSWSZ7.js";
 import {
   entitlementScope,
   standardKeysFrom
-} from "../../chunk-4NXH5ZI6.js";
+} from "../../chunk-D6UUAL7I.js";
 import {
   LIMITS,
   MODELS,
@@ -68,7 +69,7 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-VT7DR6NQ.js";
+} from "../../chunk-ZD6TYLET.js";
 import {
   P,
   setProfile
@@ -757,53 +758,6 @@ async function handleRevokeKey(env, req, id) {
   return json({ ok: true, updated: r.meta?.changes ?? 0 });
 }
 
-// workers/worker_public/src/compress.ts
-var STOP = new Set(
-  "the a an and or of to in on for with by as at is are was were be been from that this these those it its their there which who what when where how why not no than then also such may must shall can could should would per within under over into about between during before after each any all more most less least other only same both few many some own very one two".split(
-    " "
-  )
-);
-function tokens(text) {
-  return (text.toLowerCase().match(/[a-z0-9]+(?:[.][0-9]+)?/g) ?? []).filter(
-    (t) => /^[0-9]/.test(t) || t.length >= 3 && !STOP.has(t)
-  );
-}
-function splitSentences(text) {
-  const parts = text.replace(/\r/g, "").split(/(?<=[.!?;])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
-  return parts;
-}
-function scoreSentence(sentence, qTerms) {
-  const toks = tokens(sentence);
-  if (!toks.length) return 0;
-  let hits = 0;
-  for (const t of toks) if (qTerms.has(t)) hits += 1;
-  const density = hits / Math.sqrt(toks.length);
-  const numeric = /\d/.test(sentence) ? 0.35 : 0;
-  return density + numeric;
-}
-function compressText(text, query, budgetChars) {
-  const clean = text.replace(/\s+/g, " ").trim();
-  if (!clean || clean.length <= budgetChars) return clean;
-  const qTerms = new Set(tokens(query));
-  const sentences = splitSentences(clean);
-  if (sentences.length <= 1) {
-    const cut = clean.slice(0, Math.max(0, budgetChars));
-    const end = cut.lastIndexOf(" ");
-    return (end > 40 ? cut.slice(0, end) : cut).trim();
-  }
-  const scored = sentences.map((s, i) => ({ s, i, score: scoreSentence(s, qTerms) }));
-  const keep = /* @__PURE__ */ new Set([0]);
-  const ranked = scored.slice(1).sort((a, b) => b.score - a.score || a.i - b.i);
-  let used = sentences[0].length + 1;
-  for (const r of ranked) {
-    if (used + r.s.length + 1 > budgetChars) continue;
-    keep.add(r.i);
-    used += r.s.length + 1;
-  }
-  const out = scored.filter((r) => keep.has(r.i)).map((r) => r.s).join(" ").trim();
-  return out.slice(0, budgetChars);
-}
-
 // workers/worker_public/prompts/research.md
 var research_default = `You are a sufficiency judge for a research loop over {{PUBLISHER_NAME}} publications. Given the research question and the passages collected so far (across iterations), decide whether the collected evidence is SUFFICIENT to write a complete, well-grounded answer.
 
@@ -1165,13 +1119,13 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-GDHKPEZR.js");
+    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-JZY6GSYC.js");
     let payload;
     if (TOOLS_REGISTRY2.some((t) => t.name === name && t.audiences.includes("mcp"))) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-DP5HOH4K.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-FW5O32BY.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-72CFKRCU.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-IXNVNOOY.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });

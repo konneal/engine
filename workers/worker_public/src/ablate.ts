@@ -34,6 +34,11 @@ export interface AblateConfig {
    *  diversified subset + one strong verifier. Off in serving until the
    *  gate promotes it; the grid arms it per ask. */
   speculative: boolean;
+  /** Extractive prompt compression (TODO.sota/02 row 5): each passage
+   *  body is query-weighted sentence selection at a fraction of its
+   *  budget before the answer model reads it. Off in serving; the grid
+   *  arms it per ask (the row's accuracy-at-token-budget gate). */
+  compress: boolean;
 }
 
 export type AblateParse =
@@ -55,10 +60,11 @@ export function parseAblate(
   const noVerdict = body?.ablate_no_verdict === true;
   const rawRoute = body?.ablate_route;
   const speculative = body?.ablate_speculative === true;
+  const compress = body?.ablate_compress === true;
   const namesAblation = rawStages !== undefined && rawStages !== null;
   const routeAblation = rawRoute !== undefined && rawRoute !== null && rawRoute !== "adaptive";
 
-  if (!namesAblation && !noVerdict && !routeAblation && !speculative) return { ok: true, config: null };
+  if (!namesAblation && !noVerdict && !routeAblation && !speculative && !compress) return { ok: true, config: null };
 
   if (!adminToken || presentedToken !== adminToken) {
     return {
@@ -93,5 +99,5 @@ export function parseAblate(
     stages = [...new Set(rawStages as string[])];
   }
 
-  return { ok: true, config: { stages, noVerdict, route, speculative } };
+  return { ok: true, config: { stages, noVerdict, route, speculative, compress } };
 }

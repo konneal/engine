@@ -78,6 +78,9 @@ export const THRESHOLDS = {
    *  then states a measurement — claim support in the cited passages —
    *  not only the source rung. Fails open (a slow or unparseable check
    *  leaves the source-rung note unchanged). */
+  // the extractive compression arm (TODO.sota/02 row 5): when ablated
+  // on, each passage body is compressed to this share of its budget
+  compressShare: 0.6,
   entailmentGate: true,
   entailmentBudgetMs: 6000,
   entailmentSupportedFloor: 0.9,

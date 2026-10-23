@@ -32,7 +32,7 @@ import {
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-6OD35FOY.js";
+} from "./chunk-K5WL3DKH.js";
 import {
   NO_CONTEXT,
   STAGE_NAMES,
@@ -75,18 +75,18 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-MTIAHAOK.js";
+} from "./chunk-E74MNLBC.js";
 import {
   embed,
   generateOnce
-} from "./chunk-NI4CIK6W.js";
+} from "./chunk-FHRGC6TP.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-W7J5SFXJ.js";
+} from "./chunk-GJATVGBS.js";
 import {
   cacheableAnswer,
   canonicalRefusal,
@@ -99,7 +99,7 @@ import {
   requestSalt,
   resolveRequestScope,
   standardKeysFrom
-} from "./chunk-4NXH5ZI6.js";
+} from "./chunk-D6UUAL7I.js";
 import {
   LIMITS,
   MODELS,
@@ -110,7 +110,7 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-VT7DR6NQ.js";
+} from "./chunk-ZD6TYLET.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -1397,9 +1397,10 @@ function parseAblate(body, adminToken, presentedToken, knownStages) {
   const noVerdict = body?.ablate_no_verdict === true;
   const rawRoute = body?.ablate_route;
   const speculative = body?.ablate_speculative === true;
+  const compress = body?.ablate_compress === true;
   const namesAblation = rawStages !== void 0 && rawStages !== null;
   const routeAblation = rawRoute !== void 0 && rawRoute !== null && rawRoute !== "adaptive";
-  if (!namesAblation && !noVerdict && !routeAblation && !speculative) return { ok: true, config: null };
+  if (!namesAblation && !noVerdict && !routeAblation && !speculative && !compress) return { ok: true, config: null };
   if (!adminToken || presentedToken !== adminToken) {
     return {
       ok: false,
@@ -1430,7 +1431,7 @@ function parseAblate(body, adminToken, presentedToken, knownStages) {
     }
     stages = [...new Set(rawStages)];
   }
-  return { ok: true, config: { stages, noVerdict, route, speculative } };
+  return { ok: true, config: { stages, noVerdict, route, speculative, compress } };
 }
 
 // workers/worker_public/src/route.ts
@@ -2636,7 +2637,8 @@ Answer account questions from these records ONLY: name the record when you use i
       // stage-extracted graph facts (GraphRAG) ride the same note channel
       [ops.note, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
       summary,
-      budget
+      budget,
+      ablate?.compress === true
     );
     await attachFigureImages(env, messages, usedHits, q2.query);
     const pendingTools = [];
@@ -2946,7 +2948,7 @@ Answer account questions from these records ONLY: name the record when you use i
           ...routeSubset ? { stageSubset: routeSubset ?? void 0 } : {}
         });
         if (retryRetrieve.hits.length > 0) {
-          const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q2.query, retryRetrieve.hits, q2.lang, keptHistory, void 0, summary, budget);
+          const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q2.query, retryRetrieve.hits, q2.lang, keptHistory, void 0, summary, budget, ablate?.compress === true);
           const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
           if (retryAnswer) {
             answer = canonicalRefusal(retryAnswer, refusalScope(answerCites(retryAnswer)));

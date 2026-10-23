@@ -1,11 +1,11 @@
 import {
   embed,
   rerank
-} from "./chunk-NI4CIK6W.js";
+} from "./chunk-FHRGC6TP.js";
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-W7J5SFXJ.js";
+} from "./chunk-GJATVGBS.js";
 import {
   DATASETS,
   LIMITS,
@@ -15,7 +15,7 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-VT7DR6NQ.js";
+} from "./chunk-ZD6TYLET.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -1747,13 +1747,13 @@ var UnBuilder = class extends BaseBuilder {
     return key === "token";
   }
   build(data) {
-    const tokens = this.extractTokens(Array.isArray(data) ? data : data["token"]);
-    if (tokens.length === 0)
+    const tokens2 = this.extractTokens(Array.isArray(data) ? data : data["token"]);
+    if (tokens2.length === 0)
       throw new ParseFailed("UN identifier has no tokens", 0);
-    const path = tokens.slice(0, -1);
+    const path = tokens2.slice(0, -1);
     const yearToken = [...path].reverse().find((t) => /^\d{4}$/.test(t));
     const attrs = {
-      number: tokens[tokens.length - 1],
+      number: tokens2[tokens2.length - 1],
       path
     };
     if (yearToken)
@@ -3778,7 +3778,7 @@ function jisGrammarImplementation() {
 }
 
 // node_modules/@pubid/pubid/dist/flavors/iec/model.js
-var TS = (code, stageCode, typeCode, abbr, harmonized, tokens) => ({ code, stageCode, typeCode, abbr, harmonized, tokens });
+var TS = (code, stageCode, typeCode, abbr, harmonized, tokens2) => ({ code, stageCode, typeCode, abbr, harmonized, tokens: tokens2 });
 var TYPED_STAGES = [
   TS("is", "published", "is", ""),
   TS("tr", "published", "tr", "TR"),
@@ -4332,8 +4332,8 @@ function parseLanguages2(tree) {
   const raw = s(tree);
   if (raw === void 0)
     return [];
-  const tokens = raw.split(",").flatMap((chunk) => chunk.split("/"));
-  return tokens.map((token) => token.trim()).filter((token) => token !== "").map((original) => {
+  const tokens2 = raw.split(",").flatMap((chunk) => chunk.split("/"));
+  return tokens2.map((token) => token.trim()).filter((token) => token !== "").map((original) => {
     const code = original.length === 1 ? Language.CHAR_MAP[original] ?? original.toLowerCase() : original;
     return new Language({ code, originalCode: original });
   });
@@ -5582,8 +5582,8 @@ var TYPE_WORD_TO_CODE = (() => {
   return map;
 })();
 var LANGUAGE_ALIASES = { EN: "E", FR: "F" };
-function alternation(tokens) {
-  const sorted = [...tokens].sort((a, b) => b.length - a.length);
+function alternation(tokens2) {
+  const sorted = [...tokens2].sort((a, b) => b.length - a.length);
   return sorted.map((t) => str(t)).reduce((a, b) => a.or(b));
 }
 function buildRules24() {
@@ -6863,8 +6863,8 @@ function publishedStage(typeKey) {
 }
 function stageTokens2(typeKeys) {
   const stages = typeKeys === void 0 ? ISO_TYPED_STAGES : ISO_TYPED_STAGES.filter((s8) => typeKeys.includes(s8.typeKey));
-  const tokens = stages.flatMap((s8) => s8.abbr.filter((a) => a !== ""));
-  return [...new Set(tokens)].sort((a, b) => b.length - a.length);
+  const tokens2 = stages.flatMap((s8) => s8.abbr.filter((a) => a !== ""));
+  return [...new Set(tokens2)].sort((a, b) => b.length - a.length);
 }
 function stageAbbr(entry, formatLong, originalAbbr) {
   if (formatLong && entry.longAbbr !== void 0)
@@ -7697,8 +7697,8 @@ var WG_TYPES = [
   "JTAG",
   "JTG"
 ];
-function literalAlternation(tokens) {
-  const sorted = [...new Set(tokens)].sort((a, b) => b.length - a.length);
+function literalAlternation(tokens2) {
+  const sorted = [...new Set(tokens2)].sort((a, b) => b.length - a.length);
   return sorted.map((t) => str(t)).reduce((a, b) => a.or(b));
 }
 function buildRules25() {
@@ -8171,8 +8171,8 @@ var MONTHS = [
   "Nov",
   "Dec"
 ];
-function literalAlternation2(tokens) {
-  const sorted = [...new Set(tokens)].sort((a, b) => b.length - a.length);
+function literalAlternation2(tokens2) {
+  const sorted = [...new Set(tokens2)].sort((a, b) => b.length - a.length);
   return sorted.map((t) => str(t)).reduce((a, b) => a.or(b));
 }
 function buildRules26() {
@@ -10543,8 +10543,8 @@ var MONTHS2 = [
   "Nov",
   "Dec"
 ];
-function literalAlternation3(tokens) {
-  const sorted = [...new Set(tokens)].sort((a, b) => b.length - a.length);
+function literalAlternation3(tokens2) {
+  const sorted = [...new Set(tokens2)].sort((a, b) => b.length - a.length);
   return sorted.map((t) => str(t)).reduce((a, b) => a.or(b));
 }
 function buildRules27() {
@@ -14930,8 +14930,8 @@ var RM_ABBRS = [
   "RM"
 ];
 var SUPPLEMENT_ABBRS = ["AMD", "COR"];
-function abbrAlternation(tokens) {
-  const sorted = [...new Set(tokens)].sort((a, b) => b.length - a.length);
+function abbrAlternation(tokens2) {
+  const sorted = [...new Set(tokens2)].sort((a, b) => b.length - a.length);
   return sorted.map((t) => str(t)).reduce((a, b) => a.or(b));
 }
 function buildRules30() {
@@ -15857,9 +15857,9 @@ function adoptIdentifier(raw) {
 function splitPrefix(text) {
   if (text === void 0)
     return [void 0, void 0];
-  const tokens = text.trim().split(/\s+/);
-  const copublisher = normalizeCopublisher(tokens[0]);
-  const subtype = tokens.length > 1 ? normalizeSubtype(tokens.slice(1).join(" ")) : void 0;
+  const tokens2 = text.trim().split(/\s+/);
+  const copublisher = normalizeCopublisher(tokens2[0]);
+  const subtype = tokens2.length > 1 ? normalizeSubtype(tokens2.slice(1).join(" ")) : void 0;
   return [copublisher, subtype];
 }
 function normalizeCopublisher(raw) {
@@ -16710,7 +16710,7 @@ function stri(input) {
   }
   return parts.reduce((a, b) => a.then(b));
 }
-var alt = (tokens) => tokens.map((t) => str(t)).reduce((a, b) => a.or(b));
+var alt = (tokens2) => tokens2.map((t) => str(t)).reduce((a, b) => a.or(b));
 function buildRules34() {
   const rules = {};
   const rule = (name, build) => {
@@ -19512,9 +19512,9 @@ function parseCsa(input) {
       }
     }
     if (baseInput === void 0 || baseInput === "") {
-      const tokens = input.split(/\s+/);
+      const tokens2 = input.split(/\s+/);
       let acc = "";
-      for (const token of tokens) {
+      for (const token of tokens2) {
         if (/^PACKAGE$/i.test(token))
           break;
         const testInput = acc === "" ? token : `${acc} ${token}`;
@@ -19557,7 +19557,7 @@ function csaGrammarImplementation() {
 }
 
 // node_modules/@pubid/pubid/dist/flavors/asme/grammar.js
-var alt2 = (tokens) => tokens.map((t) => str(t)).reduce((a, b) => a.or(b));
+var alt2 = (tokens2) => tokens2.map((t) => str(t)).reduce((a, b) => a.or(b));
 function buildRules36() {
   const rules = {};
   const rule = (name, build) => {
@@ -23474,6 +23474,53 @@ columns: ${colKeep.map((i) => `${t.columns[i]?.label ?? ""}${t.columns[i]?.unit 
 ${lines.join("\n")}${elided}`, cols: colKeep.map((i) => `${t.columns[i]?.label ?? ""}${t.columns[i]?.unit ? ` [${t.columns[i].unit}]` : ""}`), rowsShown: shown.length, rowsTotal: t.rows.length };
 }
 
+// workers/worker_public/src/compress.ts
+var STOP2 = new Set(
+  "the a an and or of to in on for with by as at is are was were be been from that this these those it its their there which who what when where how why not no than then also such may must shall can could should would per within under over into about between during before after each any all more most less least other only same both few many some own very one two".split(
+    " "
+  )
+);
+function tokens(text) {
+  return (text.toLowerCase().match(/[a-z0-9]+(?:[.][0-9]+)?/g) ?? []).filter(
+    (t) => /^[0-9]/.test(t) || t.length >= 3 && !STOP2.has(t)
+  );
+}
+function splitSentences(text) {
+  const parts = text.replace(/\r/g, "").split(/(?<=[.!?;])\s+|\n+/).map((s8) => s8.trim()).filter(Boolean);
+  return parts;
+}
+function scoreSentence(sentence, qTerms) {
+  const toks = tokens(sentence);
+  if (!toks.length) return 0;
+  let hits = 0;
+  for (const t of toks) if (qTerms.has(t)) hits += 1;
+  const density = hits / Math.sqrt(toks.length);
+  const numeric = /\d/.test(sentence) ? 0.35 : 0;
+  return density + numeric;
+}
+function compressText(text, query, budgetChars) {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean || clean.length <= budgetChars) return clean;
+  const qTerms = new Set(tokens(query));
+  const sentences = splitSentences(clean);
+  if (sentences.length <= 1) {
+    const cut = clean.slice(0, Math.max(0, budgetChars));
+    const end = cut.lastIndexOf(" ");
+    return (end > 40 ? cut.slice(0, end) : cut).trim();
+  }
+  const scored = sentences.map((s8, i) => ({ s: s8, i, score: scoreSentence(s8, qTerms) }));
+  const keep = /* @__PURE__ */ new Set([0]);
+  const ranked = scored.slice(1).sort((a, b) => b.score - a.score || a.i - b.i);
+  let used = sentences[0].length + 1;
+  for (const r of ranked) {
+    if (used + r.s.length + 1 > budgetChars) continue;
+    keep.add(r.i);
+    used += r.s.length + 1;
+  }
+  const out = scored.filter((r) => keep.has(r.i)).map((r) => r.s).join(" ").trim();
+  return out.slice(0, budgetChars);
+}
+
 // workers/worker_public/src/pipeline.ts
 function promptVars(extra = {}) {
   const out = { PUBLISHER_NAME: P().publisher.name };
@@ -23596,7 +23643,7 @@ ${listing}` }
     return null;
   }
 }
-function buildMessages(query, hits, lang, history = [], retrievalNote, conversationSummary, budgetTokens = LIMITS.inputTokenBudget) {
+function buildMessages(query, hits, lang, history = [], retrievalNote, conversationSummary, budgetTokens = LIMITS.inputTokenBudget, compress) {
   const corpusNotes = DATASETS().filter(
     (d) => d.note && hits.some((h) => h.metadata.corpus === d.id)
   ).map((d) => d.note).join("\n");
@@ -23641,7 +23688,7 @@ Context passages:
     const pruned = tableSel?.text ?? null;
     if (tableSel) h.metadata.table_selection = { cols: tableSel.cols, rowsShown: tableSel.rowsShown, rowsTotal: tableSel.rowsTotal };
     const figDesc = h.metadata.block === "figure" ? String(h.metadata.figure_description ?? "").trim() : "";
-    const raw = clipToTokens(pruned ?? h.text, LIMITS.maxPassageTokens);
+    const raw = compress ? compressText(String(pruned ?? h.text ?? ""), query, Math.floor(LIMITS.maxPassageTokens * 4 * THRESHOLDS.compressShare)) : clipToTokens(pruned ?? h.text, LIMITS.maxPassageTokens);
     const body = figDesc ? `${raw}
 Caption: ${figDesc}` : raw;
     const t = estTokens(head) + estTokens(body);
@@ -24718,9 +24765,9 @@ async function tokenBudget(env, bucketId) {
   const used = Number(await env.CACHE.get(`t:${today()}:ask:${await sha256Hex(bucketId)}`) ?? "0");
   return { used, limit: tokenLimit(env, bucketId) };
 }
-async function chargeTokens(env, bucketId, tokens) {
-  if (!(tokens > 0)) return;
-  await kvIncr(env.CACHE, `t:${today()}:ask:${await sha256Hex(bucketId)}`, tokens);
+async function chargeTokens(env, bucketId, tokens2) {
+  if (!(tokens2 > 0)) return;
+  await kvIncr(env.CACHE, `t:${today()}:ask:${await sha256Hex(bucketId)}`, tokens2);
 }
 function usageTotal(usage) {
   if (!usage || typeof usage !== "object") return null;
@@ -24789,6 +24836,7 @@ Family summary (precomputed from the registry and the successor graph): ${summar
 }
 
 export {
+  compressText,
   refCodec,
   NO_CONTEXT,
   machineOffers,
