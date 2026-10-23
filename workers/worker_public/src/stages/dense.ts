@@ -51,9 +51,16 @@ export const dense: Stage = {
       // reachable only through a wider net. Fires only when the scope
       // starves to zero — zero behavior when the scope matches.
       if (!matches.length) {
-        const wide: any = await env.VECTORIZE.query(vector, { ...q, topK: THRESHOLDS.denseStarveK });
-        matches = (wide.matches ?? []).filter((m: any) => matchesDocScope(m.metadata ?? {}, filters.doc_number!));
-        console.log("dense scope starvation → deep re-query:", matches.length, "doc members in the top", THRESHOLDS.denseStarveK);
+        try {
+          const wide: any = await env.VECTORIZE.query(vector, { ...q, topK: THRESHOLDS.denseStarveK });
+          matches = (wide.matches ?? []).filter((m: any) => matchesDocScope(m.metadata ?? {}, filters.doc_number!));
+          console.log("dense scope starvation → deep re-query:", matches.length, "doc members in the top", THRESHOLDS.denseStarveK);
+        } catch (e) {
+          // the deep net must never break the ask: a rejected re-query
+          // (topK above the platform cap, a transient index error)
+          // degrades to the pre-fallback state — other lanes' leftovers
+          console.log("dense scope starvation re-query failed:", String(e).slice(0, 120));
+        }
       }
       // an edition pin corroborated by (almost) nothing means the pin
       // was a guess — understanding emits editions for families it

@@ -92,7 +92,7 @@ var THRESHOLDS = {
   // when the in-code doc scope cuts the vector-level top-K to zero, the
   // re-query runs at this depth and scopes in code (the native filter is
   // dead — measured 2026-10-05)
-  denseStarveK: 1e3,
+  denseStarveK: 100,
   entailmentGate: true,
   entailmentBudgetMs: 6e3,
   entailmentSupportedFloor: 0.9,
