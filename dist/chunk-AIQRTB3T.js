@@ -1,11 +1,11 @@
 import {
   embed,
   rerank
-} from "./chunk-FHRGC6TP.js";
+} from "./chunk-POW7OTLB.js";
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-GJATVGBS.js";
+} from "./chunk-HIQSYUAU.js";
 import {
   DATASETS,
   LIMITS,
@@ -15,7 +15,7 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-ZD6TYLET.js";
+} from "./chunk-DNKWDI4G.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -22921,6 +22921,69 @@ var lexicalRrf = {
   }
 };
 
+// workers/worker_public/src/stages/vlmFigureRerank.ts
+var FIGURE_Q = /\bfig(ure|s)?\b/i;
+function parsePick(text, kept) {
+  const t = text;
+  const s8 = typeof text === "string" ? text : typeof t?.response === "string" ? t.response : t?.choices?.[0]?.message?.content ?? "";
+  const pick = Number(String(s8).match(/"pick"\s*:\s*(\d+)/)?.[1] ?? 0);
+  return pick >= 1 && pick <= kept ? pick : 0;
+}
+var vlmFigureRerank = {
+  name: "vlm-figure-rerank",
+  failure: "additive",
+  when: (c) => FIGURE_Q.test(c.query) && c.finalHits.some((h) => h.metadata.block === "figure" && h.metadata.unit_id),
+  run: async (c) => {
+    const figures = c.finalHits.filter((h) => h.metadata.block === "figure" && h.metadata.unit_id).slice(0, 3);
+    if (!figures.length) return;
+    try {
+      const ids = figures.map((h) => String(h.metadata.unit_id));
+      const ph = ids.map((_, i) => `?${i + 1}`).join(",");
+      const rows = await c.env.DB.prepare(
+        `SELECT unit_id, json_extract(payload,'$.uri') AS uri FROM unit_payloads WHERE unit_id IN (${ph})`
+      ).bind(...ids).all();
+      const uris = new Map((rows.results ?? []).map((r) => [r.unit_id, r.uri]));
+      const content = [
+        {
+          type: "text",
+          text: `Question: ${c.query}
+
+Which of these figures best answers the question? Reply with ONLY: {"pick": N} using the image's number, or {"pick": 0} if none is relevant.`
+        }
+      ];
+      const kept = [];
+      let n = 0;
+      for (const h of figures) {
+        const uri = String(uris.get(String(h.metadata.unit_id)) ?? "");
+        const m = uri.match(/^\/assets\/(.+)/);
+        if (!m) continue;
+        const obj = await c.env.UNIT_ASSETS.get(m[1]);
+        if (!obj) continue;
+        const buf = new Uint8Array(await obj.arrayBuffer());
+        let binary = "";
+        for (let i = 0; i < buf.length; i += 8192) binary += String.fromCharCode(...buf.subarray(i, i + 8192));
+        n += 1;
+        content.push({ type: "text", text: `Image ${n}:` });
+        content.push({ type: "image_url", image_url: { url: `data:image/png;base64,${btoa(binary)}` } });
+        kept.push({ h, label: n });
+      }
+      if (!kept.length) return;
+      const raced = await Promise.race([
+        c.env.AI.run(MODELS.vlmFigure, { messages: [{ role: "user", content }], max_tokens: 256, reasoning_effort: "low" }),
+        new Promise((r) => setTimeout(() => r(null), 15e3))
+      ]);
+      const pick = parsePick(raced, kept.length);
+      const chosen = kept.find((k) => k.label === pick);
+      if (!chosen) return;
+      const top = Math.max(...c.finalHits.map((h) => h.rerank_score ?? h.score ?? 0));
+      chosen.h.rerank_score = top + 1;
+      c.finalHits = [chosen.h, ...c.finalHits.filter((h) => h !== chosen.h)];
+      console.log("vlm-figure-rerank: promoted", chosen.h.metadata.unit_id, "over", c.finalHits.length - 1, "text-ranked hits");
+    } catch {
+    }
+  }
+};
+
 // workers/worker_public/src/stages/termNudge.ts
 var termNudge = {
   name: "term-nudge",
@@ -23419,6 +23482,7 @@ var STAGES = [
   typedPin,
   sectionDescent,
   dedup,
+  vlmFigureRerank,
   windowFloor
 ];
 var STAGE_NAMES = STAGES.map((s8) => s8.name);

@@ -11,6 +11,10 @@ var MODELS = {
   // Vision image-parts land with answer contract v2; text answers work now.
   anon: "@cf/zai-org/glm-5.3-flash",
   member: "@cf/zai-org/glm-5.3-flash",
+  // the VLM figure rerank (TODO.sota/18.3): the newly-landed
+  // vision-capable MoE scores figure IMAGES against figure-seeking
+  // questions — one bounded call per figure question, ablatable stage
+  vlmFigure: "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
   // hot-path understanding/summarize stays on the cheap Qwen (cost-first lane)
   understand: "@cf/qwen/qwen3-30b-a3b-fp8",
   // the api_call act's intent-to-act mapping (TODO.ai-platform/09) — the
