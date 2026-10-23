@@ -22994,6 +22994,59 @@ Which of these figures best answers the question? Reply with ONLY: {"pick": N} u
   }
 };
 
+// workers/worker_public/src/stages/figureSeat.ts
+var figureSeat = {
+  name: "figure-seat",
+  failure: "additive",
+  when: (c) => FIGURE_Q.test(c.query),
+  run: async (c) => {
+    try {
+      const counts = /* @__PURE__ */ new Map();
+      for (const h of c.finalHits.slice(0, 5)) {
+        const dn = String(h.metadata.doc_number ?? "");
+        if (dn) counts.set(dn, (counts.get(dn) ?? 0) + 1);
+      }
+      const docNumber = c.u?.doc_number ?? [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      if (!docNumber) return;
+      const seated = new Set(
+        c.finalHits.filter((h) => h.metadata.block === "figure").map((h) => String(h.metadata.unit_id ?? h.id))
+      );
+      const rows = await portStore(c.env).prepare(
+        `SELECT id, doc_id, docidentifier, clause_anchor, clause_title, doc_number, edition, language, status, corpus, tier, text, unit_id
+           FROM chunks WHERE doc_number = ?1 AND block = 'figure' AND unit_id IS NOT NULL LIMIT 3`
+      ).bind(String(docNumber)).all();
+      const fresh = [];
+      for (const r of rows.results ?? []) {
+        if (seated.has(String(r.unit_id))) continue;
+        fresh.push({
+          id: String(r.id),
+          score: 0,
+          rerank_score: 0,
+          text: String(r.text ?? ""),
+          metadata: {
+            doc_id: String(r.doc_id ?? ""),
+            docidentifier: String(r.docidentifier ?? ""),
+            doc_number: String(r.doc_number ?? docNumber),
+            clause_anchor: r.clause_anchor ? String(r.clause_anchor) : void 0,
+            clause_title: r.clause_title ? String(r.clause_title) : void 0,
+            edition: r.edition ? String(r.edition) : void 0,
+            language: r.language ? String(r.language) : void 0,
+            status: r.status ? String(r.status) : void 0,
+            corpus: r.corpus ? String(r.corpus) : void 0,
+            tier: r.tier ? String(r.tier) : void 0,
+            block: "figure",
+            unit_id: String(r.unit_id)
+          }
+        });
+      }
+      if (!fresh.length) return;
+      c.finalHits = [...fresh, ...c.finalHits];
+      console.log("figure-seat: seated", fresh.length, "figure chunk(s) of doc", docNumber);
+    } catch {
+    }
+  }
+};
+
 // workers/worker_public/src/stages/termNudge.ts
 var termNudge = {
   name: "term-nudge",
@@ -23492,6 +23545,7 @@ var STAGES = [
   typedPin,
   sectionDescent,
   dedup,
+  figureSeat,
   vlmFigureRerank,
   windowFloor
 ];

@@ -104,3 +104,33 @@ test("figure completion: the seeking path stays off for non-figure questions", a
   await completeFigures(db as any, "The tolerance applies at reference conditions.", [], used, "What MPE applies to a C3 load cell?");
   assert.equal(called, 0);
 });
+
+test("figure seat: a figure-seeking question seats the document's own figure chunks deterministically", async () => {
+  const { figureSeat } = await import("../workers/worker_public/src/stages/figureSeat.ts");
+  let sql = "";
+  const db = {
+    prepare: (s: string) => { sql = s; return { bind: (...args: string[]) => ({ all: async () => ({ results: [
+      { id: "cfig1", doc_id: "mko:oiml-r-134-2", docidentifier: "OIML R 134-2", clause_anchor: "6.1.3.1", clause_title: "", doc_number: "134", edition: "2009", language: "en", status: "in-force", corpus: "mko", tier: "mko", text: "figure text with the caption", unit_id: "u:_725ee6db" },
+    ] }) }) } },
+  };
+  const c: any = {
+    env: { DB: db }, query: "What does the figure in OIML R 134-2 clause 6.1.3.1 show?",
+    u: { doc_number: "134" },
+    finalHits: [{ metadata: { doc_number: "134", docidentifier: "OIML R 134-2" }, id: "tbl", score: 3, text: "table" }],
+    hits: [], matches: [], lane: {}, opts: {},
+  };
+  await figureSeat.run(c);
+  assert.match(sql, /block = 'figure'/);
+  assert.equal(c.finalHits[0].metadata.block, "figure");
+  assert.equal(c.finalHits[0].metadata.unit_id, "u:_725ee6db");
+  assert.equal(c.finalHits.length, 2); // seated ahead, nothing displaced
+});
+
+test("figure seat: stays off for non-figure questions and already-seated figures skip", async () => {
+  const { figureSeat } = await import("../workers/worker_public/src/stages/figureSeat.ts");
+  let called = 0;
+  const db = { prepare: () => ({ bind: async () => ({ all: async () => { called += 1; return { results: [] }; } }) }) };
+  const c: any = { env: { DB: db }, query: "What MPE applies to a C3 load cell?", u: { doc_number: "60" }, finalHits: [], hits: [], matches: [], lane: {}, opts: {} };
+  await figureSeat.run(c);
+  assert.equal(called, 0);
+});
