@@ -3,6 +3,7 @@ export declare const MODELS: {
     readonly rerank: "@cf/baai/bge-reranker-base";
     readonly anon: "@cf/zai-org/glm-5.3-flash";
     readonly member: "@cf/zai-org/glm-5.3-flash";
+    readonly vlmFigure: "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
     readonly understand: "@cf/qwen/qwen3-30b-a3b-fp8";
     readonly acts: "@cf/qwen/qwen3-30b-a3b-fp8";
     readonly fallback: "@cf/qwen/qwen3-30b-a3b-fp8";

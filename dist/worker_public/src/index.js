@@ -4,16 +4,16 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-GVCOGEJC.js";
+} from "../../chunk-2JNJ56RG.js";
 import "../../chunk-ECOYO7EX.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
   modelGroundingBlock
-} from "../../chunk-K5WL3DKH.js";
+} from "../../chunk-X6GUTX76.js";
 import {
   handleSearch
-} from "../../chunk-K7UGBTBZ.js";
+} from "../../chunk-W4BGNU6X.js";
 import {
   buildMessages,
   citations,
@@ -38,11 +38,11 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-E74MNLBC.js";
+} from "../../chunk-AIQRTB3T.js";
 import {
   embed,
   generateOnce
-} from "../../chunk-FHRGC6TP.js";
+} from "../../chunk-POW7OTLB.js";
 import {
   authenticate,
   corsHeaders,
@@ -51,14 +51,14 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-GJATVGBS.js";
+} from "../../chunk-HIQSYUAU.js";
 import {
   canonicalRefusal
 } from "../../chunk-ETLSWSZ7.js";
 import {
   entitlementScope,
   standardKeysFrom
-} from "../../chunk-D6UUAL7I.js";
+} from "../../chunk-C67BN6G3.js";
 import {
   LIMITS,
   MODELS,
@@ -69,7 +69,7 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-ZD6TYLET.js";
+} from "../../chunk-DNKWDI4G.js";
 import {
   P,
   setProfile
@@ -1119,13 +1119,13 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-JZY6GSYC.js");
+    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-OCR2HLT5.js");
     let payload;
     if (TOOLS_REGISTRY2.some((t) => t.name === name && t.audiences.includes("mcp"))) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-B7XXKYZP.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-IXNVNOOY.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-FWO5ANMW.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-EQ26APKS.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });
