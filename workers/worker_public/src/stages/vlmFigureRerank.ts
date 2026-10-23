@@ -8,6 +8,7 @@
 // mode is additive (the text ranking stands). Off via the registry
 // projection like any stage (ablate_stages drops it).
 import { MODELS } from "../config.ts";
+import { portBlobs, portModelRunner, portStore } from "../env.ts";
 import type { Stage } from "./types.ts";
 import type { Hit } from "../../../shared/chunk";
 
@@ -30,7 +31,7 @@ export const vlmFigureRerank: Stage = {
     try {
       const ids = figures.map((h: Hit) => String((h.metadata as any).unit_id));
       const ph = ids.map((_, i) => `?${i + 1}`).join(",");
-      const rows = await c.env.DB.prepare(
+      const rows = await portStore(c.env).prepare(
         `SELECT unit_id, json_extract(payload,'$.uri') AS uri FROM unit_payloads WHERE unit_id IN (${ph})`,
       )
         .bind(...ids)
@@ -50,9 +51,9 @@ export const vlmFigureRerank: Stage = {
         const uri = String(uris.get(String((h.metadata as any).unit_id)) ?? "");
         const m = uri.match(/^\/assets\/(.+)/);
         if (!m) continue;
-        const obj = await c.env.UNIT_ASSETS.get(m[1]);
-        if (!obj) continue;
-        const buf = new Uint8Array(await obj.arrayBuffer());
+        const obj = await portBlobs(c.env).get(m[1]);
+        if (!obj?.body) continue;
+        const buf = new Uint8Array(await new Response(obj.body).arrayBuffer());
         let binary = "";
         for (let i = 0; i < buf.length; i += 8192) binary += String.fromCharCode(...buf.subarray(i, i + 8192));
         n += 1;
@@ -62,10 +63,10 @@ export const vlmFigureRerank: Stage = {
       }
       if (!kept.length) return;
       const raced: any = await Promise.race([
-        c.env.AI.run(MODELS.vlmFigure, { messages: [{ role: "user", content }], max_tokens: 256, reasoning_effort: "low" }),
+        portModelRunner(c.env).run({ model: MODELS.vlmFigure, messages: [{ role: "user", content }], maxTokens: 256, effort: "low" }),
         new Promise<null>((r) => setTimeout(() => r(null), 15000)),
       ]);
-      const pick = parsePick(raced, kept.length);
+      const pick = parsePick(raced?.text ?? raced, kept.length);
       const chosen = kept.find((k) => k.label === pick);
       if (!chosen) return;
       const top = Math.max(...c.finalHits.map((h: Hit) => h.rerank_score ?? h.score ?? 0));
