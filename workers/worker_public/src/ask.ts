@@ -1500,6 +1500,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     [ops.note, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
+    ablate?.compress === true,
   );
   await attachFigureImages(env, messages, usedHits, q.query);
   // the agent loop (the owner's 2026-09-28 direction): ONE bounded tool
@@ -1953,7 +1954,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         ...(routeSubset ? { stageSubset: routeSubset ?? undefined } : {}),
       });
       if (retryRetrieve.hits.length > 0) {
-        const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget);
+        const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget, ablate?.compress === true);
         const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
         // the answer now comes from the retry passages — citations must follow
         if (retryAnswer) {

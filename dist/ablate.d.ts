@@ -13,6 +13,11 @@ export interface AblateConfig {
      *  diversified subset + one strong verifier. Off in serving until the
      *  gate promotes it; the grid arms it per ask. */
     speculative: boolean;
+    /** Extractive prompt compression (TODO.sota/02 row 5): each passage
+     *  body is query-weighted sentence selection at a fraction of its
+     *  budget before the answer model reads it. Off in serving; the grid
+     *  arms it per ask (the row's accuracy-at-token-budget gate). */
+    compress: boolean;
 }
 export type AblateParse = {
     ok: true;

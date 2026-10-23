@@ -50,7 +50,11 @@ export declare function splitHistory(history: HistoryTurn[], budgetTokens: numbe
  *  hard queries (cascade stage after the cross-encoder). Null = keep the
  *  incoming order (timeout/parse failure never blocks serving). */
 export declare function listwiseRerank(env: any, model: string, query: string, hits: Hit[]): Promise<Hit[] | null>;
-export declare function buildMessages(query: string, hits: Hit[], lang?: string, history?: HistoryTurn[], retrievalNote?: string, conversationSummary?: string, budgetTokens?: number): BuiltMessages;
+export declare function buildMessages(query: string, hits: Hit[], lang?: string, history?: HistoryTurn[], retrievalNote?: string, conversationSummary?: string, budgetTokens?: number, 
+/** the extractive compression arm (TODO.sota/02 row 5): ablate_compress
+ *  arms it per ask — each passage body becomes query-weighted sentence
+ *  selection at compressShare of its budget. Off in serving. */
+compress?: boolean): BuiltMessages;
 export declare function citations(hits: Hit[]): {
     doc_id: string;
     docidentifier: string;

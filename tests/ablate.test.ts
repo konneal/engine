@@ -37,13 +37,13 @@ test("ablation is refused when no admin token is configured", () => {
 test("a valid stage list parses with the admin credential", () => {
   const r = parseAblate({ ablate_stages: ["dense", "pool-open", "diversity", "window-floor"] }, "tok", "tok", KNOWN);
   assert.equal(r.ok, true);
-  assert.deepEqual((r as any).config, { stages: ["dense", "pool-open", "diversity", "window-floor"], noVerdict: false, route: "adaptive", speculative: false });
+  assert.deepEqual((r as any).config, { stages: ["dense", "pool-open", "diversity", "window-floor"], noVerdict: false, route: "adaptive", speculative: false, compress: false });
 });
 
 test("no-verdict parses standalone", () => {
   const r = parseAblate({ ablate_no_verdict: true }, "tok", "tok", KNOWN);
   assert.equal(r.ok, true);
-  assert.deepEqual((r as any).config, { stages: null, noVerdict: true, route: "adaptive", speculative: false });
+  assert.deepEqual((r as any).config, { stages: null, noVerdict: true, route: "adaptive", speculative: false, compress: false });
 });
 
 test("ablate_route: \"adaptive\" is the default and needs no gate", () => {
@@ -58,7 +58,7 @@ test("ablate_route: forced routes gate on the admin credential", () => {
   assert.equal((denied as any).status, 403);
   const fast = parseAblate({ ablate_route: "fast" }, "tok", "tok", KNOWN);
   assert.equal(fast.ok, true);
-  assert.deepEqual((fast as any).config, { stages: null, noVerdict: false, route: "fast", speculative: false });
+  assert.deepEqual((fast as any).config, { stages: null, noVerdict: false, route: "fast", speculative: false, compress: false });
   const deep = parseAblate({ ablate_route: "deep" }, "tok", "tok", KNOWN);
   assert.equal((deep as any).config.route, "deep");
 });
@@ -75,7 +75,7 @@ test("ablate_speculative gates on the admin credential like every field", () => 
   assert.equal((denied as any).status, 403);
   const ok = parseAblate({ ablate_speculative: true }, "tok", "tok", KNOWN);
   assert.equal(ok.ok, true);
-  assert.deepEqual((ok as any).config, { stages: null, noVerdict: false, route: "adaptive", speculative: true });
+  assert.deepEqual((ok as any).config, { stages: null, noVerdict: false, route: "adaptive", speculative: true, compress: false });
   // the false/absent form is a normal ask, not an ablation
   assert.equal((parseAblate({ ablate_speculative: false }, undefined, null, KNOWN) as any).config, null);
 });
@@ -121,4 +121,22 @@ test("the pinned vocabulary matches the registry — a new stage updates it cons
   assert.equal(STAGE_NAMES[0], "dense");
   assert.ok(STAGE_NAMES.indexOf("pool-open") < STAGE_NAMES.indexOf("rerank"));
   assert.equal(STAGE_NAMES[STAGE_NAMES.length - 1], "window-floor");
+});
+
+test("ablate_compress arms the extractive compression arm, admin-gated", () => {
+  const denied = parseAblate({ ablate_compress: true }, "tok", null, KNOWN);
+  assert.equal(denied.ok, false);
+  const ok = parseAblate({ ablate_compress: true }, "tok", "tok", KNOWN);
+  assert.equal(ok.ok, true);
+  assert.equal(ok.ok && ok.config?.compress, true);
+  // absent → the serving default (off), no configuration
+  const off = parseAblate({}, "tok", "tok", KNOWN);
+  assert.equal(off.ok && off.config, null);
+});
+
+test("ablate_compress rides alongside the other arms", () => {
+  const both = parseAblate({ ablate_compress: true, ablate_route: "fast" }, "tok", "tok", KNOWN);
+  assert.equal(both.ok, true);
+  assert.equal(both.ok && both.config?.compress, true);
+  assert.equal(both.ok && both.config?.route, "fast");
 });

@@ -5,6 +5,7 @@ import systemPromptText from "../prompts/system.md";
 import conversationalPromptText from "../prompts/conversational.md";
 import listwisePromptText from "../prompts/listwise.md";
 import { tableSelection } from "./tablecontext";
+import { compressText } from "./compress";
 
 // the pinned refusal sentence lives with the canonicalizer in ./refusal
 // (refusals are never cached: a refusal says "retrieval found nothing",
@@ -287,6 +288,10 @@ export function buildMessages(
   retrievalNote?: string,
   conversationSummary?: string,
   budgetTokens: number = LIMITS.inputTokenBudget,
+  /** the extractive compression arm (TODO.sota/02 row 5): ablate_compress
+   *  arms it per ask — each passage body becomes query-weighted sentence
+   *  selection at compressShare of its budget. Off in serving. */
+  compress?: boolean,
 ): BuiltMessages {
   // per-corpus guidance travels WITH the dataset (config.ts): every
   // dataset whose corpus appears in the passages contributes its note —
@@ -365,7 +370,12 @@ export function buildMessages(
     // the drawing and a reason to cite the unit; absent for every other
     // block type and for uncaptioned figures
     const figDesc = (h.metadata as any).block === "figure" ? String((h.metadata as any).figure_description ?? "").trim() : "";
-    const raw = clipToTokens(pruned ?? h.text, LIMITS.maxPassageTokens);
+    // the compression arm replaces clipping: the query-weighted extractor
+    // bounds the text itself (deterministic, never grows it); clipping
+    // stays the default
+    const raw = compress
+      ? compressText(String(pruned ?? h.text ?? ""), query, Math.floor(LIMITS.maxPassageTokens * 4 * THRESHOLDS.compressShare))
+      : clipToTokens(pruned ?? h.text, LIMITS.maxPassageTokens);
     const body = figDesc ? `${raw}\nCaption: ${figDesc}` : raw;
     const t = estTokens(head) + estTokens(body);
     if (t <= remain) {

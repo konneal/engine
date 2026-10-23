@@ -49,6 +49,7 @@ export declare const THRESHOLDS: {
      *  then states a measurement — claim support in the cited passages —
      *  not only the source rung. Fails open (a slow or unparseable check
      *  leaves the source-rung note unchanged). */
+    readonly compressShare: 0.6;
     readonly entailmentGate: true;
     readonly entailmentBudgetMs: 6000;
     readonly entailmentSupportedFloor: 0.9;
