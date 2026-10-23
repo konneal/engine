@@ -1,7 +1,7 @@
 import {
   answerEffort,
   effortBudget
-} from "./chunk-DNKWDI4G.js";
+} from "./chunk-FQYHT4VC.js";
 
 // workers/worker_public/src/ai.ts
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));

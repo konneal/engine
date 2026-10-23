@@ -85,6 +85,11 @@ export const THRESHOLDS = {
   // the extractive compression arm (TODO.sota/02 row 5): when ablated
   // on, each passage body is compressed to this share of its budget
   compressShare: 0.6,
+  // the dense scope's starvation fallback (the R 134-2 figure question):
+  // when the in-code doc scope cuts the vector-level top-K to zero, the
+  // re-query runs at this depth and scopes in code (the native filter is
+  // dead — measured 2026-10-05)
+  denseStarveK: 1000,
   entailmentGate: true,
   entailmentBudgetMs: 6000,
   entailmentSupportedFloor: 0.9,

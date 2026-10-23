@@ -3,7 +3,7 @@
 // query, no filter — bit-for-bit same candidates, one serial round-trip
 // saved), the doc/edition-filtered query with its guessed-pin drop and
 // sparse-filter widen, and the plain unfiltered query.
-import { LIMITS } from "../config.ts";
+import { LIMITS, THRESHOLDS } from "../config.ts";
 import { matchesDocScope } from "../context.ts";
 import type { Stage } from "./types.ts";
 
@@ -41,6 +41,20 @@ export const dense: Stage = {
       matches = matches.filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number!));
       if (filters.edition) matches = matches.filter((m) => !m.metadata?.edition || String(m.metadata.edition) === filters.edition);
       console.log("dense scope (in code):", before, "→", matches.length, "in doc", filters.doc_number, filters.edition ? `@${filters.edition}` : "");
+      // the in-code starvation fallback (observed live: the R 134-2
+      // figure question — the vector-level top-K held ZERO members of
+      // the asked document, so the scope cut to nothing and the answer
+      // ran on other lanes' leftovers): re-query at a deep topK and
+      // scope in code — the NATIVE metadata filter is dead on this
+      // platform (measured 2026-10-05: filters return empty for values
+      // proven present), so the document's own nearest neighbors are
+      // reachable only through a wider net. Fires only when the scope
+      // starves to zero — zero behavior when the scope matches.
+      if (!matches.length) {
+        const wide: any = await env.VECTORIZE.query(vector, { ...q, topK: THRESHOLDS.denseStarveK });
+        matches = (wide.matches ?? []).filter((m: any) => matchesDocScope(m.metadata ?? {}, filters.doc_number!));
+        console.log("dense scope starvation → deep re-query:", matches.length, "doc members in the top", THRESHOLDS.denseStarveK);
+      }
       // an edition pin corroborated by (almost) nothing means the pin
       // was a guess — understanding emits editions for families it
       // mixes up (observed: R 76 pinned @2021, an R 60 year; the corpus

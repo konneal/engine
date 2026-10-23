@@ -350,3 +350,24 @@ test("additive failure: a throwing additive stage leaves the context intact", as
   await runStages([boom, after], c);
   assert.ok(ranAfter, "the runner stopped after an additive failure");
 });
+
+test("dense: the in-code scope starvation falls back to a deep re-query (the R 134-2 figure question)", async () => {
+  // the vector-level top-K held ZERO members of the asked document;
+  // the native metadata filter is dead on this platform — the fallback
+  // re-queries at denseStarveK and scopes in code, so the document's
+  // own nearest neighbors enter the pool
+  const { dense } = await import("../workers/worker_public/src/stages/dense.ts");
+  const others = Array.from({ length: 50 }, (_, i) => ({ id: `other-${i}`, score: 0.9 - i / 100, metadata: { doc_number: "76" } }));
+  const docMembers = [
+    { id: "fig-1", score: 0.55, metadata: { doc_number: "134", docidentifier: "OIML R 134-2", block: "figure", unit_id: "u:fig" } },
+    { id: "clause-1", score: 0.52, metadata: { doc_number: "134", docidentifier: "OIML R 134-2" } },
+  ];
+  const queries: any[] = [];
+  const env = { VECTORIZE: { query: async (vector: number[], q: any) => { queries.push(q); return { matches: q.topK > 50 ? [...docMembers, ...others] : others }; } } };
+  const c: any = { env, query: "figure eccentricity test", rq: "eccentricity test", folded: "eccentricity test", vector: [0.1], u: null, filters: { doc_number: "134" }, matches: [], hits: [], finalHits: [], opts: {}, lane: {} };
+  await dense.run(c);
+  assert.ok(queries.length >= 2); // the starvation re-query fired (the widen may add more)
+  assert.ok(queries.some((q: any) => q.topK > 50)); // the deep net ran
+  const inDoc = c.matches.filter((m: any) => m.metadata?.doc_number === "134");
+  assert.ok(inDoc.length >= 2);
+});
