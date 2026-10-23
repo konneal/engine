@@ -51,6 +51,7 @@ export declare const THRESHOLDS: {
      *  not only the source rung. Fails open (a slow or unparseable check
      *  leaves the source-rung note unchanged). */
     readonly compressShare: 0.6;
+    readonly denseStarveK: 1000;
     readonly entailmentGate: true;
     readonly entailmentBudgetMs: 6000;
     readonly entailmentSupportedFloor: 0.9;

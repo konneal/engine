@@ -1,11 +1,11 @@
 import {
   embed,
   rerank
-} from "./chunk-POW7OTLB.js";
+} from "./chunk-5V2A3CAH.js";
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-HIQSYUAU.js";
+} from "./chunk-TTEJQ5XA.js";
 import {
   DATASETS,
   LIMITS,
@@ -15,7 +15,7 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-DNKWDI4G.js";
+} from "./chunk-FQYHT4VC.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -22164,6 +22164,11 @@ var dense = {
       matches = matches.filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number));
       if (filters.edition) matches = matches.filter((m) => !m.metadata?.edition || String(m.metadata.edition) === filters.edition);
       console.log("dense scope (in code):", before, "\u2192", matches.length, "in doc", filters.doc_number, filters.edition ? `@${filters.edition}` : "");
+      if (!matches.length) {
+        const wide = await env.VECTORIZE.query(vector, { ...q, topK: THRESHOLDS.denseStarveK });
+        matches = (wide.matches ?? []).filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number));
+        console.log("dense scope starvation \u2192 deep re-query:", matches.length, "doc members in the top", THRESHOLDS.denseStarveK);
+      }
       if (filters && filters.edition && matches.length < 3) {
         const docOnly = allMatches.filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number));
         if (docOnly.length > matches.length) {
