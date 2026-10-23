@@ -34,6 +34,7 @@ import { overviewDemote } from "./overviewDemote.ts";
 import { familyBoost } from "./familyBoost.ts";
 import { rerankStage, lexicalRrf } from "./rerank.ts";
 import { vlmFigureRerank } from "./vlmFigureRerank.ts";
+import { figureSeat } from "./figureSeat.ts";
 import { termNudge } from "./termNudge.ts";
 import { conceptSteer } from "./conceptSteer.ts";
 import { editionSteer } from "./editionSteer.ts";
@@ -76,6 +77,7 @@ export const STAGES: Stage[] = [
   typedPin,
   sectionDescent,
   dedup,
+  figureSeat,
   vlmFigureRerank,
   windowFloor,
 ];
