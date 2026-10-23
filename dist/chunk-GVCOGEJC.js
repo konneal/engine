@@ -470,13 +470,19 @@ async function completeTables(db, answer, used) {
   }
   return blocks;
 }
-async function completeFigures(db, answer, alreadyAttached, used = []) {
+async function completeFigures(db, answer, alreadyAttached, used = [], query) {
   const unitForm = (answer.match(/u:fig[\w.-]*/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, ""));
   const bareForm = (answer.match(/\bfig-[\w.-]+\b/g) ?? []).map((x) => x.replace(/[.,;:)]+$/, ""));
   let mentioned = [.../* @__PURE__ */ new Set([...unitForm, ...bareForm.map((x) => x.startsWith("u:") ? x : "u:" + x)])].slice(0, 6);
   const proseNums = new Set(
     (answer.match(/\bFig(?:ure|\.)s?\s*([0-9]{1,2}[a-z]?)/g) ?? []).map((x) => x.replace(/\bFig(?:ure|\.)s?\s*/i, "").toLowerCase())
   );
+  if (query && /\bfig(ure|s)?\b/i.test(query)) {
+    for (const h of used.slice(0, 12)) {
+      if (h.metadata.unit_id && h.metadata.block === "figure") mentioned.push(h.metadata.unit_id);
+    }
+    mentioned = [...new Set(mentioned)].slice(0, 6);
+  }
   if (proseNums.size) {
     const fams = [...new Set(used.map((h) => h.metadata.docidentifier).filter(Boolean))].slice(0, 3);
     for (const fam of fams) {
@@ -2973,7 +2979,7 @@ Answer account questions from these records ONLY: name the record when you use i
       completionBlocks = await completeTables(env.DB, answer, used);
       if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
     }
-    completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used));
+    completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used, q2.query));
     if (withImage && register?.rows?.length && answer.includes(refusalAnswer())) {
       console.log("blind-answer: the register note carried rows but the answer refused \u2014 regenerating once");
       mark("Re-answering from the register results");

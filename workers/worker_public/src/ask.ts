@@ -1994,7 +1994,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   }
 
   // figure completion (#172) — see ./completion for the rationale
-  completionBlocks.push(...(await completeFigures(env.DB, answer!, [...c2ns.blocks, ...completionBlocks], used)));
+  completionBlocks.push(...(await completeFigures(env.DB, answer!, [...c2ns.blocks, ...completionBlocks], used, q.query)));
 
   // the blind-answer regeneration (2026-10-03, live on the photo case):
   // the multimodal call can answer AROUND an attached image — a 200 whose
