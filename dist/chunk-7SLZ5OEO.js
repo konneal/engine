@@ -21,6 +21,7 @@ import {
 } from "./chunk-3FYJM7LH.js";
 import {
   hasLane,
+  portBlobs,
   portIndex,
   portModelRunner,
   portStore
@@ -22939,7 +22940,7 @@ var vlmFigureRerank = {
     try {
       const ids = figures.map((h) => String(h.metadata.unit_id));
       const ph = ids.map((_, i) => `?${i + 1}`).join(",");
-      const rows = await c.env.DB.prepare(
+      const rows = await portStore(c.env).prepare(
         `SELECT unit_id, json_extract(payload,'$.uri') AS uri FROM unit_payloads WHERE unit_id IN (${ph})`
       ).bind(...ids).all();
       const uris = new Map((rows.results ?? []).map((r) => [r.unit_id, r.uri]));
@@ -22957,9 +22958,9 @@ Which of these figures best answers the question? Reply with ONLY: {"pick": N} u
         const uri = String(uris.get(String(h.metadata.unit_id)) ?? "");
         const m = uri.match(/^\/assets\/(.+)/);
         if (!m) continue;
-        const obj = await c.env.UNIT_ASSETS.get(m[1]);
-        if (!obj) continue;
-        const buf = new Uint8Array(await obj.arrayBuffer());
+        const obj = await portBlobs(c.env).get(m[1]);
+        if (!obj?.body) continue;
+        const buf = new Uint8Array(await new Response(obj.body).arrayBuffer());
         let binary = "";
         for (let i = 0; i < buf.length; i += 8192) binary += String.fromCharCode(...buf.subarray(i, i + 8192));
         n += 1;
@@ -22969,10 +22970,10 @@ Which of these figures best answers the question? Reply with ONLY: {"pick": N} u
       }
       if (!kept.length) return;
       const raced = await Promise.race([
-        c.env.AI.run(MODELS.vlmFigure, { messages: [{ role: "user", content }], max_tokens: 256, reasoning_effort: "low" }),
+        portModelRunner(c.env).run({ model: MODELS.vlmFigure, messages: [{ role: "user", content }], maxTokens: 256, effort: "low" }),
         new Promise((r) => setTimeout(() => r(null), 15e3))
       ]);
-      const pick = parsePick(raced, kept.length);
+      const pick = parsePick(raced?.text ?? raced, kept.length);
       const chosen = kept.find((k) => k.label === pick);
       if (!chosen) return;
       const top = Math.max(...c.finalHits.map((h) => h.rerank_score ?? h.score ?? 0));
