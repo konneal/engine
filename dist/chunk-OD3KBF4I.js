@@ -1,11 +1,11 @@
 import {
   embed,
   rerank
-} from "./chunk-5V2A3CAH.js";
+} from "./chunk-LU7VIMD7.js";
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-TTEJQ5XA.js";
+} from "./chunk-QY556RJM.js";
 import {
   DATASETS,
   LIMITS,
@@ -15,7 +15,7 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-FQYHT4VC.js";
+} from "./chunk-4FZNJR5Q.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -22165,9 +22165,13 @@ var dense = {
       if (filters.edition) matches = matches.filter((m) => !m.metadata?.edition || String(m.metadata.edition) === filters.edition);
       console.log("dense scope (in code):", before, "\u2192", matches.length, "in doc", filters.doc_number, filters.edition ? `@${filters.edition}` : "");
       if (!matches.length) {
-        const wide = await env.VECTORIZE.query(vector, { ...q, topK: THRESHOLDS.denseStarveK });
-        matches = (wide.matches ?? []).filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number));
-        console.log("dense scope starvation \u2192 deep re-query:", matches.length, "doc members in the top", THRESHOLDS.denseStarveK);
+        try {
+          const wide = await env.VECTORIZE.query(vector, { ...q, topK: THRESHOLDS.denseStarveK });
+          matches = (wide.matches ?? []).filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number));
+          console.log("dense scope starvation \u2192 deep re-query:", matches.length, "doc members in the top", THRESHOLDS.denseStarveK);
+        } catch (e) {
+          console.log("dense scope starvation re-query failed:", String(e).slice(0, 120));
+        }
       }
       if (filters && filters.edition && matches.length < 3) {
         const docOnly = allMatches.filter((m) => matchesDocScope(m.metadata ?? {}, filters.doc_number));

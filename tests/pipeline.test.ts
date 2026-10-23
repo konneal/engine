@@ -367,7 +367,7 @@ test("dense: the in-code scope starvation falls back to a deep re-query (the R 1
   const c: any = { env, query: "figure eccentricity test", rq: "eccentricity test", folded: "eccentricity test", vector: [0.1], u: null, filters: { doc_number: "134" }, matches: [], hits: [], finalHits: [], opts: {}, lane: {} };
   await dense.run(c);
   assert.ok(queries.length >= 2); // the starvation re-query fired (the widen may add more)
-  assert.ok(queries.some((q: any) => q.topK > 50)); // the deep net ran
+  assert.ok(queries.some((q: any) => q.topK > 50 && q.topK <= 100)); // the deep net ran, within the platform cap
   const inDoc = c.matches.filter((m: any) => m.metadata?.doc_number === "134");
   assert.ok(inDoc.length >= 2);
 });
