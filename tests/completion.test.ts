@@ -77,3 +77,30 @@ test("figure completion: prose 'Figure 3' resolves within the used publications 
   );
   assert.deepEqual(blocks.map((b) => b.unit_id), ["u:fig-3"]); // fig-7 exists in the family but is not named
 });
+
+test("figure completion: a figure-SEEKING question completes with the used figure unit even when nothing is nameable", async () => {
+  // the MKO typed units carry UUID ids — no fig-N the model could name;
+  // the question asks what the figure shows, the figure grounded the
+  // answer, the contract completes with THAT unit
+  const db = stubDb({ "u:_725ee6db-2eca-bc39-7e06-7396ba42d28b": {} });
+  const used = [
+    { metadata: { unit_id: "u:_725ee6db-2eca-bc39-7e06-7396ba42d28b", block: "figure", docidentifier: "OIML R 134-2", clause_anchor: "6.1.3.1" } },
+    { metadata: { docidentifier: "OIML R 134-2" } },
+  ] as any[];
+  const blocks = await completeFigures(
+    db as any,
+    "The sketch shows the successive positions of the test loads on the load receptor.",
+    [],
+    used,
+    "What does the figure in OIML R 134-2 clause 6.1.3.1 show about the eccentricity test?",
+  );
+  assert.deepEqual(blocks.map((b) => b.unit_id), ["u:_725ee6db-2eca-bc39-7e06-7396ba42d28b"]);
+});
+
+test("figure completion: the seeking path stays off for non-figure questions", async () => {
+  let called = 0;
+  const db = { prepare: () => ({ bind: (...a: string[]) => ({ all: async () => { called += 1; return { results: [] }; } }) }) };
+  const used = [{ metadata: { unit_id: "u:_725ee6db-2eca-bc39-7e06-7396ba42d28b", block: "figure", docidentifier: "OIML R 134-2" } }] as any[];
+  await completeFigures(db as any, "The tolerance applies at reference conditions.", [], used, "What MPE applies to a C3 load cell?");
+  assert.equal(called, 0);
+});

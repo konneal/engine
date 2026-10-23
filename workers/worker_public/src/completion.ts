@@ -59,6 +59,7 @@ export async function completeFigures(
   answer: string,
   alreadyAttached: ResolvedBlock[],
   used: Hit[] = [],
+  query?: string,
 ): Promise<ResolvedBlock[]> {
   // the model names figures BOTH ways: unit ids (u:fig-3) and bare
   // producer anchors (fig-2a of D 36) — collect both forms; bare
@@ -74,6 +75,18 @@ export async function completeFigures(
     (answer.match(/\bFig(?:ure|\.)s?\s*([0-9]{1,2}[a-z]?)/g) ?? [])
       .map((x) => x.replace(/\bFig(?:ure|\.)s?\s*/i, "").toLowerCase()),
   );
+  // the figure-SEEKING question (the MKO typed units carry UUID ids —
+  // no fig-N the model could name, and "sketch"/"drawing" prose the
+  // prose-number scan cannot see): when the question asks about a
+  // figure and a figure unit grounded the answer, the contract
+  // completes with THAT unit — the tables' mechanical philosophy, not
+  // a hope that the model names an unnameable id
+  if (query && /\bfig(ure|s)?\b/i.test(query)) {
+    for (const h of used.slice(0, 12)) {
+      if (h.metadata.unit_id && h.metadata.block === "figure") mentioned.push(h.metadata.unit_id);
+    }
+    mentioned = [...new Set(mentioned)].slice(0, 6);
+  }
   if (proseNums.size) {
     const fams = [...new Set(used.map((h) => h.metadata.docidentifier).filter(Boolean))].slice(0, 3);
     for (const fam of fams) {
