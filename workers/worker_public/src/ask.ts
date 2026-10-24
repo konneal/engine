@@ -1702,7 +1702,19 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           const c2 = canonical0.includes(refusalAnswer())
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
             : await contractV2(env.DB, canonical0, usedHits);
-          send({ type: "done", model, query_hash: queryHash, follow_ups: refusalShaped(canonical0, refusalScope(answerCites(full))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : [])], context_applied: ctxApplied, read: readAs(),
+          // the completions ride the streamed lane too (parity: the UI's
+          // bubble IS this lane — the table/figure blocks never reached it
+          // before): additive D1 reads after the tokens are out, refusal
+          // answers carry nothing to complete
+          let streamedCompletionBlocks: Awaited<ReturnType<typeof completeTables>> = [];
+          if (!canonical0.includes(refusalAnswer())) {
+            try {
+              streamedCompletionBlocks = await completeTables(env.DB, canonical0, usedHits);
+              streamedCompletionBlocks.push(...(await completeFigures(env.DB, canonical0, [...c2.blocks, ...streamedCompletionBlocks], usedHits, q.query)));
+              if (streamedCompletionBlocks.length) console.log("streamed completion:", streamedCompletionBlocks.length, "block(s) attached");
+            } catch { /* additive — the answer stands without the blocks */ }
+          }
+          send({ type: "done", model, query_hash: queryHash, follow_ups: refusalShaped(canonical0, refusalScope(answerCites(full))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...streamedCompletionBlocks], context_applied: ctxApplied, read: readAs(),
             // the evidence view's ground truth: the exact passages this
             // answer was built from, compact — cache hits carry none,
             // because the cache stores the answer and never the passages
