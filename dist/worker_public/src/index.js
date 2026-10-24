@@ -4,7 +4,7 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-AGL4NGXY.js";
+} from "../../chunk-NTZX65GT.js";
 import "../../chunk-ECOYO7EX.js";
 import {
   TOOLS_REGISTRY,
@@ -1125,7 +1125,7 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-RUMLIO35.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-Y4Y46Y57.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-OZO3KHFV.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-Y4Y46Y57.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });

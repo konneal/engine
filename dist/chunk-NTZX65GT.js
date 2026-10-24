@@ -2785,12 +2785,21 @@ Answer account questions from these records ONLY: name the record when you use i
         }
         const canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
         const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
+        let streamedCompletionBlocks = [];
+        if (!canonical0.includes(refusalAnswer())) {
+          try {
+            streamedCompletionBlocks = await completeTables(env.DB, canonical0, usedHits);
+            streamedCompletionBlocks.push(...await completeFigures(env.DB, canonical0, [...c2.blocks, ...streamedCompletionBlocks], usedHits, q2.query));
+            if (streamedCompletionBlocks.length) console.log("streamed completion:", streamedCompletionBlocks.length, "block(s) attached");
+          } catch {
+          }
+        }
         send({
           type: "done",
           model,
           query_hash: queryHash,
           follow_ups: refusalShaped(canonical0, refusalScope(answerCites(full))) ? [] : understanding?.follow_ups ?? [],
-          blocks: [...c2.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : []],
+          blocks: [...c2.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...streamedCompletionBlocks],
           context_applied: ctxApplied,
           read: readAs(),
           // the evidence view's ground truth: the exact passages this
