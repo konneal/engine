@@ -1730,13 +1730,18 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           let streamedCompletionBlocks: Awaited<ReturnType<typeof completeTables>> = [];
           // the decision pass's section streams as the answer's tail
           // (the pass ran concurrently with generation — its arrival is
-          // instant here), before the completions and the done event
-          if (decisionPromise && !canonical0.includes(refusalAnswer())) {
+          // instant here), before the completions and the done event.
+          // Stand-down law (TODO.decisions/00): where a deterministic
+          // engine (verdict, condition, aggregation) answered, its block
+          // is authoritative — the checklist never rides beside it.
+          let streamedDecisions: { mode: string; gate: number; items: DecisionItem[] } | undefined;
+          if (decisionPromise && !canonical0.includes(refusalAnswer()) && !verdictBlock && !conditionBlock && !aggregationBlock) {
             const dp = await decisionPromise;
             if (dp) {
               canonical0 += dp.section;
               send({ type: "token", v: dp.section });
               full += dp.section;
+              streamedDecisions = { mode: dp.mode, gate: dp.gate, items: dp.items };
               console.log("decisions: streamed the checklist section (" + dp.items.length + " items, mode " + dp.mode + ")");
             }
           }
@@ -1747,7 +1752,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
               if (streamedCompletionBlocks.length) console.log("streamed completion:", streamedCompletionBlocks.length, "block(s) attached");
             } catch { /* additive — the answer stands without the blocks */ }
           }
-          send({ type: "done", model, query_hash: queryHash, follow_ups: refusalShaped(canonical0, refusalScope(answerCites(full))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...streamedCompletionBlocks], context_applied: ctxApplied, read: readAs(),
+          send({ type: "done", model, query_hash: queryHash, follow_ups: refusalShaped(canonical0, refusalScope(answerCites(full))) ? [] : (understanding?.follow_ups ?? []), ...(streamedDecisions ? { decisions: streamedDecisions } : {}), blocks: [...c2.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...streamedCompletionBlocks], context_applied: ctxApplied, read: readAs(),
             // the evidence view's ground truth: the exact passages this
             // answer was built from, compact — cache hits carry none,
             // because the cache stores the answer and never the passages
@@ -2083,7 +2088,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   let decisionsOut: { mode: string; gate: number; items: DecisionItem[] } | undefined;
   if (decisionPromise) {
     const dp = await decisionPromise;
-    if (dp && answer && !answer!.includes(refusalAnswer())) {
+    if (dp && answer && !answer!.includes(refusalAnswer()) && !verdictBlock && !conditionBlock && !aggregationBlock) {
       answer = answer! + dp.section;
       decisionsOut = { mode: dp.mode, gate: dp.gate, items: dp.items };
     }
