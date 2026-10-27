@@ -4,16 +4,16 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-HJMFOOBP.js";
+} from "../../chunk-ZZLUGHZ2.js";
 import "../../chunk-ECOYO7EX.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
   modelGroundingBlock
-} from "../../chunk-QS6V53RO.js";
+} from "../../chunk-B2MU4ZWM.js";
 import {
   handleSearch
-} from "../../chunk-6KEWBP7O.js";
+} from "../../chunk-MUWO2EV6.js";
 import {
   buildMessages,
   citations,
@@ -38,11 +38,11 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-RZLEHCIA.js";
+} from "../../chunk-CLDMP5YH.js";
 import {
   embed,
   generateOnce
-} from "../../chunk-XWSZWFYP.js";
+} from "../../chunk-ZHT4456M.js";
 import {
   authenticate,
   corsHeaders,
@@ -51,14 +51,14 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-O2XMNKCK.js";
+} from "../../chunk-D7MO4RVQ.js";
 import {
   canonicalRefusal
 } from "../../chunk-ETLSWSZ7.js";
 import {
   entitlementScope,
   standardKeysFrom
-} from "../../chunk-PQDAL4MX.js";
+} from "../../chunk-FNQ7UOEB.js";
 import {
   LIMITS,
   MODELS,
@@ -69,7 +69,7 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-5UIMQAJZ.js";
+} from "../../chunk-HWWJAJWM.js";
 import {
   P,
   setProfile
@@ -581,6 +581,67 @@ ${chain || "(no successor edges recorded)"}` }
     return err(502, "family_summary_failed", String(e?.message ?? e).slice(0, 200));
   }
 }
+async function loadUnitAsset(env, unitId) {
+  const row = await env.DB.prepare("SELECT payload, docidentifier FROM unit_payloads WHERE unit_id = ?1").bind(unitId).first();
+  if (!row) return { error: err(404, "not_found", "no unit_payload row for that id") };
+  const payload = JSON.parse(String(row.payload));
+  const uri = payload.uri ?? "";
+  const m = uri.match(/^\/assets\/(.+)/);
+  if (!m) return { error: err(400, "invalid_input", "payload has no /assets/ uri (upload the asset first)") };
+  const obj = await env.UNIT_ASSETS.get(m[1]);
+  if (!obj) return { error: err(404, "not_found", `asset ${m[1]} not in R2`) };
+  const buf = await obj.arrayBuffer();
+  const ext = m[1].split(".").pop()?.toLowerCase() ?? "png";
+  const mime = ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return { row, b64: btoa(binary), mime };
+}
+async function handleVisionJudge(env, req) {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const unitId = typeof body?.unit_id === "string" ? body.unit_id : "";
+  const capA = typeof body?.captions?.a === "string" ? body.captions.a.slice(0, 2e3) : "";
+  const capB = typeof body?.captions?.b === "string" ? body.captions.b.slice(0, 2e3) : "";
+  if (!unitId || !capA || !capB) return err(400, "invalid_input", "unit_id and captions.a/.b required");
+  try {
+    const loaded = await loadUnitAsset(env, unitId);
+    if (loaded.error) return loaded.error;
+    const swap = Math.random() < 0.5;
+    const first = swap ? capB : capA;
+    const second = swap ? capA : capB;
+    const res = await env.AI.run(roleModel(env, "visionJudge"), {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `You are judging two descriptions of the same figure (from ${loaded.row.docidentifier}) written for a reader who cannot see it. The figure is attached.
+
+Description 1: ${first}
+
+Description 2: ${second}
+
+Which description better tells the reader what the figure shows and its normative point? Reply with ONLY JSON: {"better": 1 or 2, "reason": "one sentence"}.` },
+            { type: "image_url", image_url: { url: `data:${loaded.mime};base64,${loaded.b64}` } }
+          ]
+        }
+      ],
+      max_tokens: 2048
+    });
+    const anyRes = res;
+    const text = typeof anyRes?.response === "string" ? anyRes.response : anyRes?.choices?.[0]?.message?.content ?? "";
+    const parsed = JSON.parse(text.replace(/^[^\{]*/, "").replace(/[^\}]*$/, ""));
+    const said = parsed?.better === 1 ? "first" : parsed?.better === 2 ? "second" : null;
+    if (!said) return err(502, "judge_failed", "no decision in the judge's reply: " + text.slice(0, 120));
+    const winner = said === "first" === swap ? "b" : "a";
+    return json({ ok: true, unit_id: unitId, better: winner, judge: roleModel(env, "visionJudge"), reason: String(parsed.reason ?? "").slice(0, 500) });
+  } catch (e) {
+    return err(502, "vision_judge_failed", String(e).slice(0, 200));
+  }
+}
 async function handleCaption(env, req) {
   if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
   const auth = req.headers.get("authorization") ?? "";
@@ -588,27 +649,19 @@ async function handleCaption(env, req) {
   const body = await readJson(req);
   const unitId = typeof body?.unit_id === "string" ? body.unit_id : "";
   const context = typeof body?.context === "string" ? body.context.slice(0, 400) : "";
+  const override = typeof body?.model === "string" && body.model.startsWith("@cf/") ? body.model : null;
+  const dryRun = body?.dry_run === true;
   if (!unitId) return err(400, "invalid_input", "unit_id required");
   try {
-    const row = await env.DB.prepare("SELECT payload, docidentifier FROM unit_payloads WHERE unit_id = ?1").bind(unitId).first();
-    if (!row) return err(404, "not_found", "no unit_payload row for that id");
-    const payload = JSON.parse(String(row.payload));
-    const uri = payload.uri ?? "";
-    const m = uri.match(/^\/assets\/(.+)/);
-    if (!m) return err(400, "invalid_input", "payload has no /assets/ uri (upload the asset first)");
-    const obj = await env.UNIT_ASSETS.get(m[1]);
-    if (!obj) return err(404, "not_found", `asset ${m[1]} not in R2`);
-    const buf = await obj.arrayBuffer();
-    const ext = m[1].split(".").pop()?.toLowerCase() ?? "png";
-    const mime = ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
-    const bytes = new Uint8Array(buf);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    const b64 = btoa(binary);
+    const loaded = await loadUnitAsset(env, unitId);
+    if (loaded.error) return loaded.error;
+    const row = loaded.row;
+    const b64 = loaded.b64;
+    const mime = loaded.mime;
     let res = null;
     for (let attempt = 0; attempt < 2 && !res; attempt++) {
       try {
-        res = await env.AI.run(MODELS.member, {
+        res = await env.AI.run(override ?? roleModel(env, "caption"), {
           messages: [
             {
               role: "user",
@@ -636,8 +689,8 @@ async function handleCaption(env, req) {
       const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
       return end === -1 ? cut.slice(0, cut.lastIndexOf(" ")) : cut.slice(0, end + 1);
     })();
-    await env.DB.prepare("UPDATE unit_payloads SET payload = json_set(payload, '$.description', ?1) WHERE unit_id = ?2").bind(desc, unitId).run();
-    return json({ ok: true, unit_id: unitId, description: desc });
+    if (!dryRun) await env.DB.prepare("UPDATE unit_payloads SET payload = json_set(payload, '$.description', ?1) WHERE unit_id = ?2").bind(desc, unitId).run();
+    return json({ ok: true, unit_id: unitId, model: override ?? roleModel(env, "caption"), dry_run: dryRun || void 0, description: desc });
   } catch (e) {
     return err(502, "caption_failed", String(e).slice(0, 200));
   }
@@ -1119,13 +1172,13 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-HK5RXHBQ.js");
+    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-VHN54DWH.js");
     let payload;
     if (TOOLS_REGISTRY2.some((t) => t.name === name && t.audiences.includes("mcp"))) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-XHFOJKOM.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-RNCRT5BR.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-7TNQCRD6.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-KNPPTHMG.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });
@@ -1391,6 +1444,11 @@ var OPENAPI_SURFACE = [
     "method": "POST",
     "pattern": "/admin/caption",
     "operationId": "adminCaption"
+  },
+  {
+    "method": "POST",
+    "pattern": "/admin/vision_judge",
+    "operationId": "adminVisionJudge"
   },
   {
     "method": "POST",
@@ -1933,6 +1991,7 @@ var OPENAPI_HANDLERS = {
   adminSectionAlias: (c) => handleSectionUnit(c.env, c.ctx, c.req),
   adminVectors: (c) => handleVectors(c.env, c.req),
   adminCaption: (c) => handleCaption(c.env, c.req),
+  adminVisionJudge: (c) => handleVisionJudge(c.env, c.req),
   adminJudge: (c) => handleJudge(c.env, c.req),
   adminJudgeAlias: (c) => handleJudge(c.env, c.req)
 };

@@ -23,7 +23,7 @@ import { json, err, corsHeaders, withCors, readJson, authenticate, type ApiKey }
 import { creditBudget, clientIp } from "./quota";
 
 import { handleSearch } from "./search";
-import { handleEnrich, handleSectionUnit, handleCaption, handleVectors, handleJudge, handleCreateKey, handleListKeys, handleRevokeKey, handleKeyUsage, handleFamilySummary } from "./admin";
+import { handleEnrich, handleSectionUnit, handleCaption, handleVisionJudge, handleVectors, handleJudge, handleCreateKey, handleListKeys, handleRevokeKey, handleKeyUsage, handleFamilySummary } from "./admin";
 import { handleResearch } from "./research";
 import { uploadAttachment, readAttachment, deleteAttachment, type AttachmentDeps } from "./attachments";
 import { cfBlobs } from "./ports/cloudflare/adapters";
@@ -639,6 +639,7 @@ const OPENAPI_HANDLERS: Record<OpenApiOperationId, RouteHandler> = {
   adminSectionAlias: (c) => handleSectionUnit(c.env, c.ctx, c.req),
   adminVectors: (c) => handleVectors(c.env, c.req),
   adminCaption: (c) => handleCaption(c.env, c.req),
+  adminVisionJudge: (c) => handleVisionJudge(c.env, c.req),
   adminJudge: (c) => handleJudge(c.env, c.req),
   adminJudgeAlias: (c) => handleJudge(c.env, c.req),
 };

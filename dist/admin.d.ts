@@ -21,9 +21,11 @@ export declare function handleSectionUnit(env: Env, ctx: ExecutionContext, req: 
  *  the deterministic registry line. Admin-gated; idempotent (force
  *  regenerates); the quality-first lane pays once. */
 export declare function handleFamilySummary(env: Env, req: Request): Promise<Response>;
-/** Ops access to the Vectorize binding (get/upsert by id) for offline
- *  passes like embedding smoothing (G-ETSI-4) — the binding is the
- *  credential, admin-token gated exactly like /admin/enrich. */
+/** The pairwise vision judge (TODO.sota/18.4's A/B): two anonymized
+ *  captions of the SAME figure, presented in randomized order beside the
+ *  image itself; a THIRD model (never a contestant) picks the better
+ *  caption with a reason. Admin-gated; one-time quality-first lane. */
+export declare function handleVisionJudge(env: Env, req: Request): Promise<Response>;
 /** One-time figure captioning (TODO.remaining/03): fetch the unit's asset
  *  from R2, describe it with the vision-capable answer model, store the
  *  description into unit_payloads. Admin-gated; idempotent. */
