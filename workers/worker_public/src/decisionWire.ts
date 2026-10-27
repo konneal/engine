@@ -91,7 +91,11 @@ export async function runDecisionPass(
             `Each requirement's clause = the clause anchor it comes from. If nothing qualifies, return {"mode":"list","requirements":[]}.`,
         },
       ],
-      maxTokens: 1536,
+      maxTokens: 3072,
+      // the GLM law: the effort defaults to MAX when absent — an omitted
+      // effort starved the derivation to empty (observed live: the pass
+      // stood down silently on every fired question)
+      effort: "low",
       temperature: 0,
     });
     const { mode, requirements } = parseDerivation(derived.text, THRESHOLDS.decisionsRequirementsMax);

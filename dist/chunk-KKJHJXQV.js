@@ -1590,7 +1590,11 @@ ${passages.map((p, i) => `[${i + 1}] ${p}`).join("\n")}
 List the DISTINCT requirements relevant to the question as JSON: {"mode":"check"|"list","requirements":[{"text":"...","clause":"..."}]} \u2014 "check" when the user's question or values ask whether requirements are MET; "list" when the user asks what the requirements ARE. Max ${THRESHOLDS.decisionsRequirementsMax}. Each requirement's clause = the clause anchor it comes from. If nothing qualifies, return {"mode":"list","requirements":[]}.`
         }
       ],
-      maxTokens: 1536,
+      maxTokens: 3072,
+      // the GLM law: the effort defaults to MAX when absent — an omitted
+      // effort starved the derivation to empty (observed live: the pass
+      // stood down silently on every fired question)
+      effort: "low",
       temperature: 0
     });
     const { mode, requirements } = parseDerivation(derived.text, THRESHOLDS.decisionsRequirementsMax);
