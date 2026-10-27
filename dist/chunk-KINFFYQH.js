@@ -74,7 +74,7 @@ function cfModelRunner(ai) {
       return null;
     },
     async run(req) {
-      const res = await ai.run(req.model, {
+      const payload = req.input !== void 0 ? req.input : {
         messages: req.messages,
         max_tokens: req.maxTokens,
         ...req.effort ? { reasoning_effort: req.effort } : {},
@@ -82,9 +82,13 @@ function cfModelRunner(ai) {
         ...req.topP != null ? { top_p: req.topP } : {},
         ...req.topK != null ? { top_k: req.topK } : {},
         ...req.stream ? { stream: true } : {}
-      });
+      };
+      const res = await ai.run(req.model, payload);
       if (req.stream && res && typeof res.getReader === "function") return { text: null, stream: res };
       if (req.stream && res?.body && typeof res.body.getReader === "function") return { text: null, stream: res.body };
+      if (res && typeof res === "object" && res.answers && typeof res.answers === "object") {
+        return { text: JSON.stringify(res.answers) };
+      }
       const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
       return { text: typeof text === "string" ? text : null };
     }

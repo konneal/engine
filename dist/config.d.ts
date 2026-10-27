@@ -4,6 +4,8 @@ export declare const MODELS: {
     readonly anon: "@cf/zai-org/glm-5.3-flash";
     readonly member: "@cf/zai-org/glm-5.3-flash";
     readonly vlmFigure: "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
+    readonly decisionsGate: "@cf/cloudflare/clef-flash";
+    readonly decisionsModel: "@cf/cloudflare/clef";
     readonly understand: "@cf/qwen/qwen3-30b-a3b-fp8";
     readonly acts: "@cf/qwen/qwen3-30b-a3b-fp8";
     readonly fallback: "@cf/qwen/qwen3-30b-a3b-fp8";
@@ -52,6 +54,10 @@ export declare const THRESHOLDS: {
      *  leaves the source-rung note unchanged). */
     readonly compressShare: 0.6;
     readonly denseStarveK: 100;
+    readonly decisionsGateMin: 0.5;
+    readonly decisionsMetBand: 0.8;
+    readonly decisionsRefuteBand: 0.2;
+    readonly decisionsRequirementsMax: 12;
     readonly entailmentGate: true;
     readonly entailmentBudgetMs: 6000;
     readonly entailmentSupportedFloor: 0.9;

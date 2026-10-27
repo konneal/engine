@@ -15,6 +15,10 @@ var MODELS = {
   // vision-capable MoE scores figure IMAGES against figure-seeking
   // questions — one bounded call per figure question, ablatable stage
   vlmFigure: "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
+  // the decision pass (TODO.decisions/01): clef-flash gates the
+  // requirement-shaped questions, clef decides the derived checklist
+  decisionsGate: "@cf/cloudflare/clef-flash",
+  decisionsModel: "@cf/cloudflare/clef",
   // hot-path understanding/summarize stays on the cheap Qwen (cost-first lane)
   understand: "@cf/qwen/qwen3-30b-a3b-fp8",
   // the api_call act's intent-to-act mapping (TODO.ai-platform/09) — the
@@ -93,6 +97,12 @@ var THRESHOLDS = {
   // re-query runs at this depth and scopes in code (the native filter is
   // dead — measured 2026-10-05)
   denseStarveK: 100,
+  // the decision pass (TODO.decisions): the gate fires at decisionsGateMin
+  // noul; the bands assemble met / not clearly stated / not met
+  decisionsGateMin: 0.5,
+  decisionsMetBand: 0.8,
+  decisionsRefuteBand: 0.2,
+  decisionsRequirementsMax: 12,
   entailmentGate: true,
   entailmentBudgetMs: 6e3,
   entailmentSupportedFloor: 0.9,
