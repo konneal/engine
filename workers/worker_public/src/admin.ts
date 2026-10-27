@@ -317,7 +317,10 @@ export async function handleVisionJudge(env: Env, req: Request): Promise<Respons
           ],
         },
       ],
-      max_tokens: 2048,
+      // the DeepSeek law: reasoning is always on — a 2048 budget starved
+      // the verdict to empty content (the E.2.2.x judges failed on
+      // "Unexpected end of JSON input"); 4096 leaves the JSON intact
+      max_tokens: 4096,
     });
     const anyRes = res as any;
     const text = typeof anyRes?.response === "string" ? anyRes.response : anyRes?.choices?.[0]?.message?.content ?? "";
