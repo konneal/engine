@@ -32,7 +32,7 @@ import {
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-PTY2OSC4.js";
+} from "./chunk-QS6V53RO.js";
 import {
   NO_CONTEXT,
   STAGE_NAMES,
@@ -75,18 +75,18 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-LIZJLRXZ.js";
+} from "./chunk-RZLEHCIA.js";
 import {
   embed,
   generateOnce
-} from "./chunk-LU7VIMD7.js";
+} from "./chunk-XWSZWFYP.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-QY556RJM.js";
+} from "./chunk-O2XMNKCK.js";
 import {
   cacheableAnswer,
   canonicalRefusal,
@@ -99,7 +99,7 @@ import {
   requestSalt,
   resolveRequestScope,
   standardKeysFrom
-} from "./chunk-Y7LWT24U.js";
+} from "./chunk-PQDAL4MX.js";
 import {
   LIMITS,
   MODELS,
@@ -110,14 +110,14 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-4FZNJR5Q.js";
+} from "./chunk-5UIMQAJZ.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
 import {
   portModelRunner,
   portStore
-} from "./chunk-LSZTJI7V.js";
+} from "./chunk-KINFFYQH.js";
 
 // workers/worker_public/src/internal_gateway.ts
 async function retrieveInternal(service, auth, query) {
@@ -1404,9 +1404,10 @@ function parseAblate(body, adminToken, presentedToken, knownStages) {
   const rawRoute = body?.ablate_route;
   const speculative = body?.ablate_speculative === true;
   const compress = body?.ablate_compress === true;
+  const noDecisions = body?.ablate_no_decisions === true;
   const namesAblation = rawStages !== void 0 && rawStages !== null;
   const routeAblation = rawRoute !== void 0 && rawRoute !== null && rawRoute !== "adaptive";
-  if (!namesAblation && !noVerdict && !routeAblation && !speculative && !compress) return { ok: true, config: null };
+  if (!namesAblation && !noVerdict && !routeAblation && !speculative && !compress && !noDecisions) return { ok: true, config: null };
   if (!adminToken || presentedToken !== adminToken) {
     return {
       ok: false,
@@ -1437,7 +1438,184 @@ function parseAblate(body, adminToken, presentedToken, knownStages) {
     }
     stages = [...new Set(rawStages)];
   }
-  return { ok: true, config: { stages, noVerdict, route, speculative, compress } };
+  return { ok: true, config: { stages, noVerdict, route, speculative, compress, noDecisions } };
+}
+
+// workers/worker_public/src/decisions.ts
+function parseDerivation(text, cap) {
+  const fallback = { mode: "list", requirements: [] };
+  if (!text) return fallback;
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start === -1 || end <= start) return fallback;
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned.slice(start, end + 1));
+  } catch {
+    return fallback;
+  }
+  const reqs = Array.isArray(parsed?.requirements) ? parsed.requirements : [];
+  const requirements = [];
+  for (const r of reqs) {
+    const t = typeof r?.text === "string" ? r.text.trim() : "";
+    if (t.length < 8) continue;
+    requirements.push({ text: t.slice(0, 300), clause: typeof r?.clause === "string" ? r.clause.trim().slice(0, 40) : "" });
+    if (requirements.length >= cap) break;
+  }
+  if (!requirements.length) return fallback;
+  const mode = parsed?.mode === "check" ? "check" : "list";
+  return { mode, requirements };
+}
+function buildDecisionQuestions(mode, requirements, userQuestion, statedValues) {
+  const questions = {};
+  requirements.forEach((r, i) => {
+    const id = `r${i + 1}`;
+    if (mode === "check") {
+      questions[id] = {
+        type: "noul",
+        instructions: `Requirement: "${r.text}" (clause ${r.clause || "n/a"}). The user asks: "${userQuestion}". Stated values: ${statedValues || "(none stated \u2014 judge whether the state text answers it)"}. Is this requirement met, based only on what the state contains?`,
+        criteria: {
+          true: "the state shows the requirement is satisfied",
+          false: "the state shows it is not satisfied, or the state says nothing about it"
+        }
+      };
+    } else {
+      questions[id] = {
+        type: "noul",
+        instructions: `Is this a genuine, self-contained requirement statement: "${r.text}"?`,
+        criteria: {
+          true: "a real requirement a reader could check",
+          false: "a fragment, duplicate, or not a requirement"
+        }
+      };
+    }
+  });
+  return questions;
+}
+function bandFor(p, metBand, refuteBand) {
+  if (p >= metBand) return "met";
+  if (p <= refuteBand) return "not-met";
+  return "unclear";
+}
+function matchAnswers(mode, requirements, answers, metBand, refuteBand) {
+  const items = [];
+  requirements.forEach((r, i) => {
+    const a = answers[`r${i + 1}`];
+    let probability;
+    if (a && a.type === "noul" && typeof a.noul === "number") {
+      probability = a.noul;
+    } else if (a && typeof a === "number") {
+      probability = a;
+    } else {
+      return;
+    }
+    if (probability < 0 || probability > 1) return;
+    items.push({
+      text: r.text,
+      clause: r.clause,
+      band: mode === "check" ? bandFor(probability, metBand, refuteBand) : "met",
+      probability: Math.round(probability * 100) / 100
+    });
+  });
+  return items;
+}
+var MARK = { met: "\u2713", "not-met": "\u2717", unclear: "?" };
+var WORD = { met: "met", "not-met": "not met", unclear: "not clearly stated" };
+function assembleSection(mode, items) {
+  if (!items.length) return "";
+  const title = mode === "check" ? "Requirements check (automated)" : "Requirements (from the cited clauses)";
+  const lines = items.map((it) => {
+    const mark = mode === "check" ? MARK[it.band] : "\u2022";
+    const clause = it.clause ? ` \u2014 ${it.clause}` : "";
+    const prob = mode === "check" ? ` (${Math.round(it.probability * 100)}%)` : "";
+    return `- ${mark} ${it.text}${clause}${prob}${mode === "check" ? ` \u2014 ${WORD[it.band]}` : ""}`;
+  });
+  return `
+
+${title}:
+${lines.join("\n")}`;
+}
+
+// workers/worker_public/src/decisionWire.ts
+function decisionsEnabled(env) {
+  return String(env.DECISIONS_ENABLED ?? "true") !== "false";
+}
+async function gateQuestion(env, question) {
+  try {
+    const res = await portModelRunner(env).run({
+      model: env.DECISIONS_GATE_MODEL || MODELS.decisionsGate,
+      input: {
+        state: question.slice(0, 500),
+        questions: {
+          requirements: {
+            type: "noul",
+            instructions: "Is this question asking whether requirements are met, or asking what requirements apply to something?",
+            criteria: {
+              true: "the asker wants requirements listed or their own values/products checked against requirements",
+              false: "a definitional, lookup, how-to, or conversational question"
+            }
+          }
+        }
+      },
+      maxTokens: 512
+    });
+    const parsed = JSON.parse(res.text ?? "{}");
+    const p = parsed?.requirements?.noul;
+    return typeof p === "number" ? p : null;
+  } catch {
+    return null;
+  }
+}
+async function runDecisionPass(env, opts) {
+  const gateMin = THRESHOLDS.decisionsGateMin;
+  if (opts.gate == null || opts.gate < gateMin) return null;
+  const passages = opts.passages.filter(Boolean).slice(0, 8).map((p) => p.slice(0, 1600));
+  if (!passages.length) return null;
+  try {
+    const deriveModel = env.DECISIONS_EXTRACT_MODEL || MODELS.member;
+    const derived = await portModelRunner(env).run({
+      model: deriveModel,
+      messages: [
+        { role: "system", content: "You extract requirement checklists from legal-metrology text. Reply with ONLY JSON, no prose." },
+        {
+          role: "user",
+          content: `User question: ${opts.question}
+
+` + (opts.statedValues ? `The user's stated values: ${opts.statedValues}
+
+` : "") + `Passages:
+${passages.map((p, i) => `[${i + 1}] ${p}`).join("\n")}
+
+List the DISTINCT requirements relevant to the question as JSON: {"mode":"check"|"list","requirements":[{"text":"...","clause":"..."}]} \u2014 "check" when the user's question or values ask whether requirements are MET; "list" when the user asks what the requirements ARE. Max ${THRESHOLDS.decisionsRequirementsMax}. Each requirement's clause = the clause anchor it comes from. If nothing qualifies, return {"mode":"list","requirements":[]}.`
+        }
+      ],
+      maxTokens: 1536,
+      temperature: 0
+    });
+    const { mode, requirements } = parseDerivation(derived.text, THRESHOLDS.decisionsRequirementsMax);
+    if (!requirements.length) return null;
+    const decideModel = env.DECISIONS_MODEL || MODELS.decisionsModel;
+    const decided = await portModelRunner(env).run({
+      model: decideModel,
+      input: {
+        state: `User question: ${opts.question}
+` + (opts.statedValues ? `Stated values: ${opts.statedValues}
+` : "") + `Corpus passages:
+${passages.join("\n")}`.slice(0, 12e3),
+        questions: buildDecisionQuestions(mode, requirements, opts.question, opts.statedValues ?? "")
+      },
+      maxTokens: 4096
+    });
+    const answers = JSON.parse(decided.text ?? "{}");
+    const items = matchAnswers(mode, requirements, answers, THRESHOLDS.decisionsMetBand, THRESHOLDS.decisionsRefuteBand);
+    if (!items.length) return null;
+    const section = assembleSection(mode, items);
+    if (!section) return null;
+    return { mode, gate: opts.gate, items, section };
+  } catch {
+    return null;
+  }
 }
 
 // workers/worker_public/src/route.ts
@@ -2507,6 +2685,8 @@ ${summary}` }] : [],
     const routeSubset = ablate?.stages ?? (routed.route === "fast" ? fastRouteStages(STAGE_NAMES) : null);
     if (routeSubset) console.log("route:", routed.route, routed.features.join("+"), "\u2014", STAGE_NAMES.length - routeSubset.length, "lanes dropped");
     const crag = { grade: null, corrective: null };
+    const decisionsArmed = decisionsEnabled(env) && !ablate?.noDecisions;
+    const decisionsGatePromise = decisionsArmed ? gateQuestion(env, q2.query) : Promise.resolve(null);
     try {
       const tR = Date.now();
       if (declaredCtx?.kind === "account") {
@@ -2646,6 +2826,12 @@ Answer account questions from these records ONLY: name the record when you use i
       budget,
       ablate?.compress === true
     );
+    const decisionPromise = decisionsArmed && decisionsGatePromise ? decisionsGatePromise.then((g) => g != null && g >= THRESHOLDS.decisionsGateMin ? runDecisionPass(env, {
+      question: q2.query,
+      gate: g,
+      passages: usedHits.map((h) => h.text),
+      docidentifier: understanding?.docidentifier ?? null
+    }) : null) : Promise.resolve(null);
     await attachFigureImages(env, messages, usedHits, q2.query);
     const pendingTools = [];
     if (multiTurn && env.DB && !nameplate?.manufacturer) {
@@ -2783,9 +2969,18 @@ Answer account questions from these records ONLY: name the record when you use i
             }
           }
         }
-        const canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
+        let canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
         const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
         let streamedCompletionBlocks = [];
+        if (decisionPromise && !canonical0.includes(refusalAnswer())) {
+          const dp = await decisionPromise;
+          if (dp) {
+            canonical0 += dp.section;
+            send({ type: "token", v: dp.section });
+            full += dp.section;
+            console.log("decisions: streamed the checklist section (" + dp.items.length + " items, mode " + dp.mode + ")");
+          }
+        }
         if (!canonical0.includes(refusalAnswer())) {
           try {
             streamedCompletionBlocks = await completeTables(env.DB, canonical0, usedHits);
@@ -3017,7 +3212,15 @@ Answer account questions from these records ONLY: name the record when you use i
         if (v.support !== "supported") console.log("entailment:", v.support, raced.score, raced.ungrounded_claims?.slice(0, 2));
       }
     }
-    const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer, refusalScope(answerCites(answer))) ? [] : understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
+    let decisionsOut;
+    if (decisionPromise) {
+      const dp = await decisionPromise;
+      if (dp && answer && !answer.includes(refusalAnswer())) {
+        answer = answer + dp.section;
+        decisionsOut = { mode: dp.mode, gate: dp.gate, items: dp.items };
+      }
+    }
+    const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer, refusalScope(answerCites(answer))) ? [] : understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...decisionsOut ? { decisions: decisionsOut } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
     const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer))) && finalAnchors.violations.length === 0;
     if (cacheable) {
       const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q2.query, q2.lang, salt)));

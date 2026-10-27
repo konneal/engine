@@ -101,7 +101,9 @@ export function cfModelRunner(ai: unknown): ModelRunner {
       return null;
     },
     async run(req: GenerateRequest): Promise<GenerateResult> {
-      const res: any = await (ai as any).run(req.model, {
+      // the decision models' native shape ({state, questions}) passes
+      // through verbatim — the adapter adds no sampling shaping to it
+      const payload: any = req.input !== undefined ? req.input : {
         messages: req.messages,
         max_tokens: req.maxTokens,
         ...(req.effort ? { reasoning_effort: req.effort } : {}),
@@ -109,9 +111,15 @@ export function cfModelRunner(ai: unknown): ModelRunner {
         ...(req.topP != null ? { top_p: req.topP } : {}),
         ...(req.topK != null ? { top_k: req.topK } : {}),
         ...(req.stream ? { stream: true } : {}),
-      });
+      };
+      const res: any = await (ai as any).run(req.model, payload);
       if (req.stream && res && typeof res.getReader === "function") return { text: null, stream: res };
       if (req.stream && res?.body && typeof res.body.getReader === "function") return { text: null, stream: res.body };
+      // the decision models answer with a typed answers object — the
+      // lossless form is its JSON, which the caller parses
+      if (res && typeof res === "object" && res.answers && typeof res.answers === "object") {
+        return { text: JSON.stringify(res.answers) };
+      }
       const text = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content;
       return { text: typeof text === "string" ? text : null };
     },

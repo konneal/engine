@@ -39,6 +39,9 @@ export interface AblateConfig {
    *  budget before the answer model reads it. Off in serving; the grid
    *  arms it per ask (the row's accuracy-at-token-budget gate). */
   compress: boolean;
+  /** The decision pass (TODO.decisions/01): per-request stand-down for
+   *  the measurement — the serving switch is DECISIONS_ENABLED. */
+  noDecisions: boolean;
 }
 
 export type AblateParse =
@@ -61,10 +64,11 @@ export function parseAblate(
   const rawRoute = body?.ablate_route;
   const speculative = body?.ablate_speculative === true;
   const compress = body?.ablate_compress === true;
+  const noDecisions = body?.ablate_no_decisions === true;
   const namesAblation = rawStages !== undefined && rawStages !== null;
   const routeAblation = rawRoute !== undefined && rawRoute !== null && rawRoute !== "adaptive";
 
-  if (!namesAblation && !noVerdict && !routeAblation && !speculative && !compress) return { ok: true, config: null };
+  if (!namesAblation && !noVerdict && !routeAblation && !speculative && !compress && !noDecisions) return { ok: true, config: null };
 
   if (!adminToken || presentedToken !== adminToken) {
     return {
@@ -99,5 +103,5 @@ export function parseAblate(
     stages = [...new Set(rawStages as string[])];
   }
 
-  return { ok: true, config: { stages, noVerdict, route, speculative, compress } };
+  return { ok: true, config: { stages, noVerdict, route, speculative, compress, noDecisions } };
 }

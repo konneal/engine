@@ -6,7 +6,14 @@
  *  multi-SDO / multi-cloud: docs/konneal-extraction-plan.md §5. */
 export interface GenerateRequest {
   model: string;
-  messages: unknown[];
+  /** The messages payload — required unless `input` carries a native
+   *  non-messages shape (the decision models). */
+  messages?: unknown[];
+  /** Native-shape passthrough for models whose contract is not
+   *  messages-based (the decision models: {state, questions}). When
+   *  present it REPLACES the messages payload verbatim — the adapter
+   *  adds no sampling shaping. */
+  input?: unknown;
   effort?: string;
   maxTokens?: number;
   temperature?: number;

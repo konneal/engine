@@ -18,6 +18,9 @@ export interface AblateConfig {
      *  budget before the answer model reads it. Off in serving; the grid
      *  arms it per ask (the row's accuracy-at-token-budget gate). */
     compress: boolean;
+    /** The decision pass (TODO.decisions/01): per-request stand-down for
+     *  the measurement — the serving switch is DECISIONS_ENABLED. */
+    noDecisions: boolean;
 }
 export type AblateParse = {
     ok: true;

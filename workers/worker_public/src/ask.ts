@@ -35,6 +35,8 @@ import { entitlementScope, resolveRequestScope, requestSalt, standardKeysFrom } 
 import { rawSessionToken, type SessionClaims } from "./session";
 import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested } from "./answercache";
 import { parseAblate } from "./ablate";
+import { decisionsEnabled, gateQuestion, runDecisionPass } from "./decisionWire";
+import type { DecisionItem } from "./decisions";
 import { STAGE_NAMES } from "./stages/index.ts";
 import { routeFor, fastRouteStages } from "./route.ts";
 import { partitionSubsets, type Partitionable } from "./speculative.ts";
@@ -1303,6 +1305,11 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // report it (TODO.sota/14.6 v2) — the coarse retrieval grade and the
   // corrective retry's firing/acceptance
   const crag: { grade: string | null; corrective: { fired: boolean; accepted: boolean; grade: string | null } | null } = { grade: null, corrective: null };
+  // the decision pass's gate (TODO.decisions/01): one cheap clef-flash
+  // noul over the question, prefetched in parallel with retrieval — the
+  // pass itself runs only if the gate clears and the ops switch is on
+  const decisionsArmed = decisionsEnabled(env) && !(ablate as any)?.noDecisions;
+  const decisionsGatePromise = decisionsArmed ? gateQuestion(env, q.query) : Promise.resolve(null);
   try {
     const tR = Date.now();
     // ── The "my account" live read (TODO.ai-platform/03) — resolved
@@ -1502,6 +1509,20 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     budget,
     ablate?.compress === true,
   );
+  // the decision pass (TODO.decisions/01): starts here so its calls run
+  // concurrently with generation — the checklist section arrives the
+  // moment the model's last token lands, never delaying the answer
+  const decisionPromise = decisionsArmed && decisionsGatePromise
+    ? decisionsGatePromise.then((g) =>
+        g != null && g >= THRESHOLDS.decisionsGateMin
+          ? runDecisionPass(env, {
+              question: q.query,
+              gate: g,
+              passages: usedHits.map((h: Hit) => h.text),
+              docidentifier: understanding?.docidentifier ?? null,
+            })
+          : null)
+    : Promise.resolve(null);
   await attachFigureImages(env, messages, usedHits, q.query);
   // the agent loop (the owner's 2026-09-28 direction): ONE bounded tool
   // round, armed only where a tool can help. The model may call
@@ -1697,7 +1718,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           }
           // the misplaced-pin wall rides the streamed path too: a
           // CITED stream is not a refusal
-          const canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
+          let canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
           // answer contract v2: validate [[u:]] refs, resolve typed blocks
           const c2 = canonical0.includes(refusalAnswer())
             ? { text: canonical0, blocks: [], dropped: [] as string[] }
@@ -1707,6 +1728,18 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           // before): additive D1 reads after the tokens are out, refusal
           // answers carry nothing to complete
           let streamedCompletionBlocks: Awaited<ReturnType<typeof completeTables>> = [];
+          // the decision pass's section streams as the answer's tail
+          // (the pass ran concurrently with generation — its arrival is
+          // instant here), before the completions and the done event
+          if (decisionPromise && !canonical0.includes(refusalAnswer())) {
+            const dp = await decisionPromise;
+            if (dp) {
+              canonical0 += dp.section;
+              send({ type: "token", v: dp.section });
+              full += dp.section;
+              console.log("decisions: streamed the checklist section (" + dp.items.length + " items, mode " + dp.mode + ")");
+            }
+          }
           if (!canonical0.includes(refusalAnswer())) {
             try {
               streamedCompletionBlocks = await completeTables(env.DB, canonical0, usedHits);
@@ -2047,7 +2080,15 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       if (v.support !== "supported") console.log("entailment:", v.support, raced!.score, raced!.ungrounded_claims?.slice(0, 2));
     }
   }
-  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality!, confidence_note: entailmentNote || qualityNote(jsonQuality!), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer!, refusalScope(answerCites(answer!))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
+  let decisionsOut: { mode: string; gate: number; items: DecisionItem[] } | undefined;
+  if (decisionPromise) {
+    const dp = await decisionPromise;
+    if (dp && answer && !answer!.includes(refusalAnswer())) {
+      answer = answer! + dp.section;
+      decisionsOut = { mode: dp.mode, gate: dp.gate, items: dp.items };
+    }
+  }
+  const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality!, confidence_note: entailmentNote || qualityNote(jsonQuality!), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer!, refusalScope(answerCites(answer!))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(decisionsOut ? { decisions: decisionsOut } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
   const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer!, refusalScope(answerCites(answer!))) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
