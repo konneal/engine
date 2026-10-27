@@ -148,5 +148,5 @@ test("ablate_no_decisions stands the decision pass down per request", () => {
   assert.equal(ok.ok, true);
   assert.equal(ok.ok && ok.config?.noDecisions, true);
   const off = parseAblate({}, "tok", "tok", KNOWN);
-  assert.equal(off.ok && off.config?.noDecisions, false);
+  assert.equal((off as any).config, null); // absent → no configuration, the serving default
 });
