@@ -35,7 +35,7 @@ import { entitlementScope, resolveRequestScope, requestSalt, standardKeysFrom } 
 import { rawSessionToken, type SessionClaims } from "./session";
 import { cacheKeyMaterial, corpusGen, exactCacheKey, freshRequested } from "./answercache";
 import { parseAblate } from "./ablate";
-import { decisionsEnabled, gateQuestion, runDecisionPass } from "./decisionWire";
+import { decisionsEnabled, gateQuestion, runDecisionPass, telemetryDecisions } from "./decisionWire";
 import type { DecisionItem } from "./decisions";
 import { STAGE_NAMES } from "./stages/index.ts";
 import { routeFor, fastRouteStages } from "./route.ts";
@@ -1744,6 +1744,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
               streamedDecisions = { mode: dp.mode, gate: dp.gate, items: dp.items };
               console.log("decisions: streamed the checklist section (" + dp.items.length + " items, mode " + dp.mode + ")");
             }
+            telemetryDecisions(env, ctx, tier, queryHash, streamedDecisions ?? null, Date.now() - tStart);
           }
           if (!canonical0.includes(refusalAnswer())) {
             try {
@@ -2092,6 +2093,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       answer = answer! + dp.section;
       decisionsOut = { mode: dp.mode, gate: dp.gate, items: dp.items };
     }
+    telemetryDecisions(env, ctx, tier, queryHash, decisionsOut ?? null, Date.now() - tStart);
   }
   const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality!, confidence_note: entailmentNote || qualityNote(jsonQuality!), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer!, refusalScope(answerCites(answer!))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(decisionsOut ? { decisions: decisionsOut } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
   const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer!, refusalScope(answerCites(answer!))) && finalAnchors.violations.length === 0;

@@ -1621,6 +1621,15 @@ ${passages.join("\n")}`.slice(0, 12e3),
     return null;
   }
 }
+function telemetryDecisions(env, ctx, tier, queryHash, result, durationMs) {
+  try {
+    telemetry(env, ctx, tier, "ask-decisions", result ? result.gate.toFixed(2) : "0", !!result, result?.items.length ?? 0, queryHash, result?.mode ?? void 0, void 0, { durationMs });
+    for (const it of result?.items ?? []) {
+      telemetry(env, ctx, tier, "ask-decision", it.probability.toFixed(2), it.band === "met", 1, queryHash, it.band, void 0, {});
+    }
+  } catch {
+  }
+}
 
 // workers/worker_public/src/route.ts
 var ROUTE_FAST_WORD_CAP = 10;
@@ -2986,6 +2995,7 @@ Answer account questions from these records ONLY: name the record when you use i
             streamedDecisions = { mode: dp.mode, gate: dp.gate, items: dp.items };
             console.log("decisions: streamed the checklist section (" + dp.items.length + " items, mode " + dp.mode + ")");
           }
+          telemetryDecisions(env, ctx, tier, queryHash, streamedDecisions ?? null, Date.now() - tStart);
         }
         if (!canonical0.includes(refusalAnswer())) {
           try {
@@ -3226,6 +3236,7 @@ Answer account questions from these records ONLY: name the record when you use i
         answer = answer + dp.section;
         decisionsOut = { mode: dp.mode, gate: dp.gate, items: dp.items };
       }
+      telemetryDecisions(env, ctx, tier, queryHash, decisionsOut ?? null, Date.now() - tStart);
     }
     const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer, refusalScope(answerCites(answer))) ? [] : understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...decisionsOut ? { decisions: decisionsOut } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
     const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer))) && finalAnchors.violations.length === 0;

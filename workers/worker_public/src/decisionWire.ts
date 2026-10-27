@@ -4,6 +4,7 @@
 // when DECISIONS_ENABLED, not ablated, not a refusal, no verdict block
 // bound, and the gate's noul clears decisionsGateMin.
 import { portModelRunner } from "./env.ts";
+import { telemetry } from "./quota";
 import { MODELS, THRESHOLDS } from "./config.ts";
 import {
   buildDecisionQuestions, matchAnswers, parseDerivation,
@@ -125,4 +126,28 @@ export async function runDecisionPass(
   } catch {
     return null; // additive — the essay answer ships
   }
+}
+
+/** The decisions telemetry (TODO.decisions/03): the nightly's
+ *  calibration signal, riding the queries table's route key with a
+ *  defined encoding — no schema migration.
+ *  - one PASS row, route "ask-decisions": ok = fired, lang = mode,
+ *    model = the gate probability (2dp), duration_ms = the pass's.
+ *  - one ITEM row per requirement, route "ask-decision": ok = band is
+ *    "met", lang = band, model = the probability (2dp); query_hash
+ *    joins the rows to their pass. */
+export function telemetryDecisions(
+  env: Env,
+  ctx: { waitUntil(p: Promise<unknown>): void },
+  tier: string,
+  queryHash: string,
+  result: { mode: string; gate: number; items: DecisionItem[] } | null,
+  durationMs: number,
+): void {
+  try {
+    telemetry(env, ctx, tier, "ask-decisions", result ? result.gate.toFixed(2) : "0", !!result, result?.items.length ?? 0, queryHash, result?.mode ?? undefined, undefined, { durationMs });
+    for (const it of result?.items ?? []) {
+      telemetry(env, ctx, tier, "ask-decision", it.probability.toFixed(2), it.band === "met", 1, queryHash, it.band, undefined, {});
+    }
+  } catch { /* telemetry never answers for the answer */ }
 }
