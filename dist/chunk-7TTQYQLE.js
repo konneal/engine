@@ -2976,12 +2976,14 @@ Answer account questions from these records ONLY: name the record when you use i
         let canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
         const c2 = canonical0.includes(refusalAnswer()) ? { text: canonical0, blocks: [], dropped: [] } : await contractV2(env.DB, canonical0, usedHits);
         let streamedCompletionBlocks = [];
-        if (decisionPromise && !canonical0.includes(refusalAnswer())) {
+        let streamedDecisions;
+        if (decisionPromise && !canonical0.includes(refusalAnswer()) && !verdictBlock && !conditionBlock && !aggregationBlock) {
           const dp = await decisionPromise;
           if (dp) {
             canonical0 += dp.section;
             send({ type: "token", v: dp.section });
             full += dp.section;
+            streamedDecisions = { mode: dp.mode, gate: dp.gate, items: dp.items };
             console.log("decisions: streamed the checklist section (" + dp.items.length + " items, mode " + dp.mode + ")");
           }
         }
@@ -2998,6 +3000,7 @@ Answer account questions from these records ONLY: name the record when you use i
           model,
           query_hash: queryHash,
           follow_ups: refusalShaped(canonical0, refusalScope(answerCites(full))) ? [] : understanding?.follow_ups ?? [],
+          ...streamedDecisions ? { decisions: streamedDecisions } : {},
           blocks: [...c2.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...streamedCompletionBlocks],
           context_applied: ctxApplied,
           read: readAs(),
@@ -3219,7 +3222,7 @@ Answer account questions from these records ONLY: name the record when you use i
     let decisionsOut;
     if (decisionPromise) {
       const dp = await decisionPromise;
-      if (dp && answer && !answer.includes(refusalAnswer())) {
+      if (dp && answer && !answer.includes(refusalAnswer()) && !verdictBlock && !conditionBlock && !aggregationBlock) {
         answer = answer + dp.section;
         decisionsOut = { mode: dp.mode, gate: dp.gate, items: dp.items };
       }
