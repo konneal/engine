@@ -1007,9 +1007,47 @@ paths:
                 context:
                   type: string
                   description: Surrounding clause text, at most 400 characters, to steer the description.
+                model:
+                  type: string
+                  description: >-
+                    Per-request vision model override (an @cf/ id) — the
+                    caption A/B's measurement arm. Absent, the CAPTION_MODEL
+                    role (default glm-5.3-flash) serves.
+                dry_run:
+                  type: boolean
+                  description: Return the description without storing it into the unit's payload.
       responses:
         '200':
-          description: The stored description.
+          description: The description (stored, or returned only under dry_run).
+  /admin/vision_judge:
+    post:
+      tags: [Administration]
+      summary: Judge two captions of one figure against the image
+      description: >-
+        The caption A/B's pairwise judge — two anonymized descriptions of
+        the same figure, presented in randomized order beside the image
+        itself, decided by a third model that took no part in writing
+        either. The vision A/B harness calls this lane.
+      operationId: adminVisionJudge
+      security: [{ adminAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [unit_id, captions]
+              properties:
+                unit_id: { type: string, description: The figure unit whose asset the captions describe. }
+                captions:
+                  type: object
+                  required: [a, b]
+                  properties:
+                    a: { type: string }
+                    b: { type: string }
+      responses:
+        '200':
+          description: The winning arm (a or b) with the judge's reason.
   /v1/admin/judge:
     post:
       tags: [Administration]

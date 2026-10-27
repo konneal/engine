@@ -11,6 +11,13 @@ var MODELS = {
   // Vision image-parts land with answer contract v2; text answers work now.
   anon: "@cf/zai-org/glm-5.3-flash",
   member: "@cf/zai-org/glm-5.3-flash",
+  // figure captions + the vision lane (one-time, quality-first; the A/B
+  // lever is CAPTION_MODEL, the per-request arm is the admin route's
+  // body.model)
+  caption: "@cf/zai-org/glm-5.3-flash",
+  // the pairwise vision judge (sees the image; a THIRD model never
+  // judges its own arm)
+  visionJudge: "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
   // the VLM figure rerank (TODO.sota/18.3): the newly-landed
   // vision-capable MoE scores figure IMAGES against figure-seeking
   // questions — one bounded call per figure question, ablatable stage

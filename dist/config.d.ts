@@ -3,6 +3,8 @@ export declare const MODELS: {
     readonly rerank: "@cf/baai/bge-reranker-base";
     readonly anon: "@cf/zai-org/glm-5.3-flash";
     readonly member: "@cf/zai-org/glm-5.3-flash";
+    readonly caption: "@cf/zai-org/glm-5.3-flash";
+    readonly visionJudge: "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
     readonly vlmFigure: "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
     readonly decisionsGate: "@cf/cloudflare/clef-flash";
     readonly decisionsModel: "@cf/cloudflare/clef";

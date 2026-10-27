@@ -53,6 +53,7 @@ export type OpenApiOperationId =
   | "adminFamilySummaryAlias"
   | "adminVectors"
   | "adminCaption"
+  | "adminVisionJudge"
   | "adminJudge"
   | "adminJudgeAlias"
   | "adminRevokeKey"
@@ -295,6 +296,11 @@ export const OPENAPI_SURFACE: readonly (Omit<OpenApiRoute, "operationId"> & { op
     "method": "POST",
     "pattern": "/admin/caption",
     "operationId": "adminCaption"
+  },
+  {
+    "method": "POST",
+    "pattern": "/admin/vision_judge",
+    "operationId": "adminVisionJudge"
   },
   {
     "method": "POST",

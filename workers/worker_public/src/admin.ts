@@ -264,6 +264,74 @@ export async function handleFamilySummary(env: Env, req: Request): Promise<Respo
 /** Ops access to the Vectorize binding (get/upsert by id) for offline
  *  passes like embedding smoothing (G-ETSI-4) — the binding is the
  *  credential, admin-token gated exactly like /admin/enrich. */
+/** The unit's vision asset, base64-encoded for the message part — the
+ *  one load path the caption and the pairwise judge share. */
+async function loadUnitAsset(env: Env, unitId: string) {
+  const row = await env.DB.prepare("SELECT payload, docidentifier FROM unit_payloads WHERE unit_id = ?1").bind(unitId).first<any>();
+  if (!row) return { error: err(404, "not_found", "no unit_payload row for that id") };
+  const payload = JSON.parse(String(row.payload));
+  const uri = payload.uri ?? "";
+  const m = uri.match(/^\/assets\/(.+)/);
+  if (!m) return { error: err(400, "invalid_input", "payload has no /assets/ uri (upload the asset first)") };
+  const obj = await env.UNIT_ASSETS.get(m[1]);
+  if (!obj) return { error: err(404, "not_found", `asset ${m[1]} not in R2`) };
+  const buf = await obj.arrayBuffer();
+  const ext = m[1].split(".").pop()?.toLowerCase() ?? "png";
+  const mime = ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
+  // chunked: spreading the whole byte array blows the V8 stack on large
+  // assets (the 389KB u:figure-1)
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return { row, b64: btoa(binary), mime };
+}
+
+/** The pairwise vision judge (TODO.sota/18.4's A/B): two anonymized
+ *  captions of the SAME figure, presented in randomized order beside the
+ *  image itself; a THIRD model (never a contestant) picks the better
+ *  caption with a reason. Admin-gated; one-time quality-first lane. */
+export async function handleVisionJudge(env: Env, req: Request): Promise<Response> {
+  if (!env.ADMIN_TOKEN) return err(501, "admin_disabled", "ADMIN_TOKEN secret is not configured");
+  const auth = req.headers.get("authorization") ?? "";
+  if (auth !== `Bearer ${env.ADMIN_TOKEN}`) return err(401, "unauthorized", "Invalid admin token");
+  const body = await readJson(req);
+  const unitId = typeof body?.unit_id === "string" ? body.unit_id : "";
+  const capA = typeof body?.captions?.a === "string" ? body.captions.a.slice(0, 2000) : "";
+  const capB = typeof body?.captions?.b === "string" ? body.captions.b.slice(0, 2000) : "";
+  if (!unitId || !capA || !capB) return err(400, "invalid_input", "unit_id and captions.a/.b required");
+  try {
+    const loaded = await loadUnitAsset(env, unitId);
+    if (loaded.error) return loaded.error;
+    // randomized presentation order: the judge's letter bias must not
+    // correlate with either arm
+    const swap = Math.random() < 0.5;
+    const first = swap ? capB : capA;
+    const second = swap ? capA : capB;
+    const res = await env.AI.run(roleModel(env, "visionJudge"), {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: `You are judging two descriptions of the same figure (from ${loaded.row.docidentifier}) written for a reader who cannot see it. The figure is attached.\n\nDescription 1: ${first}\n\nDescription 2: ${second}\n\nWhich description better tells the reader what the figure shows and its normative point? Reply with ONLY JSON: {"better": 1 or 2, "reason": "one sentence"}.` },
+            { type: "image_url", image_url: { url: `data:${loaded.mime};base64,${loaded.b64}` } },
+          ],
+        },
+      ],
+      max_tokens: 2048,
+    });
+    const anyRes = res as any;
+    const text = typeof anyRes?.response === "string" ? anyRes.response : anyRes?.choices?.[0]?.message?.content ?? "";
+    const parsed = JSON.parse(text.replace(/^[^\{]*/, "").replace(/[^\}]*$/, ""));
+    const said = parsed?.better === 1 ? "first" : parsed?.better === 2 ? "second" : null;
+    if (!said) return err(502, "judge_failed", "no decision in the judge's reply: " + text.slice(0, 120));
+    // map back through the presentation swap
+    const winner = (said === "first") === swap ? "b" : "a";
+    return json({ ok: true, unit_id: unitId, better: winner, judge: roleModel(env, "visionJudge"), reason: String(parsed.reason ?? "").slice(0, 500) });
+  } catch (e) {
+    return err(502, "vision_judge_failed", String(e).slice(0, 200));
+  }
+}
+
 /** One-time figure captioning (TODO.remaining/03): fetch the unit's asset
  *  from R2, describe it with the vision-capable answer model, store the
  *  description into unit_payloads. Admin-gated; idempotent. */
@@ -274,29 +342,22 @@ export async function handleCaption(env: Env, req: Request): Promise<Response> {
   const body = await readJson(req);
   const unitId = typeof body?.unit_id === "string" ? body.unit_id : "";
   const context = typeof body?.context === "string" ? body.context.slice(0, 400) : "";
+  // the A/B arm (TODO.sota/18.4): a per-request model override for the
+  // measurement, admin-gated like the route itself; dry_run skips the
+  // payload write so the arms never mix state in unit_payloads
+  const override = typeof body?.model === "string" && body.model.startsWith("@cf/") ? body.model : null;
+  const dryRun = body?.dry_run === true;
   if (!unitId) return err(400, "invalid_input", "unit_id required");
   try {
-    const row = await env.DB.prepare("SELECT payload, docidentifier FROM unit_payloads WHERE unit_id = ?1").bind(unitId).first<any>();
-    if (!row) return err(404, "not_found", "no unit_payload row for that id");
-    const payload = JSON.parse(String(row.payload));
-    const uri = payload.uri ?? "";
-    const m = uri.match(/^\/assets\/(.+)/);
-    if (!m) return err(400, "invalid_input", "payload has no /assets/ uri (upload the asset first)");
-    const obj = await env.UNIT_ASSETS.get(m[1]);
-    if (!obj) return err(404, "not_found", `asset ${m[1]} not in R2`);
-    const buf = await obj.arrayBuffer();
-    const ext = m[1].split(".").pop()?.toLowerCase() ?? "png";
-    const mime = ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
-    // chunked: spreading the whole byte array blows the V8 stack on large
-    // assets (the 389KB u:figure-1)
-    const bytes = new Uint8Array(buf);
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    const b64 = btoa(binary);
+    const loaded = await loadUnitAsset(env, unitId);
+    if (loaded.error) return loaded.error;
+    const row = loaded.row;
+    const b64 = loaded.b64;
+    const mime = loaded.mime;
     let res: any = null;
     for (let attempt = 0; attempt < 2 && !res; attempt++) {
       try {
-        res = await env.AI.run(MODELS.member, {
+        res = await env.AI.run(override ?? roleModel(env, "caption"), {
           messages: [
             {
               role: "user",
@@ -331,8 +392,8 @@ export async function handleCaption(env: Env, req: Request): Promise<Response> {
             const end = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
             return end === -1 ? cut.slice(0, cut.lastIndexOf(" ")) : cut.slice(0, end + 1);
           })();
-    await env.DB.prepare("UPDATE unit_payloads SET payload = json_set(payload, '$.description', ?1) WHERE unit_id = ?2").bind(desc, unitId).run();
-    return json({ ok: true, unit_id: unitId, description: desc });
+    if (!dryRun) await env.DB.prepare("UPDATE unit_payloads SET payload = json_set(payload, '$.description', ?1) WHERE unit_id = ?2").bind(desc, unitId).run();
+    return json({ ok: true, unit_id: unitId, model: override ?? roleModel(env, "caption"), dry_run: dryRun || undefined, description: desc });
   } catch (e) {
     return err(502, "caption_failed", String(e).slice(0, 200));
   }

@@ -753,6 +753,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/vision_judge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Judge two captions of one figure against the image
+         * @description The caption A/B's pairwise judge — two anonymized descriptions of the same figure, presented in randomized order beside the image itself, decided by a third model that took no part in writing either. The vision A/B harness calls this lane.
+         */
+        post: operations["adminVisionJudge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/judge": {
         parameters: {
             query?: never;
@@ -2164,11 +2184,44 @@ export interface operations {
                     unit_id: string;
                     /** @description Surrounding clause text, at most 400 characters, to steer the description. */
                     context?: string;
+                    /** @description Per-request vision model override (an @cf/ id) — the caption A/B's measurement arm. Absent, the CAPTION_MODEL role (default glm-5.3-flash) serves. */
+                    model?: string;
+                    /** @description Return the description without storing it into the unit's payload. */
+                    dry_run?: boolean;
                 };
             };
         };
         responses: {
-            /** @description The stored description. */
+            /** @description The description (stored, or returned only under dry_run). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    adminVisionJudge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The figure unit whose asset the captions describe. */
+                    unit_id: string;
+                    captions: {
+                        a: string;
+                        b: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The winning arm (a or b) with the judge's reason. */
             200: {
                 headers: {
                     [name: string]: unknown;
