@@ -4,13 +4,13 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-T6T2QUO6.js";
-import "../../chunk-ECOYO7EX.js";
+} from "../../chunk-CXKSRG6E.js";
+import "../../chunk-4RPXWVFG.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
   modelGroundingBlock
-} from "../../chunk-B2MU4ZWM.js";
+} from "../../chunk-LVRGPCDJ.js";
 import {
   handleSearch
 } from "../../chunk-MUWO2EV6.js";
@@ -1175,13 +1175,13 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-VHN54DWH.js");
+    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-VUHO6UG6.js");
     let payload;
     if (TOOLS_REGISTRY2.some((t) => t.name === name && t.audiences.includes("mcp"))) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-ZWZFZBKZ.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-KNPPTHMG.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-VOOT4RDA.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-KNPPTHMG.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });

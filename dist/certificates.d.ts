@@ -20,6 +20,14 @@ export declare function isRegisterShaped(query: string): boolean;
  *  narrates it (TODO.sota/04's machine-checkable ground truth, applied
  *  to the register plane 2026-10-11). */
 export declare function registerAggregateIntent(query: string): "count" | "latest" | null;
+/** The register's answers derive from the D1 snapshot, not the indexed
+ *  corpus — but the answer cache (namespaced by INDEX_VERSION +
+ *  corpus_gen) knows nothing about D1-plane loads, so a cached
+ *  pre-register refusal preempted register-shaped questions the register
+ *  answers (measured live 2026-10-28: cached refusals served over
+ *  register-shaped asks until fresh). Such asks skip both cache reads
+ *  and writes. */
+export declare function registerBypassesCache(query: string): boolean;
 export interface RegisterAggregate {
     family: string;
     count: number;

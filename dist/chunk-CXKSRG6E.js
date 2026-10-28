@@ -5,9 +5,10 @@ import {
   queryFamily,
   registerAggregate,
   registerAggregateIntent,
+  registerBypassesCache,
   registerNote,
   searchRegister
-} from "./chunk-ECOYO7EX.js";
+} from "./chunk-4RPXWVFG.js";
 import {
   TOOL_DECLARATION,
   bindConstraintByQuantities,
@@ -32,7 +33,7 @@ import {
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-B2MU4ZWM.js";
+} from "./chunk-LVRGPCDJ.js";
 import {
   NO_CONTEXT,
   STAGE_NAMES,
@@ -2221,7 +2222,8 @@ async function handleAsk(env, ctx, req, tier, key) {
   const multiTurn = body?.multi_turn !== false;
   const gen = await corpusGen(env.CACHE);
   const withImage = effectiveImage || storedImage;
-  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage || ablate ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
+  const registerBypass = registerBypassesCache(q.query);
+  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage || ablate || registerBypass ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   let probeTokensUsed = 0;
   const pipeline = async (channel, qq) => {
     const live2 = channel;
@@ -3080,7 +3082,7 @@ Answer account questions from these records ONLY: name the record when you use i
           } catch {
           }
         }
-        if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
+        if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !registerBypass && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
           ctx.waitUntil(
             env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q2.query, q2.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}, ...streamedEntailment ? { entailment: streamedEntailment } : {} }), { expirationTtl: LIMITS.cacheTtlSec })
           );
@@ -3240,7 +3242,7 @@ Answer account questions from these records ONLY: name the record when you use i
       telemetryDecisions(env, ctx, tier, queryHash, decisionsOut ?? null, Date.now() - tStart);
     }
     const out = { answer, citations: finalCites, ...jsonQuality ? { source_quality: jsonQuality, confidence_note: entailmentNote || qualityNote(jsonQuality), ...entailment ? { entailment } : {}, ...jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {} } : {}, model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer, refusalScope(answerCites(answer))) ? [] : understanding?.follow_ups ?? [], blocks: [...c2ns.blocks, ...verdictBlock ? [verdictBlock] : [], ...conditionBlock ? [conditionBlock] : [], ...aggregationBlock ? [aggregationBlock] : [], ...registerBlock ? [registerBlock] : [], ...completionBlocks], context_applied: ctxApplied, ...liveRecords ? { records: liveRecords } : {}, ...decisionsOut ? { decisions: decisionsOut } : {}, ...ablate ? { ablate } : {}, route: { route: routed.route, features: routed.features } };
-    const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer, refusalScope(answerCites(answer))) && finalAnchors.violations.length === 0;
+    const cacheable = !contextual && !declaredCtx && !ablate && !registerBypass && cacheableAnswer(answer, refusalScope(answerCites(answer))) && finalAnchors.violations.length === 0;
     if (cacheable) {
       const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q2.query, q2.lang, salt)));
       ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));

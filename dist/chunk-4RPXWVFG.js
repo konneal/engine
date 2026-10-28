@@ -12,6 +12,9 @@ function registerAggregateIntent(query) {
   if (/\b(how many|count|number of|total|how much)\b/i.test(query)) return "count";
   return null;
 }
+function registerBypassesCache(query) {
+  return isRegisterShaped(query) || registerAggregateIntent(query) !== null;
+}
 async function registerAggregate(db, family) {
   try {
     const digits = family.replace(/^[A-Za-z]+/, "");
@@ -219,6 +222,7 @@ ${absent.join("\n")}`);
 export {
   isRegisterShaped,
   registerAggregateIntent,
+  registerBypassesCache,
   registerAggregate,
   aggregateNote,
   aggregateBlock,
