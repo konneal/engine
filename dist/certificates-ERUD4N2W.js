@@ -8,10 +8,11 @@ import {
   queryFamily,
   registerAggregate,
   registerAggregateIntent,
+  registerBypassesCache,
   registerNote,
   registerTokens,
   searchRegister
-} from "./chunk-ECOYO7EX.js";
+} from "./chunk-4RPXWVFG.js";
 import "./chunk-3FYJM7LH.js";
 export {
   aggregateBlock,
@@ -23,6 +24,7 @@ export {
   queryFamily,
   registerAggregate,
   registerAggregateIntent,
+  registerBypassesCache,
   registerNote,
   registerTokens,
   searchRegister
