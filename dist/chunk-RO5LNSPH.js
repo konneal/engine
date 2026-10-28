@@ -1565,7 +1565,7 @@ var certificatesSearch = {
   handler: async (env, args) => {
     const query = String(args?.query ?? "").trim().slice(0, 160);
     if (!query) return null;
-    const { searchRegister, registerNote, certificateLinks } = await import("./certificates-ERUD4N2W.js");
+    const { searchRegister, registerNote, certificateLinks } = await import("./certificates-QHFH2KLH.js");
     const reg = await searchRegister(env.DB, query, true);
     const output = reg?.rows?.length ? [registerNote(reg.rows), certificateLinks(reg.rows)].filter(Boolean).join("\n") : `No certificate was found for "${query}" in the certificates database (the register snapshot). State this as the search's result, with the searched string visible.`;
     return { name: "certificates.search", query, output };

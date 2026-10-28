@@ -6,13 +6,14 @@ import {
   isRegisterShaped,
   printedCertificateNumber,
   queryFamily,
+  rankRegisterRows,
   registerAggregate,
   registerAggregateIntent,
   registerBypassesCache,
   registerNote,
   registerTokens,
   searchRegister
-} from "./chunk-4RPXWVFG.js";
+} from "./chunk-JKBU2IPM.js";
 import "./chunk-3FYJM7LH.js";
 export {
   aggregateBlock,
@@ -22,6 +23,7 @@ export {
   isRegisterShaped,
   printedCertificateNumber,
   queryFamily,
+  rankRegisterRows,
   registerAggregate,
   registerAggregateIntent,
   registerBypassesCache,

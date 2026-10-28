@@ -92,6 +92,15 @@ export declare function searchRegister(db: any, query: string, force?: boolean):
     rows: RegisterRow[];
     tokens: string[];
 } | null>;
+/** Rank the OR-matched candidates so the note's six rows carry the
+ *  QUESTION's model, not just its holder: the live probes showed a
+ *  distinctive model token losing its place to generic holder words
+ *  ("Rice Lake Weighing Systems" matched 6 rows before "RL116XP" was
+ *  ever consulted — the answer then denied a certificate the register
+ *  holds). A model-token hit outranks a holder-token hit; numbers must
+ *  match as standalone values (the "190 must not catch XK3190" rule).
+ *  Measured 2026-10-28, the register-lane eval. */
+export declare function rankRegisterRows(rows: RegisterRow[], tokens: string[]): RegisterRow[];
 export declare function registerNote(rows: RegisterRow[]): string;
 /** Each certificate's location rides the note as a link when its PDF
  *  is in the R2 plane (TODO 7) — the user gets the document, not just
