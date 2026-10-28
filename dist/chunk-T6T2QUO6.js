@@ -1404,10 +1404,11 @@ function parseAblate(body, adminToken, presentedToken, knownStages) {
   const rawRoute = body?.ablate_route;
   const speculative = body?.ablate_speculative === true;
   const compress = body?.ablate_compress === true;
+  const noCompress = body?.ablate_no_compress === true;
   const noDecisions = body?.ablate_no_decisions === true;
   const namesAblation = rawStages !== void 0 && rawStages !== null;
   const routeAblation = rawRoute !== void 0 && rawRoute !== null && rawRoute !== "adaptive";
-  if (!namesAblation && !noVerdict && !routeAblation && !speculative && !compress && !noDecisions) return { ok: true, config: null };
+  if (!namesAblation && !noVerdict && !routeAblation && !speculative && !compress && !noCompress && !noDecisions) return { ok: true, config: null };
   if (!adminToken || presentedToken !== adminToken) {
     return {
       ok: false,
@@ -1438,7 +1439,7 @@ function parseAblate(body, adminToken, presentedToken, knownStages) {
     }
     stages = [...new Set(rawStages)];
   }
-  return { ok: true, config: { stages, noVerdict, route, speculative, compress, noDecisions } };
+  return { ok: true, config: { stages, noVerdict, route, speculative, compress, noCompress, noDecisions } };
 }
 
 // workers/worker_public/src/decisions.ts
@@ -2837,7 +2838,7 @@ Answer account questions from these records ONLY: name the record when you use i
       [ops.note, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
       summary,
       budget,
-      ablate?.compress === true
+      ablate?.noCompress !== true
     );
     const decisionPromise = decisionsArmed && decisionsGatePromise ? decisionsGatePromise.then((g) => g != null && g >= THRESHOLDS.decisionsGateMin ? runDecisionPass(env, {
       question: q2.query,
@@ -3175,7 +3176,7 @@ Answer account questions from these records ONLY: name the record when you use i
           ...routeSubset ? { stageSubset: routeSubset ?? void 0 } : {}
         });
         if (retryRetrieve.hits.length > 0) {
-          const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q2.query, retryRetrieve.hits, q2.lang, keptHistory, void 0, summary, budget, ablate?.compress === true);
+          const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q2.query, retryRetrieve.hits, q2.lang, keptHistory, void 0, summary, budget, ablate?.noCompress !== true);
           const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
           if (retryAnswer) {
             answer = canonicalRefusal(retryAnswer, refusalScope(answerCites(retryAnswer)));

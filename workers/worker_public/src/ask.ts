@@ -1507,7 +1507,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     [ops.note, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
-    ablate?.compress === true,
+    ablate?.noCompress !== true,
   );
   // the decision pass (TODO.decisions/01): starts here so its calls run
   // concurrently with generation — the checklist section arrives the
@@ -2005,7 +2005,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         ...(routeSubset ? { stageSubset: routeSubset ?? undefined } : {}),
       });
       if (retryRetrieve.hits.length > 0) {
-        const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget, ablate?.compress === true);
+        const { messages: retryMessages, usedHits: retryUsed } = buildMessages(q.query, retryRetrieve.hits, q.lang, keptHistory, undefined, summary, budget, ablate?.noCompress !== true);
         const retryAnswer = await generateOnce(env, model, retryMessages, routeEffort(routed.route));
         // the answer now comes from the retry passages — citations must follow
         if (retryAnswer) {
