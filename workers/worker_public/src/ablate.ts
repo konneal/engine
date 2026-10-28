@@ -34,11 +34,16 @@ export interface AblateConfig {
    *  diversified subset + one strong verifier. Off in serving until the
    *  gate promotes it; the grid arms it per ask. */
   speculative: boolean;
-  /** Extractive prompt compression (TODO.sota/02 row 5): each passage
-   *  body is query-weighted sentence selection at a fraction of its
-   *  budget before the answer model reads it. Off in serving; the grid
-   *  arms it per ask (the row's accuracy-at-token-budget gate). */
+  /** Extractive prompt compression (TODO.sota/02 row 5): PROMOTED — the
+   *  passage bodies are query-weighted sentence selection at a fraction
+   *  of their budget in serving (the row's gate: identical accuracy at
+   *  ~1/20th the prompt, the whole-document baseline measured it).
+   *  ablate_compress survives for the grid's explicit arm;
+   *  ablate_no_compress is the measurement stand-down. */
   compress: boolean;
+  /** Per-request stand-down for the promoted compressor (the
+   *  measurement arm; the serving default is on). */
+  noCompress: boolean;
   /** The decision pass (TODO.decisions/01): per-request stand-down for
    *  the measurement — the serving switch is DECISIONS_ENABLED. */
   noDecisions: boolean;
@@ -64,11 +69,12 @@ export function parseAblate(
   const rawRoute = body?.ablate_route;
   const speculative = body?.ablate_speculative === true;
   const compress = body?.ablate_compress === true;
+  const noCompress = body?.ablate_no_compress === true;
   const noDecisions = body?.ablate_no_decisions === true;
   const namesAblation = rawStages !== undefined && rawStages !== null;
   const routeAblation = rawRoute !== undefined && rawRoute !== null && rawRoute !== "adaptive";
 
-  if (!namesAblation && !noVerdict && !routeAblation && !speculative && !compress && !noDecisions) return { ok: true, config: null };
+  if (!namesAblation && !noVerdict && !routeAblation && !speculative && !compress && !noCompress && !noDecisions) return { ok: true, config: null };
 
   if (!adminToken || presentedToken !== adminToken) {
     return {
@@ -103,5 +109,5 @@ export function parseAblate(
     stages = [...new Set(rawStages as string[])];
   }
 
-  return { ok: true, config: { stages, noVerdict, route, speculative, compress, noDecisions } };
+  return { ok: true, config: { stages, noVerdict, route, speculative, compress, noCompress, noDecisions } };
 }

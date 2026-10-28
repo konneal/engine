@@ -13,11 +13,16 @@ export interface AblateConfig {
      *  diversified subset + one strong verifier. Off in serving until the
      *  gate promotes it; the grid arms it per ask. */
     speculative: boolean;
-    /** Extractive prompt compression (TODO.sota/02 row 5): each passage
-     *  body is query-weighted sentence selection at a fraction of its
-     *  budget before the answer model reads it. Off in serving; the grid
-     *  arms it per ask (the row's accuracy-at-token-budget gate). */
+    /** Extractive prompt compression (TODO.sota/02 row 5): PROMOTED — the
+     *  passage bodies are query-weighted sentence selection at a fraction
+     *  of their budget in serving (the row's gate: identical accuracy at
+     *  ~1/20th the prompt, the whole-document baseline measured it).
+     *  ablate_compress survives for the grid's explicit arm;
+     *  ablate_no_compress is the measurement stand-down. */
     compress: boolean;
+    /** Per-request stand-down for the promoted compressor (the
+     *  measurement arm; the serving default is on). */
+    noCompress: boolean;
     /** The decision pass (TODO.decisions/01): per-request stand-down for
      *  the measurement — the serving switch is DECISIONS_ENABLED. */
     noDecisions: boolean;

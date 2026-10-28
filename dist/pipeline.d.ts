@@ -51,9 +51,10 @@ export declare function splitHistory(history: HistoryTurn[], budgetTokens: numbe
  *  incoming order (timeout/parse failure never blocks serving). */
 export declare function listwiseRerank(env: any, model: string, query: string, hits: Hit[]): Promise<Hit[] | null>;
 export declare function buildMessages(query: string, hits: Hit[], lang?: string, history?: HistoryTurn[], retrievalNote?: string, conversationSummary?: string, budgetTokens?: number, 
-/** the extractive compression arm (TODO.sota/02 row 5): ablate_compress
- *  arms it per ask — each passage body becomes query-weighted sentence
- *  selection at compressShare of its budget. Off in serving. */
+/** the extractive compression (TODO.sota/02 row 5): PROMOTED — on in
+ *  serving; ablate_no_compress stands it down per ask for the
+ *  measurement. Each passage body becomes query-weighted sentence
+ *  selection at compressShare of its budget. */
 compress?: boolean): BuiltMessages;
 export declare function citations(hits: Hit[]): {
     doc_id: string;

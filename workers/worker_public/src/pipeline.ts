@@ -288,9 +288,10 @@ export function buildMessages(
   retrievalNote?: string,
   conversationSummary?: string,
   budgetTokens: number = LIMITS.inputTokenBudget,
-  /** the extractive compression arm (TODO.sota/02 row 5): ablate_compress
-   *  arms it per ask — each passage body becomes query-weighted sentence
-   *  selection at compressShare of its budget. Off in serving. */
+  /** the extractive compression (TODO.sota/02 row 5): PROMOTED — on in
+   *  serving; ablate_no_compress stands it down per ask for the
+   *  measurement. Each passage body becomes query-weighted sentence
+   *  selection at compressShare of its budget. */
   compress?: boolean,
 ): BuiltMessages {
   // per-corpus guidance travels WITH the dataset (config.ts): every
