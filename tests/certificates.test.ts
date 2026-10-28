@@ -130,3 +130,14 @@ test("the note names the family with its series letter, derived from the certifi
   assert.match(note, /The \w+ R 60 family holds 1624 certificates/);
   assert.ok(!note.includes("The 60 family"), "the bare digits must not stand alone");
 });
+
+import { registerBypassesCache } from "../workers/worker_public/src/certificates.ts";
+
+test("register-shaped and aggregate asks bypass the answer cache; requirement questions do not", () => {
+  assert.equal(registerBypassesCache("Is the Utilcell 190 model still certified in the OIML R 60 certificate register?"), true);
+  assert.equal(registerBypassesCache("How many certificates are issued for R 60?"), true);
+  assert.equal(registerBypassesCache("What is the latest certificate issued for R 60?"), true);
+  // a requirements question consults the corpus, whose cache IS
+  // namespaced by the index — it rides the cache as before
+  assert.equal(registerBypassesCache("What must a load cell certificate contain per R 60?"), false);
+});

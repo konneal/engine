@@ -46,7 +46,7 @@ export type { Env };
 import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./lib/http";
 import { chargeTokens, checkQuota, clientIp, creditBudget, creditEstimate, estimateTokens, telemetry, tokenBudget, usageTotal } from "./quota";
 import { graphExpand, editionNote } from "./graph";
-import { registerNote, searchRegister, certificateLinks, registerAggregateIntent, registerAggregate, aggregateNote, aggregateBlock, queryFamily } from "./certificates";
+import { registerNote, searchRegister, certificateLinks, registerAggregateIntent, registerAggregate, aggregateNote, aggregateBlock, queryFamily, registerBypassesCache } from "./certificates";
 import { TOOL_DECLARATION, parseToolCall, runTool, toolNote } from "./tools";
 import { operationsLane } from "./operations.ts";
 import { extractNameplate, nameplateRegisterQuery } from "./nameplate.ts";
@@ -594,7 +594,8 @@ async function handleAsk(
   // cache.py) and old-generation entries miss (oimlsmart/rag#72)
   const gen = await corpusGen(env.CACHE);
   const withImage = effectiveImage || storedImage;
-  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage || ablate ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
+  const registerBypass = registerBypassesCache(q.query);
+  const cached = fresh || contextual || declaredCtx || draftAct || apiCallIntent || withImage || ablate || registerBypass ? null : await cacheGet(env, gen, ns, q.query, q.lang, salt);
   let probeTokensUsed = 0;
 
   // THE PIPELINE: one body, two deliveries. Every `return` inside is an
@@ -1837,7 +1838,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
               } });
             } catch { /* the client may have closed; never block the close */ }
           }
-          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
+          if (streamed.violations.length === 0 && canonical.length > 0 && !contextual && !declaredCtx && !registerBypass && cacheableAnswer(canonical, refusalScope(answerCites(canonical))) && !ablate) {
             ctx.waitUntil(
               env.CACHE.put(exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt))), JSON.stringify({ answer: canonical, citations: cites, model, query_hash: queryHash, ...(sourceQuality ? { source_quality: sourceQuality, confidence_note: streamedNote || qualityNote(sourceQuality) } : {}), ...(streamedEntailment ? { entailment: streamedEntailment } : {}) }), { expirationTtl: LIMITS.cacheTtlSec }),
             );
@@ -2096,7 +2097,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     telemetryDecisions(env, ctx, tier, queryHash, decisionsOut ?? null, Date.now() - tStart);
   }
   const out = { answer, citations: finalCites, ...(jsonQuality ? { source_quality: jsonQuality!, confidence_note: entailmentNote || qualityNote(jsonQuality!), ...(entailment ? { entailment } : {}), ...(jsonQuality === "ocr" ? { experimental_sources: experimentalSourceLabels(finalCites) } : {}) } : {}), model: MODELS.member, query_hash: queryHash, follow_ups: refusalShaped(answer!, refusalScope(answerCites(answer!))) ? [] : (understanding?.follow_ups ?? []), blocks: [...c2ns.blocks, ...(verdictBlock ? [verdictBlock] : []), ...(conditionBlock ? [conditionBlock] : []), ...(aggregationBlock ? [aggregationBlock] : []), ...(registerBlock ? [registerBlock] : []), ...completionBlocks], context_applied: ctxApplied, ...(liveRecords ? { records: liveRecords } : {}), ...(decisionsOut ? { decisions: decisionsOut } : {}), ...(ablate ? { ablate } : {}), route: { route: routed.route, features: routed.features } };
-  const cacheable = !contextual && !declaredCtx && !ablate && cacheableAnswer(answer!, refusalScope(answerCites(answer!))) && finalAnchors.violations.length === 0;
+  const cacheable = !contextual && !declaredCtx && !ablate && !registerBypass && cacheableAnswer(answer!, refusalScope(answerCites(answer!))) && finalAnchors.violations.length === 0;
   if (cacheable) {
     const ck = exactCacheKey(env.INDEX_VERSION, gen, ns, await sha256Hex(cacheKeyMaterial(q.query, q.lang, salt)));
     ctx.waitUntil(env.CACHE.put(ck, JSON.stringify(out), { expirationTtl: LIMITS.cacheTtlSec }));

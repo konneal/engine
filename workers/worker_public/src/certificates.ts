@@ -40,6 +40,17 @@ export function registerAggregateIntent(query: string): "count" | "latest" | nul
   return null;
 }
 
+/** The register's answers derive from the D1 snapshot, not the indexed
+ *  corpus — but the answer cache (namespaced by INDEX_VERSION +
+ *  corpus_gen) knows nothing about D1-plane loads, so a cached
+ *  pre-register refusal preempted register-shaped questions the register
+ *  answers (measured live 2026-10-28: cached refusals served over
+ *  register-shaped asks until fresh). Such asks skip both cache reads
+ *  and writes. */
+export function registerBypassesCache(query: string): boolean {
+  return isRegisterShaped(query) || registerAggregateIntent(query) !== null;
+}
+
 export interface RegisterAggregate {
   family: string;
   count: number;
