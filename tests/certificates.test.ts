@@ -141,3 +141,32 @@ test("register-shaped and aggregate asks bypass the answer cache; requirement qu
   // namespaced by the index — it rides the cache as before
   assert.equal(registerBypassesCache("What must a load cell certificate contain per R 60?"), false);
 });
+
+import { rankRegisterRows } from "../workers/worker_public/src/certificates.ts";
+
+test("the note's six rows carry the question's model, not just its holder", () => {
+  // the live defect: "Rice Lake Weighing Systems RL116XP" — the holder
+  // matched six rows before the model token was consulted
+  const rl = { num: "R60/2019-UK1-24.07", family: "R60", holder: "Rice Lake Weighing Systems", model: "Compression Load Cell - Type: RL116XP", year: "2019", status: "Valid" };
+  const others = [
+    { num: "R60/2005-DE1-11.02", family: "R60", holder: "Rice Lake Weighing Systems", model: "DHBC", year: "2005", status: "Valid" },
+    { num: "R60/2001-GB1-14.01", family: "R60", holder: "Rice Lake Weighing Systems", model: "RL20001B", year: "2001", status: "Valid" },
+    { num: "R60/2012-US1-19.10", family: "R60", holder: "Rice Lake Weighing Systems", model: "SQB", year: "2012", status: "Valid" },
+    { num: "R60/2014-SE1-20.03", family: "R60", holder: "Rice Lake Weighing Systems", model: "SSB", year: "2014", status: "Valid" },
+    { num: "R60/2016-DK1-22.11", family: "R60", holder: "Rice Lake Weighing Systems", model: "MST", year: "2016", status: "Valid" },
+    { num: "R60/2017-FR1-23.05", family: "R60", holder: "Rice Lake Weighing Systems", model: "SUR", year: "2017", status: "Valid" },
+    { num: "R60/2018-NO1-23.19", family: "R60", holder: "Rice Lake Weighing Systems", model: "SBT", year: "2018", status: "Valid" },
+  ];
+  const ranked = rankRegisterRows([...others, rl], ["Rice", "Lake", "Weighing", "Systems", "Compression", "RL116XP"]);
+  assert.equal(ranked[0]?.num, rl.num, "the model-matching row leads");
+  assert.ok(ranked.length <= 6);
+  // a numeric token matches standalone values, never substrings
+  const numeric = rankRegisterRows(
+    [
+      { num: "R60/2021-NL1-26.01", family: "R60", holder: "H", model: "XK3190", year: "2021", status: "Valid" },
+      { num: "R60/2021-NL1-26.02", family: "R60", holder: "H", model: "190", year: "2021", status: "Valid" },
+    ],
+    ["190"]
+  );
+  assert.equal(numeric[0]?.model, "190");
+});

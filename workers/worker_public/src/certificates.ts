@@ -219,7 +219,7 @@ export function buildRegisterQuery(tokens: string[]): { sql: string; params: str
     return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
   });
   return {
-    sql: `SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE family = ?FAMILY AND (${clauses.join(" OR ")}) LIMIT 6`,
+    sql: `SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE family = ?FAMILY AND (${clauses.join(" OR ")}) LIMIT 40`,
     params,
   };
 }
@@ -268,20 +268,49 @@ export async function searchRegister(db: any, query: string, force = false): Pro
   }
   try {
     const res = await db.prepare(sql).bind(...params).all();
-    return { rows: (res.results ?? []) as RegisterRow[], tokens };
+    const rows = rankRegisterRows((res.results ?? []) as RegisterRow[], tokens);
+    return { rows, tokens };
   } catch {
     // a missing table or a D1 hiccup degrades to no-note honestly
     return { rows: [], tokens };
   }
 }
 
+/** Rank the OR-matched candidates so the note's six rows carry the
+ *  QUESTION's model, not just its holder: the live probes showed a
+ *  distinctive model token losing its place to generic holder words
+ *  ("Rice Lake Weighing Systems" matched 6 rows before "RL116XP" was
+ *  ever consulted — the answer then denied a certificate the register
+ *  holds). A model-token hit outranks a holder-token hit; numbers must
+ *  match as standalone values (the "190 must not catch XK3190" rule).
+ *  Measured 2026-10-28, the register-lane eval. */
+export function rankRegisterRows(rows: RegisterRow[], tokens: string[]): RegisterRow[] {
+  const score = (row: RegisterRow): number => {
+    const model = (row.model || "").toLowerCase();
+    const holder = (row.holder || "").toLowerCase();
+    let s = 0;
+    for (const t of tokens) {
+      const tl = t.toLowerCase();
+      if (/^\d+$/.test(t)) {
+        if (new RegExp(`(^|[^a-z0-9])${tl}([^a-z0-9]|$)`).test(model)) s += 3;
+        else if (holder.includes(tl)) s += 1;
+      } else if (model.includes(tl)) s += 2;
+      else if (holder.includes(tl)) s += 1;
+    }
+    return s;
+  };
+  return [...rows]
+    .sort((a, b) => score(b) - score(a) || Number(b.year) - Number(a.year))
+    .slice(0, 6);
+}
+
 export function registerNote(rows: RegisterRow[]): string {
   if (!rows.length) {
-    return `Certificate register: NO certificate matching the asked holder or model appears in the ${P().publisher.name}-CS register snapshot. State plainly that no such certificate is in this register, and that the register is a snapshot rather than the live certification status.`;
+    return `Certificate register — THIS NOTE ANSWERS THE QUESTION. NO certificate matching the asked holder or model appears in the ${P().publisher.name}-CS register snapshot. Answer from THIS note: state plainly that no such certificate is in this register — never fall back to the indexed publications' absence phrasing — and say the register is a snapshot rather than the live certification status.`;
   }
   const lines = rows.map((r) => `- ${r.num}: holder ${r.holder}, model "${r.model}"${r.year ? `, issued ${r.year}` : ""} — status ${r.status}`);
   return [
-    "Certificate register — the following certificates matched the asked holder or model. Quote the certificate number, the holder and the status verbatim; the register is a snapshot, so qualify any statement about current certification accordingly.",
+    "Certificate register — THIS NOTE ANSWERS THE QUESTION. The following certificates matched the asked holder or model; answer from THIS note. A model the note does not list is not among the matched rows — say so plainly instead of falling back to the indexed publications. Quote the certificate number, the holder and the status verbatim; the register is a snapshot, so qualify any statement about current certification accordingly.",
     ...lines,
   ].join("\n");
 }

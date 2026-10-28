@@ -159,7 +159,7 @@ function buildRegisterQuery(tokens) {
     return `(holder LIKE ?${n} OR model LIKE ?${n} OR num LIKE ?${n})`;
   });
   return {
-    sql: `SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE family = ?FAMILY AND (${clauses.join(" OR ")}) LIMIT 6`,
+    sql: `SELECT num, family, holder, model, year, status, pdf_key FROM certificates WHERE family = ?FAMILY AND (${clauses.join(" OR ")}) LIMIT 40`,
     params
   };
 }
@@ -193,18 +193,36 @@ async function searchRegister(db, query, force = false) {
   }
   try {
     const res = await db.prepare(sql).bind(...params).all();
-    return { rows: res.results ?? [], tokens };
+    const rows = rankRegisterRows(res.results ?? [], tokens);
+    return { rows, tokens };
   } catch {
     return { rows: [], tokens };
   }
 }
+function rankRegisterRows(rows, tokens) {
+  const score = (row) => {
+    const model = (row.model || "").toLowerCase();
+    const holder = (row.holder || "").toLowerCase();
+    let s = 0;
+    for (const t of tokens) {
+      const tl = t.toLowerCase();
+      if (/^\d+$/.test(t)) {
+        if (new RegExp(`(^|[^a-z0-9])${tl}([^a-z0-9]|$)`).test(model)) s += 3;
+        else if (holder.includes(tl)) s += 1;
+      } else if (model.includes(tl)) s += 2;
+      else if (holder.includes(tl)) s += 1;
+    }
+    return s;
+  };
+  return [...rows].sort((a, b) => score(b) - score(a) || Number(b.year) - Number(a.year)).slice(0, 6);
+}
 function registerNote(rows) {
   if (!rows.length) {
-    return `Certificate register: NO certificate matching the asked holder or model appears in the ${P().publisher.name}-CS register snapshot. State plainly that no such certificate is in this register, and that the register is a snapshot rather than the live certification status.`;
+    return `Certificate register \u2014 THIS NOTE ANSWERS THE QUESTION. NO certificate matching the asked holder or model appears in the ${P().publisher.name}-CS register snapshot. Answer from THIS note: state plainly that no such certificate is in this register \u2014 never fall back to the indexed publications' absence phrasing \u2014 and say the register is a snapshot rather than the live certification status.`;
   }
   const lines = rows.map((r) => `- ${r.num}: holder ${r.holder}, model "${r.model}"${r.year ? `, issued ${r.year}` : ""} \u2014 status ${r.status}`);
   return [
-    "Certificate register \u2014 the following certificates matched the asked holder or model. Quote the certificate number, the holder and the status verbatim; the register is a snapshot, so qualify any statement about current certification accordingly.",
+    "Certificate register \u2014 THIS NOTE ANSWERS THE QUESTION. The following certificates matched the asked holder or model; answer from THIS note. A model the note does not list is not among the matched rows \u2014 say so plainly instead of falling back to the indexed publications. Quote the certificate number, the holder and the status verbatim; the register is a snapshot, so qualify any statement about current certification accordingly.",
     ...lines
   ].join("\n");
 }
@@ -231,6 +249,7 @@ export {
   registerTokens,
   buildRegisterQuery,
   searchRegister,
+  rankRegisterRows,
   registerNote,
   certificateLinks
 };
