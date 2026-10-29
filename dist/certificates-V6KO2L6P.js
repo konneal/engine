@@ -13,7 +13,7 @@ import {
   registerNote,
   registerTokens,
   searchRegister
-} from "./chunk-JKBU2IPM.js";
+} from "./chunk-IRCDOFP4.js";
 import "./chunk-3FYJM7LH.js";
 export {
   aggregateBlock,

@@ -189,7 +189,13 @@ export function registerTokens(query: string): string[] {
     if (/^\d+$/.test(w) && w.length < 2) continue;
     if (!tokens.includes(w)) tokens.push(w);
   }
-  return tokens.slice(0, 6);
+  // the budget is 12, not 6: a long holder name consumed the six slots
+  // before the distinctive model token was ever consulted (the live
+  // probe: "Endress + Hauser GmbH + Co., KG Automatic level gauge -
+  // Type: NMR81 and NMR84" cut "NMR84" — the question's WHOLE POINT —
+  // at position 7). rankRegisterRows discounts holder-only rows, so the
+  // wider OR net costs nothing in note quality.
+  return tokens.slice(0, 12);
 }
 
 /** The register query for a token set. Numeric tokens (a model number
