@@ -2435,6 +2435,8 @@ Certificates are issued per recommendation family \u2014 the register carries no
     }
     const regNote = aggregateNoteText ?? (register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : void 0);
     const ops = await operationsLane(env.DB, q2.query);
+    const registerOwns = !!register?.rows?.length;
+    const registerCitation = registerOwns ? [{ docidentifier: `${P().publisher.name}-CS certificate register`, corpus: "register" }] : [];
     if (understanding?.intent === "conversational") {
       const queryHash2 = await sha256Hex(q2.query);
       const messages2 = [
@@ -2831,9 +2833,10 @@ Answer account questions from these records ONLY: name the record when you use i
       },
       text: `${m.anchor} \u2014 ${m.text}`
     }));
+    const passagePool = registerOwns ? [...opsHits, ...hits].filter((h) => !!h.metadata.cert_holder) : [...opsHits, ...hits];
     const { messages, usedHits } = buildMessages(
       q2.query,
-      [...opsHits, ...hits],
+      passagePool,
       q2.lang,
       keptHistory,
       // stage-extracted graph facts (GraphRAG) ride the same note channel
@@ -2902,7 +2905,7 @@ Answer account questions from these records ONLY: name the record when you use i
       console.log("user image attached to generation");
     }
     const queryHash = await sha256Hex(q2.query);
-    const cites = boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits);
+    const cites = [...registerCitation, ...boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits)];
     if (live2) {
       const stream = await generateStream(env, model, messages, routeEffort(routed.route));
       if (stream) {
@@ -3191,7 +3194,7 @@ Answer account questions from these records ONLY: name the record when you use i
       telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q2.lang, void 0, telemetryMeta());
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
-    const finalCites = boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used);
+    const finalCites = [...registerCitation, ...boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used)];
     const c2ns = answer.includes(refusalAnswer()) ? { text: answer, blocks: [], dropped: [] } : await contractV2(env.DB, answer, used);
     answer = c2ns.text;
     const finalAnchors = answer.includes(refusalAnswer()) ? { total: 0, violations: [] } : checkQuoteAnchors(answer, used.map((h) => h.text));
