@@ -1722,20 +1722,23 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages!), full.length, probeTokensUsed);
           send({ type: "quota", quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
           // the blind-answer guard ON THE STREAM PATH (the JSON path has
-          // had it since 0.2.80): an image rode the turn, the register
-          // note carries rows, and the streamed text is the no-information
-          // refusal — the multimodal call answered around the photograph.
-          // One bounded regeneration: the retry sentinel tells the client
-          // to clear the buffer, the agent step says why, and the fresh
-          // tokens stream as the answer.
-          if (withImage && register?.rows?.length && full.includes(refusalAnswer())) {
+          // had it since 0.2.80): the register note carries rows and the
+          // streamed text is the no-information refusal — the model
+          // answered around the register (originally the photograph's
+          // shape; since 0.2.179 the note rides every register-owned
+          // question, and the text-only lane refuses just the same —
+          // measured 2026-10-29: 11/14 standing probes with the note in
+          // the prompt). One bounded regeneration: the retry sentinel
+          // tells the client to clear the buffer, the agent step says
+          // why, and the fresh tokens stream as the answer.
+          if (register?.rows?.length && full.includes(refusalAnswer())) {
             console.log("blind-answer(stream): regenerating once");
             streamRestarts += 1;
             mark("Re-answering from the register results");
             send({ type: "retry" });
             const regen = await generateStream(env, model, [
               ...messages.slice(0, -1),
-              { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows — number, holder, model, status, and every document link — as the answer. Do not claim that nothing was provided." },
+              { role: "user", content: "The certificate register note above lists actual matching certificate rows. Present those rows — number, holder, model, status, and every document link — as the answer. Do not claim that nothing was provided." },
               messages[messages.length - 1],
             ], routeEffort(routed.route));
             if (regen) {
@@ -2084,12 +2087,12 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // text claims nothing was provided — while the bridge succeeded and the
   // register note carries actual rows. One bounded regeneration, decided on
   // that exact signature; the retry carries a sterner ground instruction.
-  if (withImage && register?.rows?.length && answer!.includes(refusalAnswer())) {
+  if (register?.rows?.length && answer!.includes(refusalAnswer())) {
     console.log("blind-answer: the register note carried rows but the answer refused — regenerating once");
     mark("Re-answering from the register results");
     const regen = await generateOnce(env, model, [
       ...messages.slice(0, -1),
-      { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows — number, holder, model, status, and every document link — as the answer. Do not claim that nothing was provided." },
+      { role: "user", content: "The certificate register note above lists actual matching certificate rows. Present those rows — number, holder, model, status, and every document link — as the answer. Do not claim that nothing was provided." },
       messages[messages.length - 1],
     ], effort);
     if (regen && !regen!.includes(refusalAnswer())) {
