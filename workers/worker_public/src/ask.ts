@@ -914,6 +914,21 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   const regNote = aggregateNoteText
     ?? (register ? [registerNote(register.rows), certificateLinks(register.rows)].filter(Boolean).join("\n") : undefined);
   const ops = await operationsLane(env.DB, q.query);
+  // The register lane owns the answer surface when it holds rows — the
+  // aggregate path's philosophy (the note answers the structure, the
+  // model narrates) extended to the standing lane. Measured 2026-10-28:
+  // one note among fifteen system notes loses to the retrieval volume —
+  // 11/14 standing probes answered the corpus-refusal template WITH the
+  // note in the prompt (the photo path already knew this: its
+  // refusal-rescue at the answer gates exists for exactly this shape).
+  // The passage pool narrows to the certificate plane's own chunks (the
+  // register's digitalized documents, metadata cert_holder); when the
+  // dense lane missed them the note alone carries the answer — it says
+  // so itself.
+  const registerOwns = !!register?.rows?.length;
+  const registerCitation = registerOwns
+    ? [{ docidentifier: `${P().publisher.name}-CS certificate register`, corpus: "register" }]
+    : [];
 
   // Conversational route, decided by query UNDERSTANDING (any language, any
   // phrasing) — not string matching. No retrieval: nothing in the corpus
@@ -1499,9 +1514,23 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     },
     text: `${m.anchor} — ${m.text}`,
   }));
+  // The register lane owns the answer surface when it holds rows — the
+  // aggregate path's philosophy (the note answers the structure, the
+  // model narrates) extended to the standing lane. Measured 2026-10-28:
+  // one note among fifteen system notes loses to the retrieval volume —
+  // 11/14 standing probes answered the corpus-refusal template WITH the
+  // note in the prompt (the photo path already knew this: its
+  // refusal-rescue at the answer gates exists for exactly this shape).
+  // The passage pool narrows to the certificate plane's own chunks (the
+  // register's digitalized documents, metadata cert_holder); when the
+  // dense lane missed them the note alone carries the answer — it says
+  // so itself.
+  const passagePool = registerOwns
+    ? [...opsHits, ...hits].filter((h) => !!(h.metadata as any).cert_holder)
+    : [...opsHits, ...hits];
   const { messages, usedHits } = buildMessages(
     q.query,
-    [...opsHits, ...hits],
+    passagePool,
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
@@ -1623,8 +1652,10 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   const queryHash = await sha256Hex(q.query);
   // The bound model node leads the citations (TODO.ai-platform/05): the
   // panel's first citation card IS the model node — its constraint, its
-  // provenance — ahead of the prose passages.
-  const cites = boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits);
+  // provenance — ahead of the prose passages. The register rides first
+  // when it owns the answer (the standing citation the aggregate path
+  // has always attached).
+  const cites = [...registerCitation, ...(boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits))];
 
   if (live) {
     const stream = await generateStream(env, model, messages, routeEffort(routed.route));
@@ -2021,7 +2052,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, undefined, telemetryMeta());
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
-  const finalCites = boundModel ? [modelCitation(boundModel!), ...citations(used)] : citations(used);
+  const finalCites = [...registerCitation, ...(boundModel ? [modelCitation(boundModel!), ...citations(used)] : citations(used))];
   const c2ns = answer!.includes(refusalAnswer())
     ? { text: answer, blocks: [] as Awaited<ReturnType<typeof contractV2>>["blocks"], dropped: [] as string[] }
     : await contractV2(env.DB, answer!, used);
