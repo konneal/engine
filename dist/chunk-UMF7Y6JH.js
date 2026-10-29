@@ -2967,14 +2967,14 @@ Answer account questions from these records ONLY: name the record when you use i
         }
         const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length, probeTokensUsed);
         send({ type: "quota", quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
-        if (withImage && register?.rows?.length && full.includes(refusalAnswer())) {
+        if (register?.rows?.length && full.includes(refusalAnswer())) {
           console.log("blind-answer(stream): regenerating once");
           streamRestarts += 1;
           mark("Re-answering from the register results");
           send({ type: "retry" });
           const regen = await generateStream(env, model, [
             ...messages.slice(0, -1),
-            { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
+            { role: "user", content: "The certificate register note above lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
             messages[messages.length - 1]
           ], routeEffort(routed.route));
           if (regen) {
@@ -3207,12 +3207,12 @@ Answer account questions from these records ONLY: name the record when you use i
       if (completionBlocks.length) console.log("contract completion:", completionBlocks.length, "table block(s) attached server-side");
     }
     completionBlocks.push(...await completeFigures(env.DB, answer, [...c2ns.blocks, ...completionBlocks], used, q2.query));
-    if (withImage && register?.rows?.length && answer.includes(refusalAnswer())) {
+    if (register?.rows?.length && answer.includes(refusalAnswer())) {
       console.log("blind-answer: the register note carried rows but the answer refused \u2014 regenerating once");
       mark("Re-answering from the register results");
       const regen = await generateOnce(env, model, [
         ...messages.slice(0, -1),
-        { role: "user", content: "The photograph was attached and the register note lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
+        { role: "user", content: "The certificate register note above lists actual matching certificate rows. Present those rows \u2014 number, holder, model, status, and every document link \u2014 as the answer. Do not claim that nothing was provided." },
         messages[messages.length - 1]
       ], effort);
       if (regen && !regen.includes(refusalAnswer())) {
