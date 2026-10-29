@@ -170,3 +170,15 @@ test("the note's six rows carry the question's model, not just its holder", () =
   );
   assert.equal(numeric[0]?.model, "190");
 });
+
+test("the token budget reaches the model past a long holder name", () => {
+  // the live defect: NMR84/RL116XP/DIX-3000 sat at position 7+ of the
+  // question and never entered the register query
+  const tokens = registerTokens(
+    "Is the Endress + Hauser GmbH + Co., KG Automatic level gauge - Type: NMR81 and NMR84 still certified in the OIML R 85 certificate register?"
+  );
+  assert.ok(tokens.includes("NMR81"), `NMR81 in: ${tokens.join(",")}`);
+  assert.ok(tokens.includes("NMR84"), `NMR84 in: ${tokens.join(",")}`);
+  const rl = registerTokens("Is the Rice Lake Weighing Systems Compression Load Cell - Type: RL116XP still certified in the OIML R 60 certificate register?");
+  assert.ok(rl.includes("RL116XP"), `RL116XP in: ${rl.join(",")}`);
+});

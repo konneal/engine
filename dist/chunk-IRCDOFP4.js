@@ -142,7 +142,7 @@ function registerTokens(query) {
     if (/^\d+$/.test(w) && w.length < 2) continue;
     if (!tokens.includes(w)) tokens.push(w);
   }
-  return tokens.slice(0, 6);
+  return tokens.slice(0, 12);
 }
 function buildRegisterQuery(tokens) {
   const params = [];
