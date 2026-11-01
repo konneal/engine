@@ -33,7 +33,7 @@ import {
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-VRWNS4AI.js";
+} from "./chunk-XO26UIFH.js";
 import {
   NO_CONTEXT,
   STAGE_NAMES,
@@ -76,18 +76,18 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-4J47P52J.js";
+} from "./chunk-XTWH3PS6.js";
 import {
   embed,
   generateOnce
-} from "./chunk-ZHT4456M.js";
+} from "./chunk-7RZ2D64X.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-D7MO4RVQ.js";
+} from "./chunk-XMUG75ZV.js";
 import {
   cacheableAnswer,
   canonicalRefusal,
@@ -100,7 +100,7 @@ import {
   requestSalt,
   resolveRequestScope,
   standardKeysFrom
-} from "./chunk-FNQ7UOEB.js";
+} from "./chunk-5HCVX34C.js";
 import {
   LIMITS,
   MODELS,
@@ -111,11 +111,13 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-HWWJAJWM.js";
+} from "./chunk-QYTCQIA6.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
 import {
+  cfModelRunner,
+  cfVectorIndex,
   portModelRunner,
   portStore
 } from "./chunk-YGQCVPX6.js";
@@ -1675,6 +1677,227 @@ function partitionSubsets(hits, k = SPECULATIVE_SUBSETS) {
 // workers/worker_public/prompts/speculative-verify.md
 var speculative_verify_default = "You answer questions about legal-metrology publications for {{PUBLISHER_NAME}}. Candidate draft answers were prepared in parallel, each from a PARTIAL view of the evidence (a subset of the passages); you see every candidate beside the FULL passages. Produce the final answer.\n\nRules:\n1. Compare the candidates against the full passages. Adopt the candidate best supported by the evidence as your starting point; correct every claim the full passages contradict or fail to support, and fold in anything the other candidates got right that the adopted one missed.\n2. Ground every factual claim in the numbered passages and cite them inline as [1], [2], \u2026 exactly as the passages are numbered below. Never cite a passage that is not there.\n3. Quote verbatim \u2014 with quotation marks \u2014 when a clause's exact wording matters (definitions, thresholds, requirements); a quotation must appear word-for-word in the passages.\n4. Numeric and table values come from the passages exactly; never retype a table as markdown \u2014 refer to the table and cite it.\n5. If the passages do not answer the question, say so plainly instead of guessing.\n6. Be complete but compact: answer the question, cite, stop.\n";
 
+// workers/worker_public/src/userDocuments.ts
+var USER_DOC_LIMIT = 10;
+var USER_DOC_MAX_BYTES = 20 * 1024 * 1024;
+var ACCEPTED_MIMES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "application/pdf"]);
+function userDocumentChunkId(docId) {
+  return `ud-${docId}`;
+}
+async function listUserDocuments(store, sub) {
+  const res = await store.prepare("SELECT id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at FROM user_documents WHERE owner_sub = ?1 ORDER BY created_at DESC").bind(sub).all();
+  return { documents: res.results ?? [] };
+}
+async function getUserDocument(store, sub, id) {
+  const row = await store.prepare("SELECT id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at FROM user_documents WHERE id = ?1 AND owner_sub = ?2").bind(id, sub).first();
+  return row ?? null;
+}
+async function quotaRefusal(store, sub) {
+  const row = await store.prepare("SELECT COUNT(*) AS n FROM user_documents WHERE owner_sub = ?1").bind(sub).first();
+  const n = Number(row?.n ?? 0);
+  if (n >= USER_DOC_LIMIT) {
+    return new Response(JSON.stringify({ error: { code: "quota_exceeded", message: `You hold the maximum of ${USER_DOC_LIMIT} documents. Delete one to import another.` } }), { status: 403, headers: { "content-type": "application/json" } });
+  }
+  return null;
+}
+async function createImport(ports, waitUntil, sub, file) {
+  const mime = file.type || "";
+  if (!ACCEPTED_MIMES.has(mime)) {
+    return { error: new Response(JSON.stringify({ error: { code: "invalid_type", message: "Upload a PNG, JPEG, WebP image or a PDF." } }), { status: 415, headers: { "content-type": "application/json" } }) };
+  }
+  if (file.size > USER_DOC_MAX_BYTES) {
+    return { error: new Response(JSON.stringify({ error: { code: "too_large", message: `Documents are limited to ${Math.floor(USER_DOC_MAX_BYTES / (1024 * 1024))} MB.` } }), { status: 413, headers: { "content-type": "application/json" } }) };
+  }
+  const refused = await quotaRefusal(ports.store, sub);
+  if (refused) return { error: refused };
+  const id = crypto.randomUUID();
+  const r2Key = `${sub}/${id}`;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  await ports.blobs.put(r2Key, bytes.buffer, mime);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const row = {
+    id,
+    owner_sub: sub,
+    name: file.name || "document",
+    kind: null,
+    status: "importing",
+    bytes: bytes.byteLength,
+    r2_key: r2Key,
+    fields: null,
+    error: null,
+    created_at: now,
+    updated_at: now
+  };
+  await ports.store.prepare(
+    "INSERT INTO user_documents (id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
+  ).bind(id, sub, row.name, row.kind, row.status, row.bytes, row.r2_key, row.fields, row.error, now, now).run();
+  waitUntil(processImport(ports, row, mime, bytes).catch(() => {
+  }));
+  return { document: row };
+}
+async function processImport(ports, row, mime, bytes) {
+  const setStatus = async (status, fields, error) => {
+    await ports.store.prepare("UPDATE user_documents SET status = ?1, kind = ?2, fields = ?3, error = ?4, updated_at = ?5 WHERE id = ?6").bind(status, fields ? extractKind(fields) : null, fields ? JSON.stringify(fields) : null, error, (/* @__PURE__ */ new Date()).toISOString(), row.id).run();
+  };
+  try {
+    let text;
+    if (mime === "application/pdf") {
+      text = await pdfTextLayer(bytes);
+      if (!text || text.replace(/\s+/g, "").length < 40) {
+        await setStatus("no_text_layer", null, "This PDF has no extractable text layer. Export page images (PNG/JPEG) and import those \u2014 the vision lane reads them directly.");
+        return;
+      }
+    } else {
+      text = await visionTranscribe(ports.model, mime, bytes);
+      if (!text || text.replace(/\s+/g, "").length < 20) {
+        await setStatus("failed", null, "The vision lane could not read this image. Try a sharper photo.");
+        return;
+      }
+    }
+    const extraction = await structureDocument(ports.model, row.name, mime, text);
+    const fieldsLine = Object.entries(extraction.fields).map(([k, v]) => `${k}: ${v}`).join("; ");
+    const chunkText = `Member document (${extraction.kind}) \u2014 ${row.name}. ${fieldsLine}. ${extraction.summary}
+
+${extraction.text.slice(0, 8e3)}`;
+    const [vector] = await ports.model.embed([chunkText]);
+    await ports.lane.upsert([
+      {
+        id: userDocumentChunkId(row.id),
+        values: vector,
+        metadata: {
+          user_sub: row.owner_sub,
+          doc_id: `ud-${row.id}`,
+          docidentifier: `Member document \u2014 ${row.name}`,
+          doctype: "user",
+          doc_number: extraction.kind,
+          edition: "",
+          language: "en",
+          clause_anchor: "",
+          clause_title: row.name.slice(0, 120),
+          tier: "member",
+          corpus: "user_docs",
+          text_ref: "",
+          kind: extraction.kind,
+          name: row.name.slice(0, 120),
+          chunk_text: chunkText.slice(0, 1800)
+        }
+      }
+    ]);
+    await setStatus("ready", { kind: extraction.kind, ...extraction.fields, summary: extraction.summary }, null);
+  } catch (e) {
+    await setStatus("failed", null, String(e).slice(0, 200)).catch(() => {
+    });
+  }
+}
+function extractKind(fields) {
+  return fields.kind || "other";
+}
+async function visionTranscribe(model, mime, bytes) {
+  let binary = "";
+  const CHUNK = 32768;
+  for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  const dataUrl = `data:${mime};base64,${btoa(binary)}`;
+  const res = await model.run({
+    model: MODELS.member,
+    messages: [
+      { role: "system", content: "Transcribe everything you can read in this document image \u2014 certificate numbers, holders, models, values, dates, clause references. Transcribe first; organize nothing." },
+      { role: "user", content: [{ type: "image_url", image_url: { url: dataUrl } }] }
+    ],
+    maxTokens: 2048,
+    effort: "low",
+    temperature: 0.15
+  });
+  return res.text ?? "";
+}
+async function structureDocument(model, name, mime, text) {
+  const res = await model.run({
+    model: MODELS.member,
+    messages: [
+      { role: "system", content: `You classify and structure an imported metrology document. Answer with ONE JSON object: {"kind": "certificate"|"test_report"|"other", "fields": {\u2026short typed fields\u2026}, "summary": "one paragraph a retrieval engine can answer from"}. Certificates carry certificate numbers (like R60/2021-XX1-24.01), holders, models, issue dates. Test reports carry measured values, uncertainties, instruments, clause references. Fields use snake_case names, values verbatim from the text. Never invent a value the text does not carry.` },
+      { role: "user", content: `Document name: ${name}
+Format: ${mime}
+
+Text:
+${text.slice(0, 12e3)}` }
+    ],
+    maxTokens: 2048,
+    effort: "low",
+    temperature: 0.15
+  });
+  const raw = res.text ?? "";
+  const m = /\{[\s\S]*\}/.exec(raw);
+  if (!m) throw new Error("the structuring call returned no JSON object");
+  const parsed = JSON.parse(m[0]);
+  const fields = {};
+  for (const [k, v] of Object.entries(parsed.fields ?? {})) {
+    if (typeof v === "string" || typeof v === "number") fields[k.slice(0, 40)] = String(v).slice(0, 200);
+  }
+  const kind = parsed.kind === "certificate" || parsed.kind === "test_report" ? parsed.kind : "other";
+  return { kind, fields, summary: String(parsed.summary ?? "").slice(0, 1200), text };
+}
+async function pdfTextLayer(bytes) {
+  const raw = new TextDecoder("latin1").decode(bytes);
+  const parts = [];
+  const streamRe = /stream\r?\n?/g;
+  let m;
+  while (m = streamRe.exec(raw)) {
+    const start = m.index + m[0].length;
+    const end = raw.indexOf("endstream", start);
+    if (end < 0) break;
+    const chunk = raw.slice(start, end);
+    streamRe.lastIndex = end;
+    let content = "";
+    if (chunk.charCodeAt(0) === 120) {
+      try {
+        const ds = new DecompressionStream("deflate");
+        const stream = new Blob([new Uint8Array([...chunk].map((c) => c.charCodeAt(0) & 255))]).stream().pipeThrough(ds);
+        content = await new Response(stream).text();
+      } catch {
+        continue;
+      }
+    } else if (/\bTj\b|\bTJ\b/.test(chunk)) {
+      content = chunk;
+    } else {
+      continue;
+    }
+    parts.push(pdfTextOps(content));
+    if (parts.join("").length > 2e5) break;
+  }
+  return parts.join("\n");
+}
+function pdfTextOps(content) {
+  const out = [];
+  const re = /\((?:\\.|[^\\()])*\)/g;
+  let m;
+  while (m = re.exec(content)) {
+    let s = m[0].slice(1, -1);
+    s = s.replace(/\\([nrtbf()/\\])/g, (_, c) => ({ n: "\n", r: "", t: "	", b: "", f: "", "(": "(", ")": ")", "/": "/", "\\": "\\" })[c] ?? c);
+    s = s.replace(/\\([0-7]{1,3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)));
+    if (s.trim()) out.push(s);
+  }
+  return out.join(" ");
+}
+async function queryUserLane(model, lane, sub, query, k) {
+  const [vector] = await model.embed([query]);
+  const matches = await lane.query({ vector, topK: k, filter: { user_sub: sub } });
+  return matches.map((m) => ({
+    id: m.id,
+    score: m.score,
+    metadata: m.metadata,
+    text: String(m.metadata?.chunk_text ?? "")
+  }));
+}
+async function deleteUserDocument(ports, sub, id) {
+  const row = await getUserDocument(ports.store, sub, id);
+  if (!row) return null;
+  if (row.r2_key) await ports.blobs.delete(row.r2_key).catch(() => {
+  });
+  await ports.lane.deleteIds([userDocumentChunkId(id)]).catch(() => {
+  });
+  await ports.store.prepare("DELETE FROM user_documents WHERE id = ?1 AND owner_sub = ?2").bind(id, sub).run();
+  return row;
+}
+
 // workers/worker_public/src/operations.ts
 function isOperationIntent(query) {
   return /\b(operations?|endpoints?)\b/i.test(query);
@@ -2179,6 +2402,7 @@ async function handleAsk(env, ctx, req, tier, key) {
   const requestSaltStr = requestSalt(scope, memoryUsed);
   const salt = requestSaltStr ? `${requestSaltStr}|effort:${effort}` : `effort:${effort}`;
   const federate = (member || keyLicensed) && service && isoOn ? (q2) => retrieveInternal(service, fedAuth, q2) : void 0;
+  const userDocs = member && env.USER_DOCS_INDEX ? (q2) => queryUserLane(cfModelRunner(env.AI), cfVectorIndex(env.USER_DOCS_INDEX), member.sub, q2, THRESHOLDS.userLaneK) : void 0;
   const ns = tier === "key" ? `k:${key.id}` : member ? `m:${member.sub}` : "anon";
   const model = member ? MODELS.member : MODELS.anon;
   const prev = typeof body?.prev === "string" ? body.prev.slice(0, 800) : void 0;
@@ -2734,6 +2958,7 @@ Answer account questions from these records ONLY: name the record when you use i
         prev,
         understanding,
         federate,
+        userDocs,
         warmEmbed,
         graphDocNumbers,
         sealScope: declaredScoped ? docScope : null,
@@ -2768,7 +2993,7 @@ Answer account questions from these records ONLY: name the record when you use i
       if (grade === "weak" && understanding?.docidentifier) {
         const broaden = `${understanding.standalone_query || q2.query} ${understanding.docidentifier}`.trim();
         const tc = Date.now();
-        const second = await retrieve(env, q2.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...routeSubset ? { stageSubset: routeSubset } : {} });
+        const second = await retrieve(env, q2.query, { prev, understanding, queryOverride: broaden, federate, userDocs, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...routeSubset ? { stageSubset: routeSubset } : {} });
         const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q2.query, second.hits.map((h) => h.text));
         stageTiming.corrective = Date.now() - tc;
         if (grade2 === "good") retrieved = second;
@@ -3299,6 +3524,11 @@ Answer account questions from these records ONLY: name the record when you use i
 
 export {
   handleMemories,
+  USER_DOC_LIMIT,
+  listUserDocuments,
+  getUserDocument,
+  createImport,
+  deleteUserDocument,
   scoreFaithfulness,
   checkQuoteAnchors,
   scoreJudge,

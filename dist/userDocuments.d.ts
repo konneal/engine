@@ -2,6 +2,7 @@ import type { Blobs } from "./ports/blobs.ts";
 import type { StoreQuery } from "./ports/store.ts";
 import type { VectorIndex } from "./ports/vector.ts";
 import type { ModelRunner } from "./ports/model.ts";
+import type { Hit } from "../../shared/chunk.ts";
 export declare const USER_DOC_LIMIT = 10;
 export declare const USER_DOC_MAX_BYTES: number;
 export interface UserDocumentRow {
@@ -61,6 +62,11 @@ export declare function processImport(ports: UserDocumentPorts, row: UserDocumen
 export declare function pdfTextLayer(bytes: Uint8Array): Promise<string>;
 /** Pull the string literals out of one content stream's text ops. */
 export declare function pdfTextOps(content: string): string;
+/** The federation's one door: the caller's OWN lane, filtered by their
+ *  sub — the filter is a required parameter, there is no unfiltered
+ *  path. Returns Hit-shaped matches (toHits convention: text from
+ *  metadata.chunk_text). */
+export declare function queryUserLane(model: ModelRunner, lane: VectorIndex, sub: string, query: string, k: number): Promise<Hit[]>;
 /** Deletion is immediate and total: the R2 object, the lane vectors,
  *  the row. The caller has already checked ownership. */
 export declare function deleteUserDocument(ports: UserDocumentPorts, sub: string, id: string): Promise<UserDocumentRow | null>;

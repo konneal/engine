@@ -25,6 +25,7 @@ import { subQuery } from "./subQuery.ts";
 import { poolOpen } from "./poolOpen.ts";
 import { lexicalUnion } from "./lexicalUnion.ts";
 import { federate } from "./federate.ts";
+import { userLane } from "./userLane.ts";
 import { seal } from "./seal.ts";
 import { licenseScope } from "./licenseScope.ts";
 import { corpusScope } from "./corpusScope.ts";
@@ -58,6 +59,7 @@ export const STAGES: Stage[] = [
   poolOpen,
   lexicalUnion,
   federate,
+  userLane,
   seal,
   licenseScope,
   overviewDemote,

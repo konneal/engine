@@ -30,6 +30,7 @@ import type { StoreQuery } from "./ports/store.ts";
 import type { VectorIndex } from "./ports/vector.ts";
 import type { ModelRunner } from "./ports/model.ts";
 import { MODELS } from "./config.ts";
+import type { Hit } from "../../shared/chunk.ts";
 
 export const USER_DOC_LIMIT = 10;
 export const USER_DOC_MAX_BYTES = 20 * 1024 * 1024;
@@ -170,11 +171,30 @@ export async function processImport(ports: UserDocumentPorts, row: UserDocumentR
     const fieldsLine = Object.entries(extraction.fields).map(([k, v]) => `${k}: ${v}`).join("; ");
     const chunkText = `Member document (${extraction.kind}) — ${row.name}. ${fieldsLine}. ${extraction.summary}\n\n${extraction.text.slice(0, 8000)}`;
     const [vector] = await ports.model.embed([chunkText]);
+    // the lane vector carries the ChunkMeta shape the pipeline speaks
+    // (toHits reads text from metadata.chunk_text) plus user_sub — the
+    // filter key the federation's mandatory-by-construction scope
     await ports.lane.upsert([
       {
         id: userDocumentChunkId(row.id),
         values: vector,
-        metadata: { user_sub: row.owner_sub, doc_id: row.id, kind: extraction.kind, name: row.name },
+        metadata: {
+          user_sub: row.owner_sub,
+          doc_id: `ud-${row.id}`,
+          docidentifier: `Member document — ${row.name}`,
+          doctype: "user",
+          doc_number: extraction.kind,
+          edition: "",
+          language: "en",
+          clause_anchor: "",
+          clause_title: row.name.slice(0, 120),
+          tier: "member",
+          corpus: "user_docs",
+          text_ref: "",
+          kind: extraction.kind,
+          name: row.name.slice(0, 120),
+          chunk_text: chunkText.slice(0, 1800),
+        },
       },
     ]);
     await setStatus("ready", { kind: extraction.kind, ...extraction.fields, summary: extraction.summary }, null);
@@ -280,6 +300,21 @@ export function pdfTextOps(content: string): string {
     if (s.trim()) out.push(s);
   }
   return out.join(" ");
+}
+
+/** The federation's one door: the caller's OWN lane, filtered by their
+ *  sub — the filter is a required parameter, there is no unfiltered
+ *  path. Returns Hit-shaped matches (toHits convention: text from
+ *  metadata.chunk_text). */
+export async function queryUserLane(model: ModelRunner, lane: VectorIndex, sub: string, query: string, k: number): Promise<Hit[]> {
+  const [vector] = await model.embed([query]);
+  const matches = await lane.query({ vector, topK: k, filter: { user_sub: sub } });
+  return matches.map((m) => ({
+    id: m.id,
+    score: m.score,
+    metadata: m.metadata as never,
+    text: String((m.metadata as any)?.chunk_text ?? ""),
+  }));
 }
 
 /** Deletion is immediate and total: the R2 object, the lane vectors,

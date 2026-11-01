@@ -124,6 +124,9 @@ var THRESHOLDS = {
   /** Federated-ISO discount — the public corpus answers by default;
    *  internal ISO passages compete but don't preempt. */
   federateDiscount: 0.95,
+  /** the member's own imported documents: how many lane hits may join
+   *  the pool (TODO.sota/20 slice 4) — their content, their question */
+  userLaneK: 3,
   /** Standard-reference nudge (L5): when the question asks about an
    *  invoked ISO/IEC standard, chunks that CARRY such a citation (their
    *  text contains an ISO/IEC identifier) get a spread-scaled boost —
