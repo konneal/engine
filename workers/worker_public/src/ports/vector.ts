@@ -23,4 +23,7 @@ export interface VectorIndex {
   query(q: VectorQuery): Promise<VectorMatch[]>;
   upsert(vectors: VectorUpsert[]): Promise<void>;
   getByIds(ids: string[]): Promise<VectorMatch[]>;
+  /** deletion rides the same chunk cap as reads — the provider's
+   *  deleteByIds is batch-shaped exactly like getByIds */
+  deleteIds(ids: string[]): Promise<void>;
 }

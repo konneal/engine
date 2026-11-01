@@ -5,24 +5,31 @@
 // index with a filter (the 2026-09-02 incident's law). Every vector in
 // the lane carries its owner's sub; the ask-path federation (slice 4)
 // queries the lane ONLY with the session's own sub — mandatory by
-// construction, the helper below takes no unfiltered path.
+// construction, the query helper below takes no unfiltered path.
 //
 // Retention, stated to the member verbatim in the UI: 10 documents, 20
 // MB each, held until the member deletes; deletion is immediate and
 // total (the R2 object, the lane vectors and the row go together).
 //
 // Extraction v1, honest about formats: images ride the ratified vision
-// lane (glm-5.3-flash, the nameplate message pattern — the image rides
-// its OWN short trailing user message); digital-born PDFs give up their
-// text layer (inflate + the text-op scan) and the model structures it;
-// a scanned PDF with no text layer is answered honestly (status
-// no_text_layer) — the rasterization lane is future work, not a silent
-// empty import. One model call classifies and extracts (kind + typed
-// fields + a retrieval summary); the Clef instrument joins when the
-// import eval runs on the first real documents.
+// lane (the nameplate message pattern — the image rides its OWN short
+// trailing user message); digital-born PDFs give up their text layer
+// (inflate + the text-op scan) and the model structures it; a scanned
+// PDF with no text layer is answered honestly (status no_text_layer) —
+// the rasterization lane is future work, not a silent empty import.
+// One model call classifies and extracts (kind + typed fields + a
+// retrieval summary); the Clef instrument joins when the import eval
+// runs on the first real documents.
+//
+// Port purity: this module names no provider binding — the route table
+// wires cfStore/cfBlobs/cfVectorIndex/cfModelRunner; tests inject
+// fakes.
 
+import type { Blobs } from "./ports/blobs.ts";
+import type { StoreQuery } from "./ports/store.ts";
+import type { VectorIndex } from "./ports/vector.ts";
+import type { ModelRunner } from "./ports/model.ts";
 import { MODELS } from "./config.ts";
-import { embed } from "./ai.ts";
 
 export const USER_DOC_LIMIT = 10;
 export const USER_DOC_MAX_BYTES = 20 * 1024 * 1024;
@@ -42,32 +49,46 @@ export interface UserDocumentRow {
   updated_at: string;
 }
 
+export interface UserDocumentPorts {
+  store: StoreQuery;
+  blobs: Blobs;
+  lane: VectorIndex;
+  model: ModelRunner;
+}
+
+export interface UploadBlob {
+  arrayBuffer(): Promise<ArrayBuffer>;
+  size: number;
+  type: string;
+  name: string;
+}
+
 /** The lane's one chunk id per document — deterministic, so deletion
  *  can drop it by id without an index listing round-trip. */
 export function userDocumentChunkId(docId: string): string {
   return `ud-${docId}`;
 }
 
-export async function listUserDocuments(db: any, sub: string): Promise<{ documents: UserDocumentRow[] }> {
-  const res = await db
+export async function listUserDocuments(store: StoreQuery, sub: string): Promise<{ documents: UserDocumentRow[] }> {
+  const res = await store
     .prepare("SELECT id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at FROM user_documents WHERE owner_sub = ?1 ORDER BY created_at DESC")
     .bind(sub)
     .all();
-  return { documents: (res.results ?? []) as UserDocumentRow[] };
+  return { documents: (res.results ?? []) as unknown as UserDocumentRow[] };
 }
 
-export async function getUserDocument(db: any, sub: string, id: string): Promise<UserDocumentRow | null> {
-  const row = await db
+export async function getUserDocument(store: StoreQuery, sub: string, id: string): Promise<UserDocumentRow | null> {
+  const row = await store
     .prepare("SELECT id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at FROM user_documents WHERE id = ?1 AND owner_sub = ?2")
     .bind(id, sub)
     .first();
-  return (row as UserDocumentRow) ?? null;
+  return (row as unknown as UserDocumentRow) ?? null;
 }
 
 /** The quota guard: 10 documents per member. Returns the refusal
  *  response or null. */
-export async function quotaRefusal(db: any, sub: string): Promise<Response | null> {
-  const row = await db.prepare("SELECT COUNT(*) AS n FROM user_documents WHERE owner_sub = ?1").bind(sub).first();
+export async function quotaRefusal(store: StoreQuery, sub: string): Promise<Response | null> {
+  const row = await store.prepare("SELECT COUNT(*) AS n FROM user_documents WHERE owner_sub = ?1").bind(sub).first<{ n: number }>();
   const n = Number(row?.n ?? 0);
   if (n >= USER_DOC_LIMIT) {
     return new Response(JSON.stringify({ error: { code: "quota_exceeded", message: `You hold the maximum of ${USER_DOC_LIMIT} documents. Delete one to import another.` } }), { status: 403, headers: { "content-type": "application/json" } });
@@ -79,14 +100,7 @@ export async function quotaRefusal(db: any, sub: string): Promise<Response | nul
  *  the extraction under the request's waitUntil — the route answers
  *  202 with the importing row and the status endpoint tells the rest.
  *  Every quota rule is checked BEFORE anything is stored. */
-export interface UploadBlob {
-  arrayBuffer(): Promise<ArrayBuffer>;
-  size: number;
-  type: string;
-  name: string;
-}
-
-export async function createImport(env: any, ctx: { waitUntil: (p: Promise<unknown>) => void }, sub: string, file: UploadBlob): Promise<{ document: UserDocumentRow } | { error: Response }> {
+export async function createImport(ports: UserDocumentPorts, waitUntil: (p: Promise<unknown>) => void, sub: string, file: UploadBlob): Promise<{ document: UserDocumentRow } | { error: Response }> {
   const mime = file.type || "";
   if (!ACCEPTED_MIMES.has(mime)) {
     return { error: new Response(JSON.stringify({ error: { code: "invalid_type", message: "Upload a PNG, JPEG, WebP image or a PDF." } }), { status: 415, headers: { "content-type": "application/json" } }) };
@@ -94,25 +108,25 @@ export async function createImport(env: any, ctx: { waitUntil: (p: Promise<unkno
   if (file.size > USER_DOC_MAX_BYTES) {
     return { error: new Response(JSON.stringify({ error: { code: "too_large", message: `Documents are limited to ${Math.floor(USER_DOC_MAX_BYTES / (1024 * 1024))} MB.` } }), { status: 413, headers: { "content-type": "application/json" } }) };
   }
-  const refused = await quotaRefusal(env.DB, sub);
+  const refused = await quotaRefusal(ports.store, sub);
   if (refused) return { error: refused };
 
   const id = crypto.randomUUID();
   const r2Key = `${sub}/${id}`;
   const bytes = new Uint8Array(await file.arrayBuffer());
-  await env.USER_DOCS.put(r2Key, bytes, { httpMetadata: { contentType: mime } });
+  await ports.blobs.put(r2Key, bytes.buffer as ArrayBuffer, mime);
   const now = new Date().toISOString();
   const row: UserDocumentRow = {
     id, owner_sub: sub, name: file.name || "document", kind: null,
     status: "importing", bytes: bytes.byteLength, r2_key: r2Key,
     fields: null, error: null, created_at: now, updated_at: now,
   };
-  await env.DB.prepare(
+  await ports.store.prepare(
     "INSERT INTO user_documents (id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
   )
     .bind(id, sub, row.name, row.kind, row.status, row.bytes, row.r2_key, row.fields, row.error, now, now)
     .run();
-  ctx.waitUntil(processImport(env, row, mime, bytes).catch(() => {}));
+  waitUntil(processImport(ports, row, mime, bytes).catch(() => {}));
   return { document: row };
 }
 
@@ -127,9 +141,9 @@ interface Extraction {
  *  the PDF text layer for digital-born PDFs), then one structuring
  *  call. Statuses land on the row either way — importing | ready |
  *  no_text_layer | failed, never a silent empty import. */
-export async function processImport(env: any, row: UserDocumentRow, mime: string, bytes: Uint8Array): Promise<void> {
+export async function processImport(ports: UserDocumentPorts, row: UserDocumentRow, mime: string, bytes: Uint8Array): Promise<void> {
   const setStatus = async (status: string, fields: Record<string, string> | null, error: string | null) => {
-    await env.DB.prepare("UPDATE user_documents SET status = ?1, kind = ?2, fields = ?3, error = ?4, updated_at = ?5 WHERE id = ?6")
+    await ports.store.prepare("UPDATE user_documents SET status = ?1, kind = ?2, fields = ?3, error = ?4, updated_at = ?5 WHERE id = ?6")
       .bind(status, fields ? extractKind(fields) : null, fields ? JSON.stringify(fields) : null, error, new Date().toISOString(), row.id)
       .run();
   };
@@ -144,19 +158,19 @@ export async function processImport(env: any, row: UserDocumentRow, mime: string
     } else {
       // images: the vision lane transcribes (the nameplate pattern —
       // transcription-first framing beats extract-a-JSON on plates)
-      text = await visionTranscribe(env, mime, bytes);
+      text = await visionTranscribe(ports.model, mime, bytes);
       if (!text || text.replace(/\s+/g, "").length < 20) {
         await setStatus("failed", null, "The vision lane could not read this image. Try a sharper photo.");
         return;
       }
     }
-    const extraction = await structureDocument(env, row.name, mime, text);
+    const extraction = await structureDocument(ports.model, row.name, mime, text);
     // the lane chunk: the summary leads, the verbatim text carries the
     // rest — the federation cites THIS document's content
     const fieldsLine = Object.entries(extraction.fields).map(([k, v]) => `${k}: ${v}`).join("; ");
     const chunkText = `Member document (${extraction.kind}) — ${row.name}. ${fieldsLine}. ${extraction.summary}\n\n${extraction.text.slice(0, 8000)}`;
-    const vector = await embed(env.AI, MODELS.embed, chunkText);
-    await env.USER_DOCS_INDEX.upsert([
+    const [vector] = await ports.model.embed([chunkText]);
+    await ports.lane.upsert([
       {
         id: userDocumentChunkId(row.id),
         values: vector,
@@ -173,36 +187,38 @@ function extractKind(fields: Record<string, string>): string {
   return fields.kind || "other";
 }
 
-async function visionTranscribe(env: any, mime: string, bytes: Uint8Array): Promise<string> {
+async function visionTranscribe(model: ModelRunner, mime: string, bytes: Uint8Array): Promise<string> {
   let binary = "";
   const CHUNK = 0x8000;
   for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   const dataUrl = `data:${mime};base64,${btoa(binary)}`;
-  const res: any = await env.AI.run(MODELS.member, {
+  const res = await model.run({
+    model: MODELS.member,
     messages: [
       { role: "system", content: "Transcribe everything you can read in this document image — certificate numbers, holders, models, values, dates, clause references. Transcribe first; organize nothing." },
       { role: "user", content: [{ type: "image_url", image_url: { url: dataUrl } }] },
     ],
-    max_tokens: 2048,
-    reasoning_effort: "low",
+    maxTokens: 2048,
+    effort: "low",
     temperature: 0.15,
   });
-  return typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content ?? "";
+  return res.text ?? "";
 }
 
 /** One structuring call: classify + typed fields + a retrieval summary.
  *  The response's JSON object is taken; prose around it is ignored. */
-async function structureDocument(env: any, name: string, mime: string, text: string): Promise<Extraction> {
-  const res: any = await env.AI.run(MODELS.member, {
+async function structureDocument(model: ModelRunner, name: string, mime: string, text: string): Promise<Extraction> {
+  const res = await model.run({
+    model: MODELS.member,
     messages: [
       { role: "system", content: `You classify and structure an imported metrology document. Answer with ONE JSON object: {"kind": "certificate"|"test_report"|"other", "fields": {…short typed fields…}, "summary": "one paragraph a retrieval engine can answer from"}. Certificates carry certificate numbers (like R60/2021-XX1-24.01), holders, models, issue dates. Test reports carry measured values, uncertainties, instruments, clause references. Fields use snake_case names, values verbatim from the text. Never invent a value the text does not carry.` },
       { role: "user", content: `Document name: ${name}\nFormat: ${mime}\n\nText:\n${text.slice(0, 12000)}` },
     ],
-    max_tokens: 2048,
-    reasoning_effort: "low",
+    maxTokens: 2048,
+    effort: "low",
     temperature: 0.15,
   });
-  const raw = typeof res?.response === "string" ? res.response : res?.choices?.[0]?.message?.content ?? "";
+  const raw = res.text ?? "";
   const m = /\{[\s\S]*\}/.exec(raw);
   if (!m) throw new Error("the structuring call returned no JSON object");
   const parsed = JSON.parse(m[0]) as { kind?: string; fields?: Record<string, unknown>; summary?: string };
@@ -268,11 +284,11 @@ export function pdfTextOps(content: string): string {
 
 /** Deletion is immediate and total: the R2 object, the lane vectors,
  *  the row. The caller has already checked ownership. */
-export async function deleteUserDocument(env: any, sub: string, id: string): Promise<UserDocumentRow | null> {
-  const row = await getUserDocument(env.DB, sub, id);
+export async function deleteUserDocument(ports: UserDocumentPorts, sub: string, id: string): Promise<UserDocumentRow | null> {
+  const row = await getUserDocument(ports.store, sub, id);
   if (!row) return null;
-  await env.USER_DOCS.delete(row.r2_key!).catch(() => {});
-  await env.USER_DOCS_INDEX.deleteByIds([userDocumentChunkId(id)]).catch(() => {});
-  await env.DB.prepare("DELETE FROM user_documents WHERE id = ?1 AND owner_sub = ?2").bind(id, sub).run();
+  if (row.r2_key) await ports.blobs.delete(row.r2_key).catch(() => {});
+  await ports.lane.deleteIds([userDocumentChunkId(id)]).catch(() => {});
+  await ports.store.prepare("DELETE FROM user_documents WHERE id = ?1 AND owner_sub = ?2").bind(id, sub).run();
   return row;
 }

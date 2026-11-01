@@ -6,7 +6,7 @@ import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from
 import { opCfg, opMemberCanWrite, opTokenMember } from "./livedata";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleMemories } from "./memories";
-import { createImport, deleteUserDocument, getUserDocument, listUserDocuments, USER_DOC_LIMIT } from "./userDocuments";
+import { createImport, deleteUserDocument, getUserDocument, listUserDocuments, USER_DOC_LIMIT, type UserDocumentPorts } from "./userDocuments";
 import { handleProjects, handleProjectFiles } from "./projects";
 import { handleShareConversation, handleGetShared } from "./share";
 import { understandQuery } from "./understand";
@@ -27,7 +27,7 @@ import { handleSearch } from "./search";
 import { handleEnrich, handleSectionUnit, handleCaption, handleVisionJudge, handleVectors, handleJudge, handleCreateKey, handleListKeys, handleRevokeKey, handleKeyUsage, handleFamilySummary } from "./admin";
 import { handleResearch } from "./research";
 import { uploadAttachment, readAttachment, deleteAttachment, type AttachmentDeps } from "./attachments";
-import { cfBlobs } from "./ports/cloudflare/adapters";
+import { cfBlobs, cfStore, cfVectorIndex, cfModelRunner } from "./ports/cloudflare/adapters";
 import { handleAsk } from "./ask";
 import { handleMcp } from "./mcp";
 
@@ -128,11 +128,15 @@ async function memoriesRoute(c: RouteContext): Promise<Response> {
   return withCors(await handleMemories(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
 }
 
+function userDocumentPorts(env: Env): UserDocumentPorts {
+  return { store: cfStore(env.DB), blobs: cfBlobs(env.USER_DOCS), lane: cfVectorIndex(env.USER_DOCS_INDEX), model: cfModelRunner(env.AI) };
+}
+
 async function userDocumentsRoute(c: RouteContext): Promise<Response> {
   const who = await opIdentity(c, "Sign in to manage your documents");
   if (who instanceof Response) return withCors(who, corsHeaders(c.req));
   if (c.req.method === "GET") {
-    const out = await listUserDocuments(c.env.DB, who.sub);
+    const out = await listUserDocuments(userDocumentPorts(c.env).store, who.sub);
     return withCors(json({ ...out, quota: { used: out.documents.length, limit: USER_DOC_LIMIT } }), corsHeaders(c.req));
   }
   if (c.req.method === "POST") {
@@ -144,7 +148,7 @@ async function userDocumentsRoute(c: RouteContext): Promise<Response> {
       return err(400, "invalid_input", "Upload a file in the multipart \"file\" field.");
     }
     const blob = file as { arrayBuffer(): Promise<ArrayBuffer>; size: number; type: string; name: string };
-    const out = await createImport(c.env, c.ctx, who.sub, blob);
+    const out = await createImport(userDocumentPorts(c.env), c.ctx.waitUntil.bind(c.ctx), who.sub, blob);
     if ("error" in out) return withCors(out.error, corsHeaders(c.req));
     return withCors(json({ document: out.document }, 202), corsHeaders(c.req));
   }
@@ -155,13 +159,13 @@ async function userDocumentItemRoute(c: RouteContext): Promise<Response> {
   const who = await opIdentity(c, "Sign in to manage your documents");
   if (who instanceof Response) return withCors(who, corsHeaders(c.req));
   if (c.req.method === "GET") {
-    const row = await getUserDocument(c.env.DB, who.sub, c.params.id!);
+    const row = await getUserDocument(userDocumentPorts(c.env).store, who.sub, c.params.id!);
     if (!row) return err(404, "not_found", "No such document for this member");
     return withCors(json({ document: row }), corsHeaders(c.req));
   }
   const refused = opWriteRefused(c, who);
   if (refused) return withCors(refused, corsHeaders(c.req));
-  const gone = await deleteUserDocument(c.env, who.sub, c.params.id!);
+  const gone = await deleteUserDocument(userDocumentPorts(c.env), who.sub, c.params.id!);
   if (!gone) return err(404, "not_found", "No such document for this member");
   return withCors(json({ ok: true }), corsHeaders(c.req));
 }

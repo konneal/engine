@@ -108,6 +108,9 @@ function cfVectorIndex(index) {
     async upsert(vectors) {
       for (const group of by20(vectors)) await ix.upsert(group);
     },
+    async deleteIds(ids) {
+      for (const group of by20(ids)) await ix.deleteByIds(group);
+    },
     async getByIds(ids) {
       const out = [];
       for (const group of by20(ids)) {
@@ -181,7 +184,10 @@ function portRuntime(ctx) {
 }
 
 export {
+  cfModelRunner,
+  cfVectorIndex,
   cfBlobs,
+  cfStore,
   portModelRunner,
   portIndex,
   portKv,
