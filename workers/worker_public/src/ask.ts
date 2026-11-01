@@ -47,6 +47,8 @@ import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./
 import { chargeTokens, checkQuota, clientIp, creditBudget, creditEstimate, estimateTokens, telemetry, tokenBudget, usageTotal } from "./quota";
 import { graphExpand, editionNote } from "./graph";
 import { registerNote, searchRegister, certificateLinks, registerAggregateIntent, registerAggregate, aggregateNote, aggregateBlock, queryFamily, registerBypassesCache } from "./certificates";
+import { queryUserLane } from "./userDocuments";
+import { cfModelRunner, cfVectorIndex } from "./ports/cloudflare/adapters";
 import { TOOL_DECLARATION, parseToolCall, runTool, toolNote } from "./tools";
 import { operationsLane } from "./operations.ts";
 import { extractNameplate, nameplateRegisterQuery } from "./nameplate.ts";
@@ -517,6 +519,13 @@ async function handleAsk(
   const salt = requestSaltStr ? `${requestSaltStr}|effort:${effort}` : `effort:${effort}`;
   const federate = (member || keyLicensed) && service && isoOn
     ? (q2: string) => retrieveInternal(service, fedAuth, q2)
+    : undefined;
+  // The member's OWN documents federate beside the corpus (TODO.sota/20
+  // slice 4): their lane, filtered by their sub inside the callback —
+  // no unfiltered path exists. The lane hits carry the member's
+  // citations ("Member document — <name>").
+  const userDocs = member && env.USER_DOCS_INDEX
+    ? (q2: string) => queryUserLane(cfModelRunner(env.AI), cfVectorIndex(env.USER_DOCS_INDEX), member.sub, q2, THRESHOLDS.userLaneK)
     : undefined;
 
   const ns = tier === "key" ? `k:${key!.id}` : member ? `m:${member.sub}` : "anon";
@@ -1380,7 +1389,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     // top-N before a post-hoc seal ever sees one. A document named IN THE
     // QUESTION keeps the soft steer by design (the widen covers sparse
     // publications there).
-    retrieved = await retrieve(env, q.query, { prev, understanding, federate, warmEmbed, graphDocNumbers,
+    retrieved = await retrieve(env, q.query, { prev, understanding, federate, userDocs, warmEmbed, graphDocNumbers,
       sealScope: declaredScoped ? docScope : null, optimisticHits, optimisticVec,
       datasetScope: narrowed ? corpora : null, standardKeys, lexicalBoost, licensedDocNumbers,
       ...(routeSubset ? { stageSubset: routeSubset } : {}) });
@@ -1418,7 +1427,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     if (grade === "weak" && understanding?.docidentifier) {
       const broaden = `${understanding.standalone_query || q.query} ${understanding.docidentifier}`.trim();
       const tc = Date.now();
-      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...(routeSubset ? { stageSubset: routeSubset } : {}) });
+      const second = await retrieve(env, q.query, { prev, understanding, queryOverride: broaden, federate, userDocs, datasetScope: narrowed ? corpora : null, standardKeys, sealScope: declaredScoped ? docScope : null, lexicalBoost, ...(routeSubset ? { stageSubset: routeSubset } : {}) });
       const grade2 = await gradeRetrieval(env.AI, roleModel(env, "grader"), q.query, second.hits.map((h: Hit) => h.text));
       stageTiming.corrective = Date.now() - tc;
       if (grade2 === "good") retrieved = second; // corrective retry must be strictly better

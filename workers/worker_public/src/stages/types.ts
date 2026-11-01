@@ -18,6 +18,9 @@ export interface RetrieveOptions {
    *  document's own vocabulary would otherwise miss. */
   lexicalBoost?: string;
   federate?: (query: string) => Promise<Hit[]>;
+  /** The member's own imported documents (TODO.sota/20 slice 4) —
+   *  the sub filter rides inside the callback; no unfiltered path. */
+  userDocs?: (query: string) => Promise<Hit[]>;
   warmEmbed?: Promise<number[] | null>;
   graphDocNumbers?: string[];
   /** The licensed standards the entitled, topically-matched question

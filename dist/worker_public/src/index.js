@@ -1,19 +1,24 @@
 import {
+  USER_DOC_LIMIT,
   checkQuoteAnchors,
+  createImport,
+  deleteUserDocument,
+  getUserDocument,
   handleAsk,
   handleMemories,
+  listUserDocuments,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-YVQVT7GD.js";
+} from "../../chunk-ZFOODZWO.js";
 import "../../chunk-IRCDOFP4.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
   modelGroundingBlock
-} from "../../chunk-VRWNS4AI.js";
+} from "../../chunk-XO26UIFH.js";
 import {
   handleSearch
-} from "../../chunk-ZZGKC6WO.js";
+} from "../../chunk-YQQ3W5CE.js";
 import {
   buildMessages,
   citations,
@@ -38,11 +43,11 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-4J47P52J.js";
+} from "../../chunk-XTWH3PS6.js";
 import {
   embed,
   generateOnce
-} from "../../chunk-ZHT4456M.js";
+} from "../../chunk-7RZ2D64X.js";
 import {
   authenticate,
   corsHeaders,
@@ -51,14 +56,14 @@ import {
   readJson,
   validateQuery,
   withCors
-} from "../../chunk-D7MO4RVQ.js";
+} from "../../chunk-XMUG75ZV.js";
 import {
   canonicalRefusal
 } from "../../chunk-ETLSWSZ7.js";
 import {
   entitlementScope,
   standardKeysFrom
-} from "../../chunk-FNQ7UOEB.js";
+} from "../../chunk-5HCVX34C.js";
 import {
   LIMITS,
   MODELS,
@@ -69,7 +74,7 @@ import {
   roleModel,
   sha256Hex,
   today
-} from "../../chunk-HWWJAJWM.js";
+} from "../../chunk-QYTCQIA6.js";
 import {
   P,
   setProfile
@@ -198,201 +203,6 @@ async function handleAppendMessage(env, sub, req, convId) {
     ]);
   }
   return json({ id: mid }, 201);
-}
-
-// workers/worker_public/src/userDocuments.ts
-var USER_DOC_LIMIT = 10;
-var USER_DOC_MAX_BYTES = 20 * 1024 * 1024;
-var ACCEPTED_MIMES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "application/pdf"]);
-function userDocumentChunkId(docId) {
-  return `ud-${docId}`;
-}
-async function listUserDocuments(store, sub) {
-  const res = await store.prepare("SELECT id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at FROM user_documents WHERE owner_sub = ?1 ORDER BY created_at DESC").bind(sub).all();
-  return { documents: res.results ?? [] };
-}
-async function getUserDocument(store, sub, id) {
-  const row = await store.prepare("SELECT id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at FROM user_documents WHERE id = ?1 AND owner_sub = ?2").bind(id, sub).first();
-  return row ?? null;
-}
-async function quotaRefusal(store, sub) {
-  const row = await store.prepare("SELECT COUNT(*) AS n FROM user_documents WHERE owner_sub = ?1").bind(sub).first();
-  const n = Number(row?.n ?? 0);
-  if (n >= USER_DOC_LIMIT) {
-    return new Response(JSON.stringify({ error: { code: "quota_exceeded", message: `You hold the maximum of ${USER_DOC_LIMIT} documents. Delete one to import another.` } }), { status: 403, headers: { "content-type": "application/json" } });
-  }
-  return null;
-}
-async function createImport(ports, waitUntil, sub, file) {
-  const mime = file.type || "";
-  if (!ACCEPTED_MIMES.has(mime)) {
-    return { error: new Response(JSON.stringify({ error: { code: "invalid_type", message: "Upload a PNG, JPEG, WebP image or a PDF." } }), { status: 415, headers: { "content-type": "application/json" } }) };
-  }
-  if (file.size > USER_DOC_MAX_BYTES) {
-    return { error: new Response(JSON.stringify({ error: { code: "too_large", message: `Documents are limited to ${Math.floor(USER_DOC_MAX_BYTES / (1024 * 1024))} MB.` } }), { status: 413, headers: { "content-type": "application/json" } }) };
-  }
-  const refused = await quotaRefusal(ports.store, sub);
-  if (refused) return { error: refused };
-  const id = crypto.randomUUID();
-  const r2Key = `${sub}/${id}`;
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  await ports.blobs.put(r2Key, bytes.buffer, mime);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const row = {
-    id,
-    owner_sub: sub,
-    name: file.name || "document",
-    kind: null,
-    status: "importing",
-    bytes: bytes.byteLength,
-    r2_key: r2Key,
-    fields: null,
-    error: null,
-    created_at: now,
-    updated_at: now
-  };
-  await ports.store.prepare(
-    "INSERT INTO user_documents (id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
-  ).bind(id, sub, row.name, row.kind, row.status, row.bytes, row.r2_key, row.fields, row.error, now, now).run();
-  waitUntil(processImport(ports, row, mime, bytes).catch(() => {
-  }));
-  return { document: row };
-}
-async function processImport(ports, row, mime, bytes) {
-  const setStatus = async (status, fields, error) => {
-    await ports.store.prepare("UPDATE user_documents SET status = ?1, kind = ?2, fields = ?3, error = ?4, updated_at = ?5 WHERE id = ?6").bind(status, fields ? extractKind(fields) : null, fields ? JSON.stringify(fields) : null, error, (/* @__PURE__ */ new Date()).toISOString(), row.id).run();
-  };
-  try {
-    let text;
-    if (mime === "application/pdf") {
-      text = await pdfTextLayer(bytes);
-      if (!text || text.replace(/\s+/g, "").length < 40) {
-        await setStatus("no_text_layer", null, "This PDF has no extractable text layer. Export page images (PNG/JPEG) and import those \u2014 the vision lane reads them directly.");
-        return;
-      }
-    } else {
-      text = await visionTranscribe(ports.model, mime, bytes);
-      if (!text || text.replace(/\s+/g, "").length < 20) {
-        await setStatus("failed", null, "The vision lane could not read this image. Try a sharper photo.");
-        return;
-      }
-    }
-    const extraction = await structureDocument(ports.model, row.name, mime, text);
-    const fieldsLine = Object.entries(extraction.fields).map(([k, v]) => `${k}: ${v}`).join("; ");
-    const chunkText = `Member document (${extraction.kind}) \u2014 ${row.name}. ${fieldsLine}. ${extraction.summary}
-
-${extraction.text.slice(0, 8e3)}`;
-    const [vector] = await ports.model.embed([chunkText]);
-    await ports.lane.upsert([
-      {
-        id: userDocumentChunkId(row.id),
-        values: vector,
-        metadata: { user_sub: row.owner_sub, doc_id: row.id, kind: extraction.kind, name: row.name }
-      }
-    ]);
-    await setStatus("ready", { kind: extraction.kind, ...extraction.fields, summary: extraction.summary }, null);
-  } catch (e) {
-    await setStatus("failed", null, String(e).slice(0, 200)).catch(() => {
-    });
-  }
-}
-function extractKind(fields) {
-  return fields.kind || "other";
-}
-async function visionTranscribe(model, mime, bytes) {
-  let binary = "";
-  const CHUNK = 32768;
-  for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-  const dataUrl = `data:${mime};base64,${btoa(binary)}`;
-  const res = await model.run({
-    model: MODELS.member,
-    messages: [
-      { role: "system", content: "Transcribe everything you can read in this document image \u2014 certificate numbers, holders, models, values, dates, clause references. Transcribe first; organize nothing." },
-      { role: "user", content: [{ type: "image_url", image_url: { url: dataUrl } }] }
-    ],
-    maxTokens: 2048,
-    effort: "low",
-    temperature: 0.15
-  });
-  return res.text ?? "";
-}
-async function structureDocument(model, name, mime, text) {
-  const res = await model.run({
-    model: MODELS.member,
-    messages: [
-      { role: "system", content: `You classify and structure an imported metrology document. Answer with ONE JSON object: {"kind": "certificate"|"test_report"|"other", "fields": {\u2026short typed fields\u2026}, "summary": "one paragraph a retrieval engine can answer from"}. Certificates carry certificate numbers (like R60/2021-XX1-24.01), holders, models, issue dates. Test reports carry measured values, uncertainties, instruments, clause references. Fields use snake_case names, values verbatim from the text. Never invent a value the text does not carry.` },
-      { role: "user", content: `Document name: ${name}
-Format: ${mime}
-
-Text:
-${text.slice(0, 12e3)}` }
-    ],
-    maxTokens: 2048,
-    effort: "low",
-    temperature: 0.15
-  });
-  const raw = res.text ?? "";
-  const m = /\{[\s\S]*\}/.exec(raw);
-  if (!m) throw new Error("the structuring call returned no JSON object");
-  const parsed = JSON.parse(m[0]);
-  const fields = {};
-  for (const [k, v] of Object.entries(parsed.fields ?? {})) {
-    if (typeof v === "string" || typeof v === "number") fields[k.slice(0, 40)] = String(v).slice(0, 200);
-  }
-  const kind = parsed.kind === "certificate" || parsed.kind === "test_report" ? parsed.kind : "other";
-  return { kind, fields, summary: String(parsed.summary ?? "").slice(0, 1200), text };
-}
-async function pdfTextLayer(bytes) {
-  const raw = new TextDecoder("latin1").decode(bytes);
-  const parts = [];
-  const streamRe = /stream\r?\n?/g;
-  let m;
-  while (m = streamRe.exec(raw)) {
-    const start = m.index + m[0].length;
-    const end = raw.indexOf("endstream", start);
-    if (end < 0) break;
-    const chunk = raw.slice(start, end);
-    streamRe.lastIndex = end;
-    let content = "";
-    if (chunk.charCodeAt(0) === 120) {
-      try {
-        const ds = new DecompressionStream("deflate");
-        const stream = new Blob([new Uint8Array([...chunk].map((c) => c.charCodeAt(0) & 255))]).stream().pipeThrough(ds);
-        content = await new Response(stream).text();
-      } catch {
-        continue;
-      }
-    } else if (/\bTj\b|\bTJ\b/.test(chunk)) {
-      content = chunk;
-    } else {
-      continue;
-    }
-    parts.push(pdfTextOps(content));
-    if (parts.join("").length > 2e5) break;
-  }
-  return parts.join("\n");
-}
-function pdfTextOps(content) {
-  const out = [];
-  const re = /\((?:\\.|[^\\()])*\)/g;
-  let m;
-  while (m = re.exec(content)) {
-    let s = m[0].slice(1, -1);
-    s = s.replace(/\\([nrtbf()/\\])/g, (_, c) => ({ n: "\n", r: "", t: "	", b: "", f: "", "(": "(", ")": ")", "/": "/", "\\": "\\" })[c] ?? c);
-    s = s.replace(/\\([0-7]{1,3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)));
-    if (s.trim()) out.push(s);
-  }
-  return out.join(" ");
-}
-async function deleteUserDocument(ports, sub, id) {
-  const row = await getUserDocument(ports.store, sub, id);
-  if (!row) return null;
-  if (row.r2_key) await ports.blobs.delete(row.r2_key).catch(() => {
-  });
-  await ports.lane.deleteIds([userDocumentChunkId(id)]).catch(() => {
-  });
-  await ports.store.prepare("DELETE FROM user_documents WHERE id = ?1 AND owner_sub = ?2").bind(id, sub).run();
-  return row;
 }
 
 // workers/worker_public/src/projects.ts
@@ -1373,13 +1183,13 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-HLA7O2ZK.js");
+    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-BTH6YAOB.js");
     let payload;
     if (TOOLS_REGISTRY2.some((t) => t.name === name && t.audiences.includes("mcp"))) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-YWYXQ6PE.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-N37WULEM.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-7DFXT4DJ.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-4FWS4HVI.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });

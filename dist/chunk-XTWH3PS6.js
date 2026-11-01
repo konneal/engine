@@ -1,11 +1,11 @@
 import {
   embed,
   rerank
-} from "./chunk-ZHT4456M.js";
+} from "./chunk-7RZ2D64X.js";
 import {
   bubbleConfirmPage,
   isAllowedBubbleOrigin
-} from "./chunk-D7MO4RVQ.js";
+} from "./chunk-XMUG75ZV.js";
 import {
   DATASETS,
   LIMITS,
@@ -15,7 +15,7 @@ import {
   processExpansion,
   sha256Hex,
   today
-} from "./chunk-HWWJAJWM.js";
+} from "./chunk-QYTCQIA6.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -22705,6 +22705,22 @@ var federate = {
   }
 };
 
+// workers/worker_public/src/stages/userLane.ts
+var userLane = {
+  name: "user-lane",
+  when: (c) => !!c.opts.userDocs,
+  run: async (c) => {
+    const fed = await c.opts.userDocs(c.rq).catch(() => []);
+    const seen = new Set(c.hits.map((h) => h.id));
+    for (const h of fed) {
+      if (!seen.has(h.id)) {
+        c.hits.push({ ...h });
+        seen.add(h.id);
+      }
+    }
+  }
+};
+
 // workers/worker_public/src/stages/seal.ts
 async function familyChunks(env, familyNumber, query, keep) {
   const match2 = ftsMatchQuery(query) ?? `"${familyNumber}"`;
@@ -23526,6 +23542,7 @@ var STAGES = [
   poolOpen,
   lexicalUnion,
   federate,
+  userLane,
   seal,
   licenseScope,
   overviewDemote,
