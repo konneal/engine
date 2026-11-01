@@ -4,16 +4,16 @@ import {
   handleMemories,
   scoreFaithfulness,
   scoreJudge
-} from "../../chunk-UMF7Y6JH.js";
+} from "../../chunk-YVQVT7GD.js";
 import "../../chunk-IRCDOFP4.js";
 import {
   TOOLS_REGISTRY,
   bindModelNode,
   modelGroundingBlock
-} from "../../chunk-ROXOL4GF.js";
+} from "../../chunk-VRWNS4AI.js";
 import {
   handleSearch
-} from "../../chunk-MUWO2EV6.js";
+} from "../../chunk-ZZGKC6WO.js";
 import {
   buildMessages,
   citations,
@@ -38,7 +38,7 @@ import {
   sessionFrom,
   telemetry,
   understandQuery
-} from "../../chunk-CLDMP5YH.js";
+} from "../../chunk-4J47P52J.js";
 import {
   embed,
   generateOnce
@@ -76,8 +76,11 @@ import {
 } from "../../chunk-3FYJM7LH.js";
 import {
   cfBlobs,
+  cfModelRunner,
+  cfStore,
+  cfVectorIndex,
   portModelRunner
-} from "../../chunk-KINFFYQH.js";
+} from "../../chunk-YGQCVPX6.js";
 
 // workers/worker_public/src/conversations.ts
 var ID_RE = /^[a-zA-Z0-9_-]{8,64}$/;
@@ -195,6 +198,201 @@ async function handleAppendMessage(env, sub, req, convId) {
     ]);
   }
   return json({ id: mid }, 201);
+}
+
+// workers/worker_public/src/userDocuments.ts
+var USER_DOC_LIMIT = 10;
+var USER_DOC_MAX_BYTES = 20 * 1024 * 1024;
+var ACCEPTED_MIMES = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "application/pdf"]);
+function userDocumentChunkId(docId) {
+  return `ud-${docId}`;
+}
+async function listUserDocuments(store, sub) {
+  const res = await store.prepare("SELECT id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at FROM user_documents WHERE owner_sub = ?1 ORDER BY created_at DESC").bind(sub).all();
+  return { documents: res.results ?? [] };
+}
+async function getUserDocument(store, sub, id) {
+  const row = await store.prepare("SELECT id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at FROM user_documents WHERE id = ?1 AND owner_sub = ?2").bind(id, sub).first();
+  return row ?? null;
+}
+async function quotaRefusal(store, sub) {
+  const row = await store.prepare("SELECT COUNT(*) AS n FROM user_documents WHERE owner_sub = ?1").bind(sub).first();
+  const n = Number(row?.n ?? 0);
+  if (n >= USER_DOC_LIMIT) {
+    return new Response(JSON.stringify({ error: { code: "quota_exceeded", message: `You hold the maximum of ${USER_DOC_LIMIT} documents. Delete one to import another.` } }), { status: 403, headers: { "content-type": "application/json" } });
+  }
+  return null;
+}
+async function createImport(ports, waitUntil, sub, file) {
+  const mime = file.type || "";
+  if (!ACCEPTED_MIMES.has(mime)) {
+    return { error: new Response(JSON.stringify({ error: { code: "invalid_type", message: "Upload a PNG, JPEG, WebP image or a PDF." } }), { status: 415, headers: { "content-type": "application/json" } }) };
+  }
+  if (file.size > USER_DOC_MAX_BYTES) {
+    return { error: new Response(JSON.stringify({ error: { code: "too_large", message: `Documents are limited to ${Math.floor(USER_DOC_MAX_BYTES / (1024 * 1024))} MB.` } }), { status: 413, headers: { "content-type": "application/json" } }) };
+  }
+  const refused = await quotaRefusal(ports.store, sub);
+  if (refused) return { error: refused };
+  const id = crypto.randomUUID();
+  const r2Key = `${sub}/${id}`;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  await ports.blobs.put(r2Key, bytes.buffer, mime);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const row = {
+    id,
+    owner_sub: sub,
+    name: file.name || "document",
+    kind: null,
+    status: "importing",
+    bytes: bytes.byteLength,
+    r2_key: r2Key,
+    fields: null,
+    error: null,
+    created_at: now,
+    updated_at: now
+  };
+  await ports.store.prepare(
+    "INSERT INTO user_documents (id, owner_sub, name, kind, status, bytes, r2_key, fields, error, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
+  ).bind(id, sub, row.name, row.kind, row.status, row.bytes, row.r2_key, row.fields, row.error, now, now).run();
+  waitUntil(processImport(ports, row, mime, bytes).catch(() => {
+  }));
+  return { document: row };
+}
+async function processImport(ports, row, mime, bytes) {
+  const setStatus = async (status, fields, error) => {
+    await ports.store.prepare("UPDATE user_documents SET status = ?1, kind = ?2, fields = ?3, error = ?4, updated_at = ?5 WHERE id = ?6").bind(status, fields ? extractKind(fields) : null, fields ? JSON.stringify(fields) : null, error, (/* @__PURE__ */ new Date()).toISOString(), row.id).run();
+  };
+  try {
+    let text;
+    if (mime === "application/pdf") {
+      text = await pdfTextLayer(bytes);
+      if (!text || text.replace(/\s+/g, "").length < 40) {
+        await setStatus("no_text_layer", null, "This PDF has no extractable text layer. Export page images (PNG/JPEG) and import those \u2014 the vision lane reads them directly.");
+        return;
+      }
+    } else {
+      text = await visionTranscribe(ports.model, mime, bytes);
+      if (!text || text.replace(/\s+/g, "").length < 20) {
+        await setStatus("failed", null, "The vision lane could not read this image. Try a sharper photo.");
+        return;
+      }
+    }
+    const extraction = await structureDocument(ports.model, row.name, mime, text);
+    const fieldsLine = Object.entries(extraction.fields).map(([k, v]) => `${k}: ${v}`).join("; ");
+    const chunkText = `Member document (${extraction.kind}) \u2014 ${row.name}. ${fieldsLine}. ${extraction.summary}
+
+${extraction.text.slice(0, 8e3)}`;
+    const [vector] = await ports.model.embed([chunkText]);
+    await ports.lane.upsert([
+      {
+        id: userDocumentChunkId(row.id),
+        values: vector,
+        metadata: { user_sub: row.owner_sub, doc_id: row.id, kind: extraction.kind, name: row.name }
+      }
+    ]);
+    await setStatus("ready", { kind: extraction.kind, ...extraction.fields, summary: extraction.summary }, null);
+  } catch (e) {
+    await setStatus("failed", null, String(e).slice(0, 200)).catch(() => {
+    });
+  }
+}
+function extractKind(fields) {
+  return fields.kind || "other";
+}
+async function visionTranscribe(model, mime, bytes) {
+  let binary = "";
+  const CHUNK = 32768;
+  for (let i = 0; i < bytes.length; i += CHUNK) binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  const dataUrl = `data:${mime};base64,${btoa(binary)}`;
+  const res = await model.run({
+    model: MODELS.member,
+    messages: [
+      { role: "system", content: "Transcribe everything you can read in this document image \u2014 certificate numbers, holders, models, values, dates, clause references. Transcribe first; organize nothing." },
+      { role: "user", content: [{ type: "image_url", image_url: { url: dataUrl } }] }
+    ],
+    maxTokens: 2048,
+    effort: "low",
+    temperature: 0.15
+  });
+  return res.text ?? "";
+}
+async function structureDocument(model, name, mime, text) {
+  const res = await model.run({
+    model: MODELS.member,
+    messages: [
+      { role: "system", content: `You classify and structure an imported metrology document. Answer with ONE JSON object: {"kind": "certificate"|"test_report"|"other", "fields": {\u2026short typed fields\u2026}, "summary": "one paragraph a retrieval engine can answer from"}. Certificates carry certificate numbers (like R60/2021-XX1-24.01), holders, models, issue dates. Test reports carry measured values, uncertainties, instruments, clause references. Fields use snake_case names, values verbatim from the text. Never invent a value the text does not carry.` },
+      { role: "user", content: `Document name: ${name}
+Format: ${mime}
+
+Text:
+${text.slice(0, 12e3)}` }
+    ],
+    maxTokens: 2048,
+    effort: "low",
+    temperature: 0.15
+  });
+  const raw = res.text ?? "";
+  const m = /\{[\s\S]*\}/.exec(raw);
+  if (!m) throw new Error("the structuring call returned no JSON object");
+  const parsed = JSON.parse(m[0]);
+  const fields = {};
+  for (const [k, v] of Object.entries(parsed.fields ?? {})) {
+    if (typeof v === "string" || typeof v === "number") fields[k.slice(0, 40)] = String(v).slice(0, 200);
+  }
+  const kind = parsed.kind === "certificate" || parsed.kind === "test_report" ? parsed.kind : "other";
+  return { kind, fields, summary: String(parsed.summary ?? "").slice(0, 1200), text };
+}
+async function pdfTextLayer(bytes) {
+  const raw = new TextDecoder("latin1").decode(bytes);
+  const parts = [];
+  const streamRe = /stream\r?\n?/g;
+  let m;
+  while (m = streamRe.exec(raw)) {
+    const start = m.index + m[0].length;
+    const end = raw.indexOf("endstream", start);
+    if (end < 0) break;
+    const chunk = raw.slice(start, end);
+    streamRe.lastIndex = end;
+    let content = "";
+    if (chunk.charCodeAt(0) === 120) {
+      try {
+        const ds = new DecompressionStream("deflate");
+        const stream = new Blob([new Uint8Array([...chunk].map((c) => c.charCodeAt(0) & 255))]).stream().pipeThrough(ds);
+        content = await new Response(stream).text();
+      } catch {
+        continue;
+      }
+    } else if (/\bTj\b|\bTJ\b/.test(chunk)) {
+      content = chunk;
+    } else {
+      continue;
+    }
+    parts.push(pdfTextOps(content));
+    if (parts.join("").length > 2e5) break;
+  }
+  return parts.join("\n");
+}
+function pdfTextOps(content) {
+  const out = [];
+  const re = /\((?:\\.|[^\\()])*\)/g;
+  let m;
+  while (m = re.exec(content)) {
+    let s = m[0].slice(1, -1);
+    s = s.replace(/\\([nrtbf()/\\])/g, (_, c) => ({ n: "\n", r: "", t: "	", b: "", f: "", "(": "(", ")": ")", "/": "/", "\\": "\\" })[c] ?? c);
+    s = s.replace(/\\([0-7]{1,3})/g, (_, o) => String.fromCharCode(parseInt(o, 8)));
+    if (s.trim()) out.push(s);
+  }
+  return out.join(" ");
+}
+async function deleteUserDocument(ports, sub, id) {
+  const row = await getUserDocument(ports.store, sub, id);
+  if (!row) return null;
+  if (row.r2_key) await ports.blobs.delete(row.r2_key).catch(() => {
+  });
+  await ports.lane.deleteIds([userDocumentChunkId(id)]).catch(() => {
+  });
+  await ports.store.prepare("DELETE FROM user_documents WHERE id = ?1 AND owner_sub = ?2").bind(id, sub).run();
+  return row;
 }
 
 // workers/worker_public/src/projects.ts
@@ -1175,13 +1373,13 @@ async function callToolOnce(env, ctx, _req, tier, key, name, args, t0) {
       // stream:false forces the JSON lane (anon defaults to SSE)
       body: JSON.stringify({ ...args, stream: false })
     });
-    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-UCUNOJR4.js");
+    const { runTool, TOOLS_REGISTRY: TOOLS_REGISTRY2 } = await import("../../tools-HLA7O2ZK.js");
     let payload;
     if (TOOLS_REGISTRY2.some((t) => t.name === name && t.audiences.includes("mcp"))) {
       const r = await runTool({ ...env, DB: env.DB }, { name, args }, "mcp");
       payload = r ? { tool: r.name, query: r.query, result: r.output } : { error: { message: `tool ${name} returned nothing for the given arguments` } };
     } else {
-      const res = name === "ask" ? await (await import("../../ask-TOJKDMU7.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-KNPPTHMG.js")).handleSearch(env, ctx, inner, tier, key);
+      const res = name === "ask" ? await (await import("../../ask-YWYXQ6PE.js")).handleAsk(env, ctx, inner, tier, key) : await (await import("../../search-N37WULEM.js")).handleSearch(env, ctx, inner, tier, key);
       payload = await res.json().catch(() => ({ error: { message: "tool transport failed", status: res.status } }));
     }
     telemetry(env, ctx, tier, `mcp:${name}`, null, !payload?.error, JSON.stringify(payload).length, await sha256Hex(`${name}:${JSON.stringify(args ?? {})}`), void 0, void 0, { durationMs: Date.now() - t0 });
@@ -1362,6 +1560,26 @@ var OPENAPI_SURFACE = [
     "method": "DELETE",
     "pattern": "/api/memories/:id",
     "operationId": "deleteMemory"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/user-documents",
+    "operationId": "listUserDocuments"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/user-documents",
+    "operationId": "createUserDocument"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/user-documents/:id",
+    "operationId": "getUserDocument"
+  },
+  {
+    "method": "DELETE",
+    "pattern": "/api/user-documents/:id",
+    "operationId": "deleteUserDocument"
   },
   {
     "method": "GET",
@@ -1575,6 +1793,45 @@ async function memoriesRoute(c) {
   const refused = opWriteRefused(c, who);
   if (refused) return withCors(refused, corsHeaders(c.req));
   return withCors(await handleMemories(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+}
+function userDocumentPorts(env) {
+  return { store: cfStore(env.DB), blobs: cfBlobs(env.USER_DOCS), lane: cfVectorIndex(env.USER_DOCS_INDEX), model: cfModelRunner(env.AI) };
+}
+async function userDocumentsRoute(c) {
+  const who = await opIdentity(c, "Sign in to manage your documents");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  if (c.req.method === "GET") {
+    const out = await listUserDocuments(userDocumentPorts(c.env).store, who.sub);
+    return withCors(json({ ...out, quota: { used: out.documents.length, limit: USER_DOC_LIMIT } }), corsHeaders(c.req));
+  }
+  if (c.req.method === "POST") {
+    const refused = opWriteRefused(c, who);
+    if (refused) return withCors(refused, corsHeaders(c.req));
+    const form = await c.req.formData().catch(() => null);
+    const file = form?.get("file");
+    if (!file || typeof file !== "object" || !("arrayBuffer" in file) || !("size" in file)) {
+      return err(400, "invalid_input", 'Upload a file in the multipart "file" field.');
+    }
+    const blob = file;
+    const out = await createImport(userDocumentPorts(c.env), c.ctx.waitUntil.bind(c.ctx), who.sub, blob);
+    if ("error" in out) return withCors(out.error, corsHeaders(c.req));
+    return withCors(json({ document: out.document }, 202), corsHeaders(c.req));
+  }
+  return err(405, "method_not_allowed", `The path is served, but not with ${c.req.method}`);
+}
+async function userDocumentItemRoute(c) {
+  const who = await opIdentity(c, "Sign in to manage your documents");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  if (c.req.method === "GET") {
+    const row = await getUserDocument(userDocumentPorts(c.env).store, who.sub, c.params.id);
+    if (!row) return err(404, "not_found", "No such document for this member");
+    return withCors(json({ document: row }), corsHeaders(c.req));
+  }
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  const gone = await deleteUserDocument(userDocumentPorts(c.env), who.sub, c.params.id);
+  if (!gone) return err(404, "not_found", "No such document for this member");
+  return withCors(json({ ok: true }), corsHeaders(c.req));
 }
 async function projectsRoute(c) {
   const who = await opIdentity(c, "Sign in to use projects");
@@ -1974,6 +2231,10 @@ var OPENAPI_HANDLERS = {
   getAttachment: attachmentsGetRoute,
   deleteAttachment: attachmentsDeleteRoute,
   listMemories: memoriesRoute,
+  listUserDocuments: userDocumentsRoute,
+  createUserDocument: userDocumentsRoute,
+  getUserDocument: userDocumentItemRoute,
+  deleteUserDocument: userDocumentItemRoute,
   createMemory: memoriesRoute,
   deleteMemory: memoriesRoute,
   listProjects: projectsRoute,

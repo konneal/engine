@@ -21,6 +21,8 @@ export interface Env {
     INDEX_VERSION: string;
     UNIT_ASSETS: R2Bucket;
     CHAT_UPLOADS: R2Bucket;
+    USER_DOCS: R2Bucket;
+    USER_DOCS_INDEX: any;
     ANON_DAY_ASK: string;
     ANON_DAY_SEARCH: string;
     KEY_DAY_ASK_DEFAULT: string;

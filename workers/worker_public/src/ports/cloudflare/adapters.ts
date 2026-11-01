@@ -141,6 +141,9 @@ export function cfVectorIndex(index: unknown): VectorIndex {
       // the adapter law: batches above the provider cap go in chunks
       for (const group of by20(vectors)) await ix.upsert(group);
     },
+    async deleteIds(ids: string[]) {
+      for (const group of by20(ids)) await ix.deleteByIds(group);
+    },
     async getByIds(ids: string[]) {
       // getByIds above ~20 returns EMPTY silently — chunk, always
       const out: VectorMatch[] = [];

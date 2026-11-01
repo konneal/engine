@@ -29,9 +29,17 @@ binding = "AI"
 binding = "UNIT_ASSETS"
 bucket_name = "rag-public-assets"
 
+[[r2_buckets]]
+binding = "USER_DOCS"
+bucket_name = "rag-user-docs"
+
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "idx_oiml_public_v2"
+
+[[vectorize]]
+binding = "USER_DOCS_INDEX"
+index_name = "idx-user-docs"
 
 # Comparison lanes (TODO.model-rag): the annealment experiment indexes
 [[vectorize]]
