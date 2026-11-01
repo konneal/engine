@@ -633,6 +633,78 @@ paths:
       responses:
         '200':
           description: The note is deleted.
+  /api/user-documents:
+    get:
+      tags: [UserDocuments]
+      summary: List the member's imported documents
+      operationId: listUserDocuments
+      responses:
+        '200':
+          description: The documents with their import status and the quota.
+    post:
+      tags: [UserDocuments]
+      summary: Import a document (a certificate or a test report)
+      description: >-
+        Member-gated. Upload one PNG/JPEG/WebP image or a PDF (20 MB
+        max, 10 documents held per member until deleted). The import
+        runs asynchronously: the route answers 202 with the importing
+        row, the status endpoint (or a re-list) tells the rest. Images
+        ride the vision lane; a PDF's text layer is extracted (a
+        scanned PDF with no text layer is answered honestly with the
+        no_text_layer status). Retention: held until the member
+        deletes; deletion is immediate and total.
+      operationId: createUserDocument
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: The import is running; the row carries its status.
+        '413':
+          description: The document exceeds the 20 MB limit.
+        '415':
+          description: Unsupported media type.
+        '403':
+          description: The member holds the maximum of 10 documents.
+  /api/user-documents/{id}:
+    get:
+      tags: [UserDocuments]
+      summary: One imported document's status and extracted fields
+      operationId: getUserDocument
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The document row.
+        '404':
+          description: No such document for this member.
+    delete:
+      tags: [UserDocuments]
+      summary: Delete an imported document
+      description: Immediate and total — the stored file, the private-lane vectors and the row go together.
+      operationId: deleteUserDocument
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The document is deleted.
+        '404':
+          description: No such document for this member.
+
   /api/projects:
     get:
       tags: [Projects]

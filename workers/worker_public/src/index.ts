@@ -6,6 +6,7 @@ import { handleCallback, handleLogin, handleLogout, handleMe, sessionFrom } from
 import { opCfg, opMemberCanWrite, opTokenMember } from "./livedata";
 import { handleAppendMessage, handleConversations } from "./conversations";
 import { handleMemories } from "./memories";
+import { createImport, deleteUserDocument, getUserDocument, listUserDocuments, USER_DOC_LIMIT } from "./userDocuments";
 import { handleProjects, handleProjectFiles } from "./projects";
 import { handleShareConversation, handleGetShared } from "./share";
 import { understandQuery } from "./understand";
@@ -125,6 +126,44 @@ async function memoriesRoute(c: RouteContext): Promise<Response> {
   const refused = opWriteRefused(c, who);
   if (refused) return withCors(refused, corsHeaders(c.req));
   return withCors(await handleMemories(c.env, who.sub, c.req, { method: c.req.method, id: c.params.id }), corsHeaders(c.req));
+}
+
+async function userDocumentsRoute(c: RouteContext): Promise<Response> {
+  const who = await opIdentity(c, "Sign in to manage your documents");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  if (c.req.method === "GET") {
+    const out = await listUserDocuments(c.env.DB, who.sub);
+    return withCors(json({ ...out, quota: { used: out.documents.length, limit: USER_DOC_LIMIT } }), corsHeaders(c.req));
+  }
+  if (c.req.method === "POST") {
+    const refused = opWriteRefused(c, who);
+    if (refused) return withCors(refused, corsHeaders(c.req));
+    const form = await c.req.formData().catch(() => null);
+    const file = form?.get("file") as unknown;
+    if (!file || typeof file !== "object" || !("arrayBuffer" in file) || !("size" in file)) {
+      return err(400, "invalid_input", "Upload a file in the multipart \"file\" field.");
+    }
+    const blob = file as { arrayBuffer(): Promise<ArrayBuffer>; size: number; type: string; name: string };
+    const out = await createImport(c.env, c.ctx, who.sub, blob);
+    if ("error" in out) return withCors(out.error, corsHeaders(c.req));
+    return withCors(json({ document: out.document }, 202), corsHeaders(c.req));
+  }
+  return err(405, "method_not_allowed", `The path is served, but not with ${c.req.method}`);
+}
+
+async function userDocumentItemRoute(c: RouteContext): Promise<Response> {
+  const who = await opIdentity(c, "Sign in to manage your documents");
+  if (who instanceof Response) return withCors(who, corsHeaders(c.req));
+  if (c.req.method === "GET") {
+    const row = await getUserDocument(c.env.DB, who.sub, c.params.id!);
+    if (!row) return err(404, "not_found", "No such document for this member");
+    return withCors(json({ document: row }), corsHeaders(c.req));
+  }
+  const refused = opWriteRefused(c, who);
+  if (refused) return withCors(refused, corsHeaders(c.req));
+  const gone = await deleteUserDocument(c.env, who.sub, c.params.id!);
+  if (!gone) return err(404, "not_found", "No such document for this member");
+  return withCors(json({ ok: true }), corsHeaders(c.req));
 }
 
 async function projectsRoute(c: RouteContext): Promise<Response> {
@@ -619,6 +658,10 @@ const OPENAPI_HANDLERS: Record<OpenApiOperationId, RouteHandler> = {
   getAttachment: attachmentsGetRoute,
   deleteAttachment: attachmentsDeleteRoute,
   listMemories: memoriesRoute,
+  listUserDocuments: userDocumentsRoute,
+  createUserDocument: userDocumentsRoute,
+  getUserDocument: userDocumentItemRoute,
+  deleteUserDocument: userDocumentItemRoute,
   createMemory: memoriesRoute,
   deleteMemory: memoriesRoute,
   listProjects: projectsRoute,

@@ -262,3 +262,19 @@ CREATE INDEX IF NOT EXISTS idx_attachments_sub ON attachments (sub);
 
 -- Tier-2 image reuse: the user message's stored attachment
 ALTER TABLE messages ADD COLUMN attachment_id TEXT;
+
+-- The member's own documents (TODO.sota/20 v1): the import lane.
+CREATE TABLE IF NOT EXISTS user_documents (
+    id TEXT PRIMARY KEY,
+    owner_sub TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT,
+    status TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    r2_key TEXT,
+    fields TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_documents_owner ON user_documents (owner_sub);

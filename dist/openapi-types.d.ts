@@ -454,6 +454,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/user-documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the member's imported documents */
+        get: operations["listUserDocuments"];
+        put?: never;
+        /**
+         * Import a document (a certificate or a test report)
+         * @description Member-gated. Upload one PNG/JPEG/WebP image or a PDF (20 MB max, 10 documents held per member until deleted). The import runs asynchronously: the route answers 202 with the importing row, the status endpoint (or a re-list) tells the rest. Images ride the vision lane; a PDF's text layer is extracted (a scanned PDF with no text layer is answered honestly with the no_text_layer status). Retention: held until the member deletes; deletion is immediate and total.
+         */
+        post: operations["createUserDocument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/user-documents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One imported document's status and extracted fields */
+        get: operations["getUserDocument"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete an imported document
+         * @description Immediate and total — the stored file, the private-lane vectors and the row go together.
+         */
+        delete: operations["deleteUserDocument"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects": {
         parameters: {
             query?: never;
@@ -1759,6 +1801,124 @@ export interface operations {
         responses: {
             /** @description The note is deleted. */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listUserDocuments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The documents with their import status and the quota. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createUserDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The import is running; the row carries its status. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The member holds the maximum of 10 documents. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The document exceeds the 20 MB limit. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unsupported media type. */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getUserDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such document for this member. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteUserDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document is deleted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such document for this member. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

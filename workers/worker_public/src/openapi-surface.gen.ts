@@ -36,6 +36,10 @@ export type OpenApiOperationId =
   | "listMemories"
   | "createMemory"
   | "deleteMemory"
+  | "listUserDocuments"
+  | "createUserDocument"
+  | "getUserDocument"
+  | "deleteUserDocument"
   | "listProjects"
   | "createProject"
   | "deleteProject"
@@ -211,6 +215,26 @@ export const OPENAPI_SURFACE: readonly (Omit<OpenApiRoute, "operationId"> & { op
     "method": "DELETE",
     "pattern": "/api/memories/:id",
     "operationId": "deleteMemory"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/user-documents",
+    "operationId": "listUserDocuments"
+  },
+  {
+    "method": "POST",
+    "pattern": "/api/user-documents",
+    "operationId": "createUserDocument"
+  },
+  {
+    "method": "GET",
+    "pattern": "/api/user-documents/:id",
+    "operationId": "getUserDocument"
+  },
+  {
+    "method": "DELETE",
+    "pattern": "/api/user-documents/:id",
+    "operationId": "deleteUserDocument"
   },
   {
     "method": "GET",
