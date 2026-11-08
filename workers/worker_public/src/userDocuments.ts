@@ -327,3 +327,38 @@ export async function deleteUserDocument(ports: UserDocumentPorts, sub: string, 
   await ports.store.prepare("DELETE FROM user_documents WHERE id = ?1 AND owner_sub = ?2").bind(id, sub).run();
   return row;
 }
+
+/** The member's own recorded values, ready to serve as the STATED STATE
+ *  of a check (TODO.sota/20's "the verdict engine evaluates THEIR
+ *  recorded values"): the ready documents' extracted fields, verbatim.
+ *  The verdict extraction parses numbers-with-units out of these the
+ *  same way it parses the question's own phrases. */
+export async function memberDocFields(store: StoreQuery, sub: string): Promise<{ doc_id: string; name: string; fields: Record<string, string> }[]> {
+  const res = await store
+    .prepare("SELECT id, name, fields FROM user_documents WHERE owner_sub = ?1 AND status = 'ready' AND fields IS NOT NULL ORDER BY created_at DESC")
+    .bind(sub)
+    .all();
+  const out: { doc_id: string; name: string; fields: Record<string, string> }[] = [];
+  for (const r of (res.results ?? []) as unknown as { id: string; name: string; fields: string }[]) {
+    try {
+      const parsed = JSON.parse(r.fields) as Record<string, unknown>;
+      const fields: Record<string, string> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === "string" || typeof v === "number") fields[k] = String(v);
+      }
+      if (Object.keys(fields).length) out.push({ doc_id: r.id, name: r.name, fields });
+    } catch {
+      // a fields blob that fails to parse contributes nothing
+    }
+  }
+  return out;
+}
+
+/** The fields' flat text for the stated-state extraction: one line per
+ *  field, keyed — numbers-with-units parse from this the same way the
+ *  question's own phrases do. */
+export function fieldsAsText(docs: { doc_id: string; name: string; fields: Record<string, string> }[]): string {
+  return docs
+    .map((d) => Object.entries(d.fields).map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join("; "))
+    .join("\n");
+}

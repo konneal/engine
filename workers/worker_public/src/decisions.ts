@@ -13,7 +13,11 @@ export interface DerivedRequirement {
 export interface DecisionItem {
   text: string;
   clause: string;
-  band: "met" | "not-met" | "unclear";
+  /** null in LIST mode: a requirements inventory makes no conformance
+   *  claim, so met/not-met/unclear would all lie (the calibration
+   *  reader's first week caught the hardcoded "met" this replaces —
+   *  2026-11-05, TODO.decisions/03). */
+  band: "met" | "not-met" | "unclear" | null;
   probability: number;
 }
 
@@ -123,15 +127,15 @@ export function matchAnswers(
     items.push({
       text: r.text,
       clause: r.clause,
-      band: mode === "check" ? bandFor(probability, metBand, refuteBand) : "met",
+      band: mode === "check" ? bandFor(probability, metBand, refuteBand) : null,
       probability: Math.round(probability * 100) / 100,
     });
   });
   return items;
 }
 
-const MARK: Record<DecisionItem["band"], string> = { met: "✓", "not-met": "✗", unclear: "?" };
-const WORD: Record<DecisionItem["band"], string> = { met: "met", "not-met": "not met", unclear: "not clearly stated" };
+const MARK: Record<Exclude<DecisionItem["band"], null>, string> = { met: "✓", "not-met": "✗", unclear: "?" };
+const WORD: Record<Exclude<DecisionItem["band"], null>, string> = { met: "met", "not-met": "not met", unclear: "not clearly stated" };
 
 /** The deterministic checklist section appended to the answer. The
  *  model never writes this — the server composes it from the decisions. */
@@ -139,10 +143,13 @@ export function assembleSection(mode: DecisionMode, items: DecisionItem[]): stri
   if (!items.length) return "";
   const title = mode === "check" ? "Requirements check (automated)" : "Requirements (from the cited clauses)";
   const lines = items.map((it) => {
-    const mark = mode === "check" ? MARK[it.band] : "•";
+    // check mode guarantees a band (bandFor ran); list mode renders no
+    // mark, probability, or word at all
+    const band = mode === "check" ? it.band : null;
+    const mark = band ? MARK[band] : "•";
     const clause = it.clause ? ` — ${it.clause}` : "";
-    const prob = mode === "check" ? ` (${Math.round(it.probability * 100)}%)` : "";
-    return `- ${mark} ${it.text}${clause}${prob}${mode === "check" ? ` — ${WORD[it.band]}` : ""}`;
+    const prob = band ? ` (${Math.round(it.probability * 100)}%)` : "";
+    return `- ${mark} ${it.text}${clause}${prob}${band ? ` — ${WORD[band]}` : ""}`;
   });
   return `\n\n${title}:\n${lines.join("\n")}`;
 }
