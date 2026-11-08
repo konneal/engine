@@ -147,7 +147,7 @@ export function telemetryDecisions(
   try {
     telemetry(env, ctx, tier, "ask-decisions", result ? result.gate.toFixed(2) : "0", !!result, result?.items.length ?? 0, queryHash, result?.mode ?? undefined, undefined, { durationMs });
     for (const it of result?.items ?? []) {
-      telemetry(env, ctx, tier, "ask-decision", it.probability.toFixed(2), it.band === "met", 1, queryHash, it.band, undefined, {});
+      telemetry(env, ctx, tier, "ask-decision", it.probability.toFixed(2), it.band === "met", 1, queryHash, it.band ?? undefined, undefined, {});
     }
   } catch { /* telemetry never answers for the answer */ }
 }

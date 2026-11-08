@@ -5,7 +5,11 @@ export interface DerivedRequirement {
 export interface DecisionItem {
     text: string;
     clause: string;
-    band: "met" | "not-met" | "unclear";
+    /** null in LIST mode: a requirements inventory makes no conformance
+     *  claim, so met/not-met/unclear would all lie (the calibration
+     *  reader's first week caught the hardcoded "met" this replaces —
+     *  2026-11-05, TODO.decisions/03). */
+    band: "met" | "not-met" | "unclear" | null;
     probability: number;
 }
 export type DecisionMode = "check" | "list";

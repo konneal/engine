@@ -117,6 +117,7 @@ import {
 } from "./chunk-3FYJM7LH.js";
 import {
   cfModelRunner,
+  cfStore,
   cfVectorIndex,
   portModelRunner,
   portStore
@@ -1518,7 +1519,7 @@ function matchAnswers(mode, requirements, answers, metBand, refuteBand) {
     items.push({
       text: r.text,
       clause: r.clause,
-      band: mode === "check" ? bandFor(probability, metBand, refuteBand) : "met",
+      band: mode === "check" ? bandFor(probability, metBand, refuteBand) : null,
       probability: Math.round(probability * 100) / 100
     });
   });
@@ -1530,10 +1531,11 @@ function assembleSection(mode, items) {
   if (!items.length) return "";
   const title = mode === "check" ? "Requirements check (automated)" : "Requirements (from the cited clauses)";
   const lines = items.map((it) => {
-    const mark = mode === "check" ? MARK[it.band] : "\u2022";
+    const band = mode === "check" ? it.band : null;
+    const mark = band ? MARK[band] : "\u2022";
     const clause = it.clause ? ` \u2014 ${it.clause}` : "";
-    const prob = mode === "check" ? ` (${Math.round(it.probability * 100)}%)` : "";
-    return `- ${mark} ${it.text}${clause}${prob}${mode === "check" ? ` \u2014 ${WORD[it.band]}` : ""}`;
+    const prob = band ? ` (${Math.round(it.probability * 100)}%)` : "";
+    return `- ${mark} ${it.text}${clause}${prob}${band ? ` \u2014 ${WORD[band]}` : ""}`;
   });
   return `
 
@@ -1629,7 +1631,7 @@ function telemetryDecisions(env, ctx, tier, queryHash, result, durationMs) {
   try {
     telemetry(env, ctx, tier, "ask-decisions", result ? result.gate.toFixed(2) : "0", !!result, result?.items.length ?? 0, queryHash, result?.mode ?? void 0, void 0, { durationMs });
     for (const it of result?.items ?? []) {
-      telemetry(env, ctx, tier, "ask-decision", it.probability.toFixed(2), it.band === "met", 1, queryHash, it.band, void 0, {});
+      telemetry(env, ctx, tier, "ask-decision", it.probability.toFixed(2), it.band === "met", 1, queryHash, it.band ?? void 0, void 0, {});
     }
   } catch {
   }
@@ -1896,6 +1898,25 @@ async function deleteUserDocument(ports, sub, id) {
   });
   await ports.store.prepare("DELETE FROM user_documents WHERE id = ?1 AND owner_sub = ?2").bind(id, sub).run();
   return row;
+}
+async function memberDocFields(store, sub) {
+  const res = await store.prepare("SELECT id, name, fields FROM user_documents WHERE owner_sub = ?1 AND status = 'ready' AND fields IS NOT NULL ORDER BY created_at DESC").bind(sub).all();
+  const out = [];
+  for (const r of res.results ?? []) {
+    try {
+      const parsed = JSON.parse(r.fields);
+      const fields = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === "string" || typeof v === "number") fields[k] = String(v);
+      }
+      if (Object.keys(fields).length) out.push({ doc_id: r.id, name: r.name, fields });
+    } catch {
+    }
+  }
+  return out;
+}
+function fieldsAsText(docs) {
+  return docs.map((d) => Object.entries(d.fields).map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join("; ")).join("\n");
 }
 
 // workers/worker_public/src/operations.ts
@@ -2778,7 +2799,13 @@ ${summary}` }] : [],
       console.log("model plane: bound", boundModel.node_id, `[${boundModel.standard}]`, boundModel.clause?.urn ?? "no-clause", boundModel.gated ? "(gated: license)" : "");
     }
     const modelNote = boundModel && !boundModel.gated ? modelGroundingBlock(boundModel) : void 0;
-    let machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? evaluate(boundModel.content, q2.query) : null;
+    const memberDocs = member && !ablate?.noVerdict ? await memberDocFields(cfStore(env.DB), member.sub).catch(() => []) : [];
+    const memberFieldsText = memberDocs.length ? fieldsAsText(memberDocs) : "";
+    const statedText = memberFieldsText ? `${q2.query}
+${memberFieldsText}` : q2.query;
+    const memberDocNote = memberDocs.length ? `MEMBER DOCUMENT DATA \u2014 these are the QUESTION-ASKER'S OWN recorded values from their imported documents; treat them as the stated state for any conformance check, and cite the document name when you use them:
+${memberFieldsText}` : void 0;
+    let machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? evaluate(boundModel.content, statedText) : null;
     if (machineVerdict === null && boundModel && !boundModel.gated) {
       try {
         const unitTokens = [...new Set(Object.values(extractParamsWithUnits(q2.query, symbolsIn(extractChecks(boundModel.content))).units).map((u) => u.toLowerCase()))];
@@ -2811,7 +2838,7 @@ ${summary}` }] : [],
     if (!machineVerdict && !boundModel && !ablate?.noVerdict && P().publisher.features?.model_plane) {
       const ql = q2.query.toLowerCase();
       const severityWord = /\b(severity|test|valid|tolerance|condition|within)\b/.test(ql);
-      const stated = quantitiesIn(q2.query);
+      const stated = quantitiesIn(statedText);
       if (severityWord && Object.keys(stated).length >= 1) {
         const docNum = modelDocHint?.doc_number;
         const rows = await modelNodeRows("condition_set", docNum);
@@ -3065,7 +3092,7 @@ Answer account questions from these records ONLY: name the record when you use i
       q2.lang,
       keptHistory,
       // stage-extracted graph facts (GraphRAG) ride the same note channel
-      [ops.note, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
+      [ops.note, processNote, eNote, regNote, memberDocNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...retrieved.notes ?? []].filter(Boolean).join("\n") || void 0,
       summary,
       budget,
       ablate?.noCompress !== true

@@ -70,3 +70,21 @@ export declare function queryUserLane(model: ModelRunner, lane: VectorIndex, sub
 /** Deletion is immediate and total: the R2 object, the lane vectors,
  *  the row. The caller has already checked ownership. */
 export declare function deleteUserDocument(ports: UserDocumentPorts, sub: string, id: string): Promise<UserDocumentRow | null>;
+/** The member's own recorded values, ready to serve as the STATED STATE
+ *  of a check (TODO.sota/20's "the verdict engine evaluates THEIR
+ *  recorded values"): the ready documents' extracted fields, verbatim.
+ *  The verdict extraction parses numbers-with-units out of these the
+ *  same way it parses the question's own phrases. */
+export declare function memberDocFields(store: StoreQuery, sub: string): Promise<{
+    doc_id: string;
+    name: string;
+    fields: Record<string, string>;
+}[]>;
+/** The fields' flat text for the stated-state extraction: one line per
+ *  field, keyed — numbers-with-units parse from this the same way the
+ *  question's own phrases do. */
+export declare function fieldsAsText(docs: {
+    doc_id: string;
+    name: string;
+    fields: Record<string, string>;
+}[]): string;

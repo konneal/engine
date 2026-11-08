@@ -47,8 +47,8 @@ import { json, err, corsHeaders, readJson, validateQuery, type ApiKey } from "./
 import { chargeTokens, checkQuota, clientIp, creditBudget, creditEstimate, estimateTokens, telemetry, tokenBudget, usageTotal } from "./quota";
 import { graphExpand, editionNote } from "./graph";
 import { registerNote, searchRegister, certificateLinks, registerAggregateIntent, registerAggregate, aggregateNote, aggregateBlock, queryFamily, registerBypassesCache } from "./certificates";
-import { queryUserLane } from "./userDocuments";
-import { cfModelRunner, cfVectorIndex } from "./ports/cloudflare/adapters";
+import { queryUserLane, memberDocFields, fieldsAsText } from "./userDocuments";
+import { cfModelRunner, cfStore, cfVectorIndex } from "./ports/cloudflare/adapters";
 import { TOOL_DECLARATION, parseToolCall, runTool, toolNote } from "./tools";
 import { operationsLane } from "./operations.ts";
 import { extractNameplate, nameplateRegisterQuery } from "./nameplate.ts";
@@ -1114,7 +1114,18 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // the worker EXECUTES the bound node's machine checks against the
   // question's stated values; the model narrates the computed verdict
   // and the verdict BLOCK is server-built — data, never generated prose
-  let machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? machineEvaluate(boundModel.content, q.query) : null;
+  // The member's own imported values are the STATED STATE for their
+  // checks (TODO.sota/20: "compare my recorded errors against R 60
+  // Table 4"): fetched directly (the verdict paths precede retrieval),
+  // composed once, and fed to BOTH the machine evaluation and the note
+  // channel. Member-gated, ready documents only.
+  const memberDocs = member && !ablate?.noVerdict ? await memberDocFields(cfStore(env.DB), member.sub).catch(() => []) : [];
+  const memberFieldsText = memberDocs.length ? fieldsAsText(memberDocs) : "";
+  const statedText = memberFieldsText ? `${q.query}\n${memberFieldsText}` : q.query;
+  const memberDocNote = memberDocs.length
+    ? `MEMBER DOCUMENT DATA — these are the QUESTION-ASKER'S OWN recorded values from their imported documents; treat them as the stated state for any conformance check, and cite the document name when you use them:\n${memberFieldsText}`
+    : undefined;
+  let machineVerdict = boundModel && !boundModel.gated && !ablate?.noVerdict ? machineEvaluate(boundModel.content, statedText) : null;
   if (machineVerdict === null && boundModel && !boundModel.gated) {
     // unit semantics (TODO.sota/04): the stated values' units reach the
     // units register for their dimensions; a comparison mixing
@@ -1165,7 +1176,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   if (!machineVerdict && !boundModel && !ablate?.noVerdict && P().publisher.features?.model_plane) {
     const ql = q.query.toLowerCase();
     const severityWord = /\b(severity|test|valid|tolerance|condition|within)\b/.test(ql);
-    const stated = quantitiesIn(q.query);
+    const stated = quantitiesIn(statedText);
     if (severityWord && Object.keys(stated).length >= 1) {
       const docNum = modelDocHint?.doc_number;
       // the doc number joins the STANDARD id (iec-60068-2-78), which is
@@ -1543,7 +1554,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     q.lang,
     keptHistory,
     // stage-extracted graph facts (GraphRAG) ride the same note channel
-    [ops.note, processNote, eNote, regNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
+    [ops.note, processNote, eNote, regNote, memberDocNote, contextNote(declaredCtx, docScope), accountNote, modelNote, vocabNote, memNote, machineNote, conditionNote, aggregationNote, boundaryNote, licenseNote, ...(retrieved.notes ?? [])].filter(Boolean).join("\n") || undefined,
     summary,
     budget,
     ablate?.noCompress !== true,

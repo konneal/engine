@@ -53,11 +53,14 @@ test("matchAnswers keys r1..rN, bands, drops missing and out-of-range", () => {
   assert.equal(items[1].band, "not-met");
 });
 
-test("matchAnswers: list mode bands everything met (presence is the decision)", () => {
+test("matchAnswers: list mode carries NO band (presence is not a conformance claim)", () => {
   const reqs = [{ text: "a", clause: "1" }];
   const items = matchAnswers("list", reqs, { r1: { type: "noul", noul: 0.7 } }, 0.8, 0.2);
-  assert.equal(items[0].band, "met");
+  assert.equal(items[0].band, null);
   assert.equal(items[0].probability, 0.7);
+  // check mode still bands by the thresholds
+  const checked = matchAnswers("check", reqs, { r1: { type: "noul", noul: 0.7 } }, 0.8, 0.2);
+  assert.equal(checked[0].band, "unclear");
 });
 
 test("assembleSection: the check section marks, cites, and states the probability", () => {
