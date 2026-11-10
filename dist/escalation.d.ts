@@ -19,7 +19,9 @@ export declare function verifyAnchors(answer: string, clauses: Set<string>): {
     ok: boolean;
     missing: string[];
 };
-export declare const ESCALATION_SYSTEM: string;
+/** The system prompt reads the publisher from the profile — the
+ *  publisher-leak lint's law (a hardcoded name is a leak). */
+export declare const escalationSystem: () => string;
 /** The escalation's daily budget: a per-bucket KV counter. */
 export declare function escalationAllowed(kv: any, bucketId: string, dailyCap: number, day: string): Promise<boolean>;
 export declare function chargeEscalation(kv: any, bucketId: string, day: string): Promise<void>;

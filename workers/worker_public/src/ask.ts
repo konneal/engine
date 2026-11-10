@@ -48,7 +48,7 @@ import { chargeTokens, checkQuota, clientIp, creditBudget, creditEstimate, estim
 import { graphExpand, editionNote } from "./graph";
 import { registerNote, searchRegister, certificateLinks, registerAggregateIntent, registerAggregate, aggregateNote, aggregateBlock, queryFamily, registerBypassesCache } from "./certificates";
 import { queryUserLane, memberDocFields, fieldsAsText } from "./userDocuments";
-import { assembleDocument, verifyAnchors, escalationAllowed, chargeEscalation, ESCALATION_SYSTEM } from "./escalation";
+import { assembleDocument, verifyAnchors, escalationAllowed, chargeEscalation, escalationSystem } from "./escalation";
 import { ESCALATION_DAILY_DEFAULT } from "./config";
 import { cfModelRunner, cfStore, cfVectorIndex } from "./ports/cloudflare/adapters";
 import { TOOL_DECLARATION, parseToolCall, runTool, toolNote } from "./tools";
@@ -1590,7 +1590,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       if (doc && doc.text.length > 20_000) {
         const history = keptHistory.slice(-6);
         messages = [
-          { role: "system", content: ESCALATION_SYSTEM },
+          { role: "system", content: escalationSystem() },
           ...history,
           { role: "user", content: `Question: ${q.query}\n\nPublication ${doc.docidentifier}${doc.truncated ? " (truncated)" : ""}:\n\n${doc.text}` },
         ];

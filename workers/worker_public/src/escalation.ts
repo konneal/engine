@@ -15,6 +15,7 @@
 // the answer to the honest refusal.
 
 import type { StoreQuery } from "./ports/store.ts";
+import { P } from "./profile.ts";
 
 export interface AssembledDocument {
   docidentifier: string;
@@ -76,8 +77,10 @@ export function verifyAnchors(answer: string, clauses: Set<string>): { ok: boole
   return { ok: missing.length === 0, missing };
 }
 
-export const ESCALATION_SYSTEM =
-  "You are Ommisa, the answer service over OIML legal-metrology publications. " +
+/** The system prompt reads the publisher from the profile — the
+ *  publisher-leak lint's law (a hardcoded name is a leak). */
+export const escalationSystem = (): string =>
+  `You are ${P().publisher.name}, the answer service over legal-metrology publications. ` +
   "Answer the question using ONLY the publication text below. Cite the clause numbers you use. " +
   "If the publication does not answer it, say so plainly.";
 

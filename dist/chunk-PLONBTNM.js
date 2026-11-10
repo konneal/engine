@@ -1960,7 +1960,7 @@ function verifyAnchors(answer, clauses) {
   }
   return { ok: missing.length === 0, missing };
 }
-var ESCALATION_SYSTEM = "You are Ommisa, the answer service over OIML legal-metrology publications. Answer the question using ONLY the publication text below. Cite the clause numbers you use. If the publication does not answer it, say so plainly.";
+var escalationSystem = () => `You are ${P().publisher.name}, the answer service over legal-metrology publications. Answer the question using ONLY the publication text below. Cite the clause numbers you use. If the publication does not answer it, say so plainly.`;
 async function escalationAllowed(kv, bucketId, dailyCap, day) {
   if (dailyCap <= 0) return false;
   const n = Number(await kv.get(`esc:${day}:${bucketId}`) ?? "0");
@@ -3163,7 +3163,7 @@ Answer account questions from these records ONLY: name the record when you use i
         if (doc && doc.text.length > 2e4) {
           const history2 = keptHistory.slice(-6);
           messages = [
-            { role: "system", content: ESCALATION_SYSTEM },
+            { role: "system", content: escalationSystem() },
             ...history2,
             { role: "user", content: `Question: ${q2.query}
 
