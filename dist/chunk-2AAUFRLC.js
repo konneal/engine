@@ -33,7 +33,7 @@ import {
   tableRetyped,
   toolNote,
   verdictNote
-} from "./chunk-XO26UIFH.js";
+} from "./chunk-BMODSEKT.js";
 import {
   NO_CONTEXT,
   STAGE_NAMES,
@@ -76,18 +76,18 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-XTWH3PS6.js";
+} from "./chunk-5ISPTV5G.js";
 import {
   embed,
   generateOnce
-} from "./chunk-7RZ2D64X.js";
+} from "./chunk-BAOKHV2D.js";
 import {
   corsHeaders,
   err,
   json,
   readJson,
   validateQuery
-} from "./chunk-XMUG75ZV.js";
+} from "./chunk-TLPUJMAF.js";
 import {
   cacheableAnswer,
   canonicalRefusal,
@@ -100,8 +100,9 @@ import {
   requestSalt,
   resolveRequestScope,
   standardKeysFrom
-} from "./chunk-5HCVX34C.js";
+} from "./chunk-MZQEI4VJ.js";
 import {
+  ESCALATION_DAILY_DEFAULT,
   LIMITS,
   MODELS,
   THRESHOLDS,
@@ -111,7 +112,7 @@ import {
   requestEffort,
   roleModel,
   sha256Hex
-} from "./chunk-QYTCQIA6.js";
+} from "./chunk-IZ3GSYMD.js";
 import {
   P
 } from "./chunk-3FYJM7LH.js";
@@ -1919,6 +1920,57 @@ function fieldsAsText(docs) {
   return docs.map((d) => Object.entries(d.fields).map(([k, v]) => `${k.replace(/_/g, " ")}: ${v}`).join("; ")).join("\n");
 }
 
+// workers/worker_public/src/escalation.ts
+async function assembleDocument(store, docidentifier, capChars, lang = "en") {
+  const res = await store.prepare(
+    `SELECT text, clause_anchor, status, language FROM chunks
+       WHERE docidentifier = ?1 AND language = ?2 AND status = 'in-force'
+       ORDER BY rowid`
+  ).bind(docidentifier, lang).all();
+  const rows = res.results ?? [];
+  if (!rows.length) return null;
+  const clauses = /* @__PURE__ */ new Set();
+  const parts = [];
+  let total = 0;
+  let truncated = false;
+  for (const r of rows) {
+    const anchor = (r.clause_anchor || "").trim();
+    if (anchor) {
+      clauses.add(anchor);
+      const segs = anchor.split(".");
+      for (let i = 1; i < segs.length; i++) clauses.add(segs.slice(0, i).join("."));
+    }
+    if (total + r.text.length > capChars) {
+      truncated = true;
+      break;
+    }
+    parts.push(r.text);
+    total += r.text.length;
+  }
+  if (!parts.length) return null;
+  return { docidentifier, text: parts.join("\n\n"), clauses, truncated };
+}
+function verifyAnchors(answer, clauses) {
+  const cited = /* @__PURE__ */ new Set();
+  for (const m of answer.matchAll(/\b(\d{1,2}(?:\.\d{1,2}){1,3})\b/g)) cited.add(m[1]);
+  for (const m of answer.matchAll(/\b(\d{1,2}\.\d{1,2})\s?[–—-]\s?(\d{1,2}(?:\.\d{1,2}){1,3})\b/g)) cited.add(m[2]);
+  const missing = [];
+  for (const c of cited) {
+    if (!clauses.has(c) && ![...clauses].some((k) => k.startsWith(`${c}.`) || k === c)) missing.push(c);
+  }
+  return { ok: missing.length === 0, missing };
+}
+var ESCALATION_SYSTEM = "You are Ommisa, the answer service over OIML legal-metrology publications. Answer the question using ONLY the publication text below. Cite the clause numbers you use. If the publication does not answer it, say so plainly.";
+async function escalationAllowed(kv, bucketId, dailyCap, day) {
+  if (dailyCap <= 0) return false;
+  const n = Number(await kv.get(`esc:${day}:${bucketId}`) ?? "0");
+  return n < dailyCap;
+}
+async function chargeEscalation(kv, bucketId, day) {
+  const key = `esc:${day}:${bucketId}`;
+  await kv.put(key, String(Number(await kv.get(key) ?? "0") + 1), { expirationTtl: 172800 });
+}
+
 // workers/worker_public/src/operations.ts
 function isOperationIntent(query) {
   return /\b(operations?|endpoints?)\b/i.test(query);
@@ -2682,6 +2734,7 @@ Certificates are issued per recommendation family \u2014 the register carries no
     const ops = await operationsLane(env.DB, q2.query);
     const registerOwns = !!register?.rows?.length;
     const registerCitation = registerOwns ? [{ docidentifier: `${P().publisher.name}-CS certificate register`, corpus: "register" }] : [];
+    const escalationCitation = () => escalatedDoc ? [{ docidentifier: `${escalatedDoc.docidentifier} (the complete publication)`, corpus: "escalated" }] : [];
     if (understanding?.intent === "conversational") {
       const queryHash2 = await sha256Hex(q2.query);
       const messages2 = [
@@ -3086,7 +3139,7 @@ Answer account questions from these records ONLY: name the record when you use i
       text: `${m.anchor} \u2014 ${m.text}`
     }));
     const passagePool = registerOwns ? [...opsHits, ...hits].filter((h) => !!h.metadata.cert_holder) : [...opsHits, ...hits];
-    const { messages, usedHits } = buildMessages(
+    const built = buildMessages(
       q2.query,
       passagePool,
       q2.lang,
@@ -3097,6 +3150,35 @@ Answer account questions from these records ONLY: name the record when you use i
       budget,
       ablate?.noCompress !== true
     );
+    let escalateAnswer = false;
+    let escalatedDoc = null;
+    let messages = built.messages;
+    let usedHits = built.usedHits;
+    const escalateWanted = crag.grade === "weak" && !crag.corrective?.accepted;
+    if (escalateWanted && understanding?.docidentifier && (tier === "member" || tier === "key") && !withImage) {
+      const day = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+      const bucket = tier === "key" ? `key:${key.id}` : `sub:${member.sub}`;
+      if (await escalationAllowed(env.CACHE, bucket, num(env, "ESCALATION_DAILY", ESCALATION_DAILY_DEFAULT), day)) {
+        const doc = await assembleDocument(cfStore(env.DB), understanding.docidentifier, 9e5, q2.lang || "en").catch(() => null);
+        if (doc && doc.text.length > 2e4) {
+          const history2 = keptHistory.slice(-6);
+          messages = [
+            { role: "system", content: ESCALATION_SYSTEM },
+            ...history2,
+            { role: "user", content: `Question: ${q2.query}
+
+Publication ${doc.docidentifier}${doc.truncated ? " (truncated)" : ""}:
+
+${doc.text}` }
+          ];
+          usedHits = [];
+          escalatedDoc = doc;
+          escalateAnswer = true;
+          await chargeEscalation(env.CACHE, bucket, day);
+          console.log("escalation: answering from the whole", doc.docidentifier, `(${doc.text.length} chars)`);
+        }
+      }
+    }
     const decisionPromise = decisionsArmed && decisionsGatePromise ? decisionsGatePromise.then((g) => g != null && g >= THRESHOLDS.decisionsGateMin ? runDecisionPass(env, {
       question: q2.query,
       gate: g,
@@ -3157,7 +3239,7 @@ Answer account questions from these records ONLY: name the record when you use i
       console.log("user image attached to generation");
     }
     const queryHash = await sha256Hex(q2.query);
-    const cites = [...registerCitation, ...boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits)];
+    const cites = escalateAnswer ? escalationCitation() : [...registerCitation, ...boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits)];
     if (live2) {
       const stream = await generateStream(env, model, messages, routeEffort(routed.route));
       if (stream) {
@@ -3238,6 +3320,14 @@ Answer account questions from these records ONLY: name the record when you use i
               }
             } catch {
             }
+          }
+        }
+        if (escalateAnswer && escalatedDoc && !full.includes(refusalAnswer())) {
+          const verdict = verifyAnchors(full, escalatedDoc.clauses);
+          if (!verdict.ok) {
+            console.log("escalation: unverifiable clause citations", verdict.missing.join(","), "\u2014 refusing honestly");
+            full = refusalAnswer();
+            send({ type: "token", v: refusalAnswer() });
           }
         }
         let canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
@@ -3446,7 +3536,14 @@ Answer account questions from these records ONLY: name the record when you use i
       telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q2.lang, void 0, telemetryMeta());
       return err(502, "generation_failed", "The generation model is unavailable; please retry.");
     }
-    const finalCites = [...registerCitation, ...boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used)];
+    const finalCites = escalateAnswer ? escalationCitation() : [...registerCitation, ...boundModel ? [modelCitation(boundModel), ...citations(used)] : citations(used)];
+    if (escalateAnswer && escalatedDoc && !answer.includes(refusalAnswer())) {
+      const verdict = verifyAnchors(answer, escalatedDoc.clauses);
+      if (!verdict.ok) {
+        console.log("escalation: unverifiable clause citations", verdict.missing.join(","), "\u2014 refusing honestly");
+        answer = canonicalRefusal(refusalAnswer(), refusalScope(false));
+      }
+    }
     const c2ns = answer.includes(refusalAnswer()) ? { text: answer, blocks: [], dropped: [] } : await contractV2(env.DB, answer, used);
     answer = c2ns.text;
     const finalAnchors = answer.includes(refusalAnswer()) ? { total: 0, violations: [] } : checkQuoteAnchors(answer, used.map((h) => h.text));
