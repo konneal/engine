@@ -48,6 +48,8 @@ import { chargeTokens, checkQuota, clientIp, creditBudget, creditEstimate, estim
 import { graphExpand, editionNote } from "./graph";
 import { registerNote, searchRegister, certificateLinks, registerAggregateIntent, registerAggregate, aggregateNote, aggregateBlock, queryFamily, registerBypassesCache } from "./certificates";
 import { queryUserLane, memberDocFields, fieldsAsText } from "./userDocuments";
+import { assembleDocument, verifyAnchors, escalationAllowed, chargeEscalation, escalationSystem } from "./escalation";
+import { ESCALATION_DAILY_DEFAULT } from "./config";
 import { cfModelRunner, cfStore, cfVectorIndex } from "./ports/cloudflare/adapters";
 import { TOOL_DECLARATION, parseToolCall, runTool, toolNote } from "./tools";
 import { operationsLane } from "./operations.ts";
@@ -938,6 +940,10 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   const registerCitation = registerOwns
     ? [{ docidentifier: `${P().publisher.name}-CS certificate register`, corpus: "register" }]
     : [];
+  const escalationCitation = () =>
+    escalatedDoc
+      ? [{ docidentifier: `${escalatedDoc.docidentifier} (the complete publication)`, corpus: "escalated" }]
+      : [];
 
   // Conversational route, decided by query UNDERSTANDING (any language, any
   // phrasing) — not string matching. No retrieval: nothing in the corpus
@@ -1548,7 +1554,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   const passagePool = registerOwns
     ? [...opsHits, ...hits].filter((h) => !!(h.metadata as any).cert_holder)
     : [...opsHits, ...hits];
-  const { messages, usedHits } = buildMessages(
+  const built = buildMessages(
     q.query,
     passagePool,
     q.lang,
@@ -1559,6 +1565,43 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     budget,
     ablate?.noCompress !== true,
   );
+  // The selective brute-force escalation (TODO.sota/21): the compressed
+  // pipeline graded weak on a DOCUMENT-SCOPED question and the
+  // corrective retry did not recover — answer from the WHOLE publication
+  // uncut on the 1M-ctx model. The measured trade (18.1): brute force
+  // 100% vs the window's ~92.9% at ~1/20th... reversed: the escalation
+  // BUYS ~7pp at ~250k tokens, member/key only, daily-capped. One
+  // message swap here feeds both delivery lanes.
+  let escalateAnswer = false;
+  let escalatedDoc: Awaited<ReturnType<typeof assembleDocument>> | null = null;
+  let messages = built.messages;
+  let usedHits = built.usedHits;
+  const escalateWanted = crag.grade === "weak" && !crag.corrective?.accepted;
+  if (
+    escalateWanted &&
+    understanding?.docidentifier &&
+    (tier === "member" || tier === "key") &&
+    !withImage
+  ) {
+    const day = new Date().toISOString().slice(0, 10);
+    const bucket = tier === "key" ? `key:${key!.id}` : `sub:${member!.sub}`;
+    if (await escalationAllowed(env.CACHE, bucket, num(env as any, "ESCALATION_DAILY", ESCALATION_DAILY_DEFAULT), day)) {
+      const doc = await assembleDocument(cfStore(env.DB), understanding.docidentifier, 900_000, q.lang || "en").catch(() => null);
+      if (doc && doc.text.length > 20_000) {
+        const history = keptHistory.slice(-6);
+        messages = [
+          { role: "system", content: escalationSystem() },
+          ...history,
+          { role: "user", content: `Question: ${q.query}\n\nPublication ${doc.docidentifier}${doc.truncated ? " (truncated)" : ""}:\n\n${doc.text}` },
+        ];
+        usedHits = [];
+        escalatedDoc = doc;
+        escalateAnswer = true;
+        await chargeEscalation(env.CACHE, bucket, day);
+        console.log("escalation: answering from the whole", doc.docidentifier, `(${doc.text.length} chars)`);
+      }
+    }
+  }
   // the decision pass (TODO.decisions/01): starts here so its calls run
   // concurrently with generation — the checklist section arrives the
   // moment the model's last token lands, never delaying the answer
@@ -1675,7 +1718,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
   // provenance — ahead of the prose passages. The register rides first
   // when it owns the answer (the standing citation the aggregate path
   // has always attached).
-  const cites = [...registerCitation, ...(boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits))];
+  const cites = escalateAnswer ? escalationCitation() : [...registerCitation, ...(boundModel ? [modelCitation(boundModel), ...citations(usedHits)] : citations(usedHits))];
 
   if (live) {
     const stream = await generateStream(env, model, messages, routeEffort(routed.route));
@@ -1773,6 +1816,17 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           }
           // the misplaced-pin wall rides the streamed path too: a
           // CITED stream is not a refusal
+          // the escalation's citation contract (TODO.sota/21): every
+          // clause the answer references must exist in the assembled
+          // document — an unverifiable escalation IS the honest refusal
+          if (escalateAnswer && escalatedDoc && !full.includes(refusalAnswer())) {
+            const verdict = verifyAnchors(full, escalatedDoc.clauses);
+            if (!verdict.ok) {
+              console.log("escalation: unverifiable clause citations", verdict.missing.join(","), "— refusing honestly");
+              full = refusalAnswer();
+              send({ type: "token", v: refusalAnswer() });
+            }
+          }
           let canonical0 = exciseMisplacedPin(canonicalRefusal(full.replace(/^TOOL [a-z_.]+.*$\n?/gm, "").replace(/^\n+/, ""), refusalScope(answerCites(full))), answerCites(full));
           // answer contract v2: validate [[u:]] refs, resolve typed blocks
           const c2 = canonical0.includes(refusalAnswer())
@@ -2075,7 +2129,15 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     telemetry(env, ctx, tier, "ask", model, false, 0, queryHash, q.lang, undefined, telemetryMeta());
     return err(502, "generation_failed", "The generation model is unavailable; please retry.");
   }
-  const finalCites = [...registerCitation, ...(boundModel ? [modelCitation(boundModel!), ...citations(used)] : citations(used))];
+  const finalCites = escalateAnswer ? escalationCitation() : [...registerCitation, ...(boundModel ? [modelCitation(boundModel!), ...citations(used)] : citations(used))];
+  // the escalation's citation contract (the JSON lane's half)
+  if (escalateAnswer && escalatedDoc && !answer!.includes(refusalAnswer())) {
+    const verdict = verifyAnchors(answer!, escalatedDoc.clauses);
+    if (!verdict.ok) {
+      console.log("escalation: unverifiable clause citations", verdict.missing.join(","), "— refusing honestly");
+      answer = canonicalRefusal(refusalAnswer(), refusalScope(false));
+    }
+  }
   const c2ns = answer!.includes(refusalAnswer())
     ? { text: answer, blocks: [] as Awaited<ReturnType<typeof contractV2>>["blocks"], dropped: [] as string[] }
     : await contractV2(env.DB, answer!, used);

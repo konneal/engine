@@ -38,6 +38,7 @@ export const MODELS = {
   // cross-encoder prunes, listwise orders jointly)
   listwise: "@cf/zai-org/glm-4.7-flash",
   // deep-research loop (G10): bounded agentic iterations, members-only
+  escalation: "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
   research: "@cf/zai-org/glm-5.3-flash",
   // speculative draft-verify (TODO.sota/02 row 2): the strong verifier
   // over the cheap drafts — the research-tier model verifies; the drafter
@@ -187,6 +188,11 @@ export function processExpansion(): string {
 /** Per-deployment model override: <ROLE>_MODEL (e.g. UNDERSTAND_MODEL)
  *  replaces the pinned default for that role. Ops lever for A/B-ing a
  *  role's model without a code change; absent/invalid = the default. */
+/** The escalation's daily per-bucket cap (TODO.sota/21): the whole-doc
+ *  answer costs ~200–250k input tokens, so the spend is capped hard
+ *  and measured (route "ask-escalation"). */
+export const ESCALATION_DAILY_DEFAULT = 10;
+
 export function roleModel(env: any, role: keyof typeof MODELS): string {
   const ov = env[`${role.toUpperCase()}_MODEL`];
   return typeof ov === "string" && ov.startsWith("@cf/") ? ov : MODELS[role];

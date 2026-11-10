@@ -43,6 +43,7 @@ var MODELS = {
   // cross-encoder prunes, listwise orders jointly)
   listwise: "@cf/zai-org/glm-4.7-flash",
   // deep-research loop (G10): bounded agentic iterations, members-only
+  escalation: "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
   research: "@cf/zai-org/glm-5.3-flash",
   // speculative draft-verify (TODO.sota/02 row 2): the strong verifier
   // over the cheap drafts — the research-tier model verifies; the drafter
@@ -183,6 +184,7 @@ var THRESHOLDS = {
 function processExpansion() {
   return P().retrieval.process_expansion;
 }
+var ESCALATION_DAILY_DEFAULT = 10;
 function roleModel(env, role) {
   const ov = env[`${role.toUpperCase()}_MODEL`];
   return typeof ov === "string" && ov.startsWith("@cf/") ? ov : MODELS[role];
@@ -247,6 +249,7 @@ export {
   LIMITS,
   THRESHOLDS,
   processExpansion,
+  ESCALATION_DAILY_DEFAULT,
   roleModel,
   answerEffort,
   effortBudget,

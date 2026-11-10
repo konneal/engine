@@ -14,6 +14,7 @@ export declare const MODELS: {
     readonly grader: "@cf/deepseek-ai/deepseek-v4-flash-0731";
     readonly enrich: "@cf/deepseek-ai/deepseek-v4-pro-0813";
     readonly listwise: "@cf/zai-org/glm-4.7-flash";
+    readonly escalation: "@cf/deepseek-ai/deepseek-v4.1-flash-1017";
     readonly research: "@cf/zai-org/glm-5.3-flash";
     readonly verifier: "@cf/zai-org/glm-5.2";
 };
@@ -136,6 +137,10 @@ export declare function processExpansion(): string;
 /** Per-deployment model override: <ROLE>_MODEL (e.g. UNDERSTAND_MODEL)
  *  replaces the pinned default for that role. Ops lever for A/B-ing a
  *  role's model without a code change; absent/invalid = the default. */
+/** The escalation's daily per-bucket cap (TODO.sota/21): the whole-doc
+ *  answer costs ~200–250k input tokens, so the spend is capped hard
+ *  and measured (route "ask-escalation"). */
+export declare const ESCALATION_DAILY_DEFAULT = 10;
 export declare function roleModel(env: any, role: keyof typeof MODELS): string;
 /** Per-deployment effort override for the answer lane (ANSWER_EFFORT).
  *  The effort–accuracy curve is front-loaded (DeepSeek-V4.1-Flash report,
