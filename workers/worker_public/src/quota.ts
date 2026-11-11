@@ -68,18 +68,24 @@ function tokenTier(bucketId: string): "anon" | "member" | "key" {
   return bucketId.startsWith("key:") ? "key" : bucketId.startsWith("sub:") ? "member" : "anon";
 }
 
-export function tokenLimit(env: Env, bucketId: string): number {
+export function tokenLimit(env: Env, bucketId: string, keyDayLimitAsks?: number): number {
   const tier = tokenTier(bucketId);
   return tier === "key"
-    ? num(env as any, "KEY_DAY_TOKENS", 4_000_000)
+    ? // the key's OWN day_limit is the one truth for both counters (the
+      // owner's 2026-11-09 ruling: the serving cap is for USERS, not
+      // operators): 1 ask ≈ 2000 tokens, so day_limit × 2000 — the
+      // default 2000 asks reproduces the historic 4M exactly
+      keyDayLimitAsks
+      ? keyDayLimitAsks * 2_000
+      : num(env as any, "KEY_DAY_TOKENS", 4_000_000)
     : tier === "member"
       ? num(env as any, "MEMBER_DAY_TOKENS", 1_500_000)
       : num(env as any, "ANON_DAY_TOKENS", 300_000);
 }
 
-export async function tokenBudget(env: Env, bucketId: string): Promise<{ used: number; limit: number }> {
+export async function tokenBudget(env: Env, bucketId: string, keyDayLimitAsks?: number): Promise<{ used: number; limit: number }> {
   const used = Number((await env.CACHE.get(`t:${today()}:ask:${await sha256Hex(bucketId)}`)) ?? "0");
-  return { used, limit: tokenLimit(env, bucketId) };
+  return { used, limit: tokenLimit(env, bucketId, keyDayLimitAsks) };
 }
 
 export async function chargeTokens(env: Env, bucketId: string, tokens: number): Promise<void> {
@@ -109,8 +115,8 @@ export function creditLimit(env: Env, bucketId: string): number {
   return Math.floor(tokenLimit(env, bucketId) / CREDIT_TOKEN_UNIT);
 }
 
-export async function creditBudget(env: Env, bucketId: string): Promise<{ credits_used: number; credits_limit: number }> {
-  const b = await tokenBudget(env, bucketId);
+export async function creditBudget(env: Env, bucketId: string, keyDayLimitAsks?: number): Promise<{ credits_used: number; credits_limit: number }> {
+  const b = await tokenBudget(env, bucketId, keyDayLimitAsks);
   return { credits_used: Math.ceil(b.used / CREDIT_TOKEN_UNIT), credits_limit: creditLimit(env, bucketId) };
 }
 

@@ -16,8 +16,8 @@ export declare function telemetry(env: Env, ctx: Background, tier: string, route
     retries?: number;
 }): void;
 export declare function estimateTokens(chars: number): number;
-export declare function tokenLimit(env: Env, bucketId: string): number;
-export declare function tokenBudget(env: Env, bucketId: string): Promise<{
+export declare function tokenLimit(env: Env, bucketId: string, keyDayLimitAsks?: number): number;
+export declare function tokenBudget(env: Env, bucketId: string, keyDayLimitAsks?: number): Promise<{
     used: number;
     limit: number;
 }>;
@@ -25,7 +25,7 @@ export declare function chargeTokens(env: Env, bucketId: string, tokens: number)
 export declare function usageTotal(usage: unknown): number | null;
 export declare const CREDIT_TOKEN_UNIT = 1000;
 export declare function creditLimit(env: Env, bucketId: string): number;
-export declare function creditBudget(env: Env, bucketId: string): Promise<{
+export declare function creditBudget(env: Env, bucketId: string, keyDayLimitAsks?: number): Promise<{
     credits_used: number;
     credits_limit: number;
 }>;

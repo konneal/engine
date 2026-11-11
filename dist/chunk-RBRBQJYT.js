@@ -24902,13 +24902,19 @@ function estimateTokens(chars) {
 function tokenTier(bucketId) {
   return bucketId.startsWith("key:") ? "key" : bucketId.startsWith("sub:") ? "member" : "anon";
 }
-function tokenLimit(env, bucketId) {
+function tokenLimit(env, bucketId, keyDayLimitAsks) {
   const tier = tokenTier(bucketId);
-  return tier === "key" ? num(env, "KEY_DAY_TOKENS", 4e6) : tier === "member" ? num(env, "MEMBER_DAY_TOKENS", 15e5) : num(env, "ANON_DAY_TOKENS", 3e5);
+  return tier === "key" ? (
+    // the key's OWN day_limit is the one truth for both counters (the
+    // owner's 2026-11-09 ruling: the serving cap is for USERS, not
+    // operators): 1 ask ≈ 2000 tokens, so day_limit × 2000 — the
+    // default 2000 asks reproduces the historic 4M exactly
+    keyDayLimitAsks ? keyDayLimitAsks * 2e3 : num(env, "KEY_DAY_TOKENS", 4e6)
+  ) : tier === "member" ? num(env, "MEMBER_DAY_TOKENS", 15e5) : num(env, "ANON_DAY_TOKENS", 3e5);
 }
-async function tokenBudget(env, bucketId) {
+async function tokenBudget(env, bucketId, keyDayLimitAsks) {
   const used = Number(await env.CACHE.get(`t:${today()}:ask:${await sha256Hex(bucketId)}`) ?? "0");
-  return { used, limit: tokenLimit(env, bucketId) };
+  return { used, limit: tokenLimit(env, bucketId, keyDayLimitAsks) };
 }
 async function chargeTokens(env, bucketId, tokens2) {
   if (!(tokens2 > 0)) return;
@@ -24926,8 +24932,8 @@ var CREDIT_TOKEN_UNIT = 1e3;
 function creditLimit(env, bucketId) {
   return Math.floor(tokenLimit(env, bucketId) / CREDIT_TOKEN_UNIT);
 }
-async function creditBudget(env, bucketId) {
-  const b = await tokenBudget(env, bucketId);
+async function creditBudget(env, bucketId, keyDayLimitAsks) {
+  const b = await tokenBudget(env, bucketId, keyDayLimitAsks);
   return { credits_used: Math.ceil(b.used / CREDIT_TOKEN_UNIT), credits_limit: creditLimit(env, bucketId) };
 }
 function creditEstimate(opts) {
