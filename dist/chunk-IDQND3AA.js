@@ -76,7 +76,7 @@ import {
   tokenBudget,
   understandQuery,
   usageTotal
-} from "./chunk-5ISPTV5G.js";
+} from "./chunk-RBRBQJYT.js";
 import {
   embed,
   generateOnce
@@ -2342,10 +2342,10 @@ function messageChars(messages) {
   }
   return n;
 }
-async function chargeAnswerTokens(env, bucketId, stats, promptChars, answerChars, extraTokens = 0) {
+async function chargeAnswerTokens(env, bucketId, stats, promptChars, answerChars, extraTokens = 0, keyDayLimitAsks) {
   const total = (usageTotal(stats?.usage) ?? estimateTokens(promptChars + answerChars)) + extraTokens;
   await chargeTokens(env, bucketId, total);
-  const budget = await tokenBudget(env, bucketId);
+  const budget = await tokenBudget(env, bucketId, keyDayLimitAsks);
   return { tokens_used: budget.used, token_limit: budget.limit };
 }
 async function* sseTokens(stream, stats) {
@@ -2407,14 +2407,15 @@ async function handleAsk(env, ctx, req, tier, key) {
   const memberKey = tier === "key" ? key?.owner_sub ?? null : null;
   const limit = memberKey ? num(env, "MEMBER_DAY_ASK", 300) : tier === "key" ? key.day_limit : tier === "member" || member ? num(env, "MEMBER_DAY_ASK", 300) : num(env, "ANON_DAY_ASK", 20);
   const bucketId = memberKey ? `sub:${memberKey}` : tier === "key" ? `key:${key.id}` : member ? `sub:${member.sub}` : clientIp(req);
+  const keyDayLimit = tier === "key" ? key?.day_limit : void 0;
   const quota = await checkQuota(env, "ask", bucketId, limit, effort === "low" ? 1 : 2);
   const creditPreview = creditEstimate({ effort, toolTurns: body?.multi_turn !== false ? 3 : 0, image: false });
   if (!quota.ok) {
     return err(429, "quota_exceeded", `Daily question limit reached (${quota.limit}). Try again tomorrow.`);
   }
-  const tokBudget = await tokenBudget(env, bucketId);
+  const tokBudget = await tokenBudget(env, bucketId, keyDayLimit);
   if (tokBudget.used >= tokBudget.limit) {
-    const cb = await creditBudget(env, bucketId);
+    const cb = await creditBudget(env, bucketId, keyDayLimit);
     return err(429, "quota_exceeded", `Daily credits reached (${cb.credits_limit} credits, ${cb.credits_used} used). Try again tomorrow.`);
   }
   quota.tokens_used = tokBudget.used;
@@ -2705,7 +2706,7 @@ Certificates are issued per recommendation family \u2014 the register carries no
           aggregateNoteText = aggregateNote(agg);
           const queryHash2 = await sha256Hex(q2.query);
           telemetry(env, ctx, tier, "ask", MODELS.member, true, answer2.length, queryHash2, q2.lang, void 0, telemetryMeta());
-          const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q2.query.length, answer2.length);
+          const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q2.query.length, answer2.length, keyDayLimit);
           const payload = {
             answer: answer2,
             citations: [{ docidentifier: `${P().publisher.name}-CS certificate register (family ${agg.family})`, corpus: "register" }],
@@ -2716,7 +2717,7 @@ Certificates are issued per recommendation family \u2014 the register carries no
             context_applied: NO_CONTEXT,
             read: readAs(),
             ...ablate ? { ablate } : {},
-            quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview }
+            quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview }
           };
           if (live2) {
             live2.send({ type: "citations", citations: payload.citations, quota: payload.quota, context_applied: NO_CONTEXT });
@@ -2761,8 +2762,8 @@ ${summary}` }] : [],
           }
         } catch {
         }
-        const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages2), full.length, probeTokensUsed);
-        live2.send({ type: "quota", quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+        const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages2), full.length, probeTokensUsed, keyDayLimit);
+        live2.send({ type: "quota", quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview } });
         live2.send({ type: "done", model, query_hash: queryHash2, context_applied: NO_CONTEXT, read: readAs() });
         telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash2, q2.lang, void 0, telemetryMeta());
         live2.close();
@@ -2810,8 +2811,8 @@ ${summary}` }] : [],
         live2.close();
         return null;
       }
-      const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q2.query.length, verdict.answer.length);
-      return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, ...ablate ? { ablate } : {}, quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+      const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q2.query.length, verdict.answer.length, keyDayLimit);
+      return json({ answer: verdict.answer, citations: citations2, model, query_hash: queryHash2, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, ...ablate ? { ablate } : {}, quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview } });
     }
     if (apiCallIntent) {
       const callCtxApplied = declaredCtx ? appliedContext(declaredCtx, null) : NO_CONTEXT;
@@ -2835,8 +2836,8 @@ ${summary}` }] : [],
         live2.close();
         return null;
       }
-      const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q2.query.length, verdict.answer.length);
-      return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, ...ablate ? { ablate } : {}, quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+      const tq2 = await chargeAnswerTokens(env, bucketId, void 0, q2.query.length, verdict.answer.length, keyDayLimit);
+      return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash2, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...draftPayload ? { draft: draftPayload } : {}, ...ablate ? { ablate } : {}, quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview } });
     }
     let liveRecords;
     let accountNote;
@@ -3299,8 +3300,8 @@ ${doc.text}` }
           }
         } catch {
         }
-        const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length, probeTokensUsed);
-        send({ type: "quota", quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+        const tq2 = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages), full.length, probeTokensUsed, keyDayLimit);
+        send({ type: "quota", quota: { ...quota, ...tq2, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview } });
         if (register?.rows?.length && full.includes(refusalAnswer())) {
           console.log("blind-answer(stream): regenerating once");
           streamRestarts += 1;
@@ -3606,7 +3607,7 @@ ${doc.text}` }
       text: h.text.slice(0, 1200),
       ...h.metadata.table_selection ? { sel: h.metadata.table_selection } : {}
     }));
-    const tq = await chargeAnswerTokens(env, bucketId, void 0, messageChars(messages), answer.length, probeTokensUsed);
+    const tq = await chargeAnswerTokens(env, bucketId, void 0, messageChars(messages), answer.length, probeTokensUsed, keyDayLimit);
     let cragPassages = null;
     if (body?.manifest === true && used.length) {
       const grades = await gradePassages(env.AI, roleModel(env, "grader"), q2.query, used.map((h) => h.text));
@@ -3632,7 +3633,7 @@ ${doc.text}` }
       entailment,
       total_ms: Date.now() - tStart
     } } : {};
-    return json({ ...out, context: contextOut, read: readAs(), ...manifestOut, quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
+    return json({ ...out, context: contextOut, read: readAs(), ...manifestOut, quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
   };
   if (liveResponse) {
     void pipeline(live, q).catch(() => {

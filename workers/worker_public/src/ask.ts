@@ -288,10 +288,10 @@ function messageChars(messages: any[]): number {
 /** Post-generation true-up: the model's own usage when the stream
  *  reported it, the character estimate otherwise — charged, then the
  *  budget's fresh state returned for the quota payload. */
-async function chargeAnswerTokens(env: Env, bucketId: string, stats: { usage?: unknown } | undefined, promptChars: number, answerChars: number, extraTokens = 0): Promise<{ tokens_used: number; token_limit: number }> {
+async function chargeAnswerTokens(env: Env, bucketId: string, stats: { usage?: unknown } | undefined, promptChars: number, answerChars: number, extraTokens = 0, keyDayLimitAsks?: number): Promise<{ tokens_used: number; token_limit: number }> {
   const total = (usageTotal(stats?.usage) ?? estimateTokens(promptChars + answerChars)) + extraTokens;
   await chargeTokens(env, bucketId, total);
-  const budget = await tokenBudget(env, bucketId);
+  const budget = await tokenBudget(env, bucketId, keyDayLimitAsks);
   return { tokens_used: budget.used, token_limit: budget.limit };
 }
 
@@ -421,6 +421,12 @@ async function handleAsk(
     : tier === "member" || member ? num(env as any, "MEMBER_DAY_ASK", 300)
     : num(env as any, "ANON_DAY_ASK", 20);
   const bucketId = memberKey ? `sub:${memberKey}` : tier === "key" ? `key:${key!.id}` : member ? `sub:${member.sub}` : clientIp(req);
+  // the KEY'S OWN day_limit drives BOTH counters (asks and tokens) — the
+  // owner's 2026-11-09 ruling: the serving cap is for USERS, not
+  // operators; quota.ts derives tokens = asks × 2000, so an operator
+  // key minted at day_limit 50000 carries a 100M-token day, while the
+  // default user key stays at 4M
+  const keyDayLimit = tier === "key" ? key?.day_limit : undefined;
   const quota = await checkQuota(env, "ask", bucketId, limit, effort === "low" ? 1 : 2);
   const creditPreview = creditEstimate({ effort, toolTurns: body?.multi_turn !== false ? 3 : 0, image: false });
   if (!quota.ok) {
@@ -428,12 +434,12 @@ async function handleAsk(
   }
   // the real allowance is the day's TOKENS (the 2026-09-29 shift): the
   // request cap above is the anti-abuse backstop, this is the budget
-  const tokBudget = await tokenBudget(env, bucketId);
+  const tokBudget = await tokenBudget(env, bucketId, keyDayLimit);
   // the credit preview (2026-10-11): what this ask will cost, shown in
   // the refusal when the day's credits are spent — effort + armed tool
   // turns + multimodality, one honest number
   if (tokBudget.used >= tokBudget.limit) {
-    const cb = await creditBudget(env, bucketId);
+    const cb = await creditBudget(env, bucketId, keyDayLimit);
     return err(429, "quota_exceeded", `Daily credits reached (${cb.credits_limit} credits, ${cb.credits_used} used). Try again tomorrow.`);
   }
   (quota as any).tokens_used = tokBudget.used;
@@ -897,7 +903,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         aggregateNoteText = aggregateNote(agg);
         const queryHash = await sha256Hex(q.query);
         telemetry(env, ctx, tier, "ask", MODELS.member, true, answer!.length, queryHash, q.lang, undefined, telemetryMeta());
-        const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, answer!.length);
+        const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, answer!.length, keyDayLimit);
         const payload = {
           answer,
           citations: [{ docidentifier: `${P().publisher.name}-CS certificate register (family ${agg.family})`, corpus: "register" }],
@@ -908,7 +914,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           context_applied: NO_CONTEXT,
           read: readAs(),
           ...(ablate ? { ablate } : {}),
-          quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview },
+          quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview },
         };
         if (live) {
           live!.send({ type: "citations", citations: payload.citations, quota: payload.quota, context_applied: NO_CONTEXT });
@@ -978,8 +984,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       } catch {
         // stream ended prematurely — deliver what we have
       }
-      const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages!), full.length, probeTokensUsed);
-      live!.send({ type: "quota", quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+      const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages!), full.length, probeTokensUsed, keyDayLimit);
+      live!.send({ type: "quota", quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview } });
       live!.send({ type: "done", model, query_hash: queryHash, context_applied: NO_CONTEXT, read: readAs() });
       telemetry(env, ctx, tier, "ask", model, true, full.length, queryHash, q.lang, undefined, telemetryMeta());
       live!.close();
@@ -1043,8 +1049,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       live!.close();
       return null;
     }
-    const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer!.length);
-    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), ...(ablate ? { ablate } : {}), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+    const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer!.length, keyDayLimit);
+    return json({ answer: verdict.answer, citations, model, query_hash: queryHash, follow_ups: [], context_applied: draftCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), ...(ablate ? { ablate } : {}), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview } });
   }
 
   // ── The api_call draft (TODO.ai-platform/09) — the operations
@@ -1078,8 +1084,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
       live!.close();
       return null;
     }
-    const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer!.length);
-    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), ...(ablate ? { ablate } : {}), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+    const tq = await chargeAnswerTokens(env, bucketId, undefined, q.query.length, verdict.answer!.length, keyDayLimit);
+    return json({ answer: verdict.answer, citations: [], model, query_hash: queryHash, follow_ups: [], context_applied: callCtxApplied, read: readAs(), ...(draftPayload ? { draft: draftPayload } : {}), ...(ablate ? { ablate } : {}), quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview } });
   }
 
   // (declared before the retrieval try: the account block, the refusal
@@ -1782,8 +1788,8 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
           } catch {
             // stream ended prematurely — deliver what we have
           }
-          const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages!), full.length, probeTokensUsed);
-          send({ type: "quota", quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } });
+          const tq = await chargeAnswerTokens(env, bucketId, stats, messageChars(messages!), full.length, probeTokensUsed, keyDayLimit);
+          send({ type: "quota", quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview } });
           // the blind-answer guard ON THE STREAM PATH (the JSON path has
           // had it since 0.2.80): the register note carries rows and the
           // streamed text is the no-information refusal — the model
@@ -2228,7 +2234,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
     text: h.text.slice(0, 1200),
     ...((h.metadata as any).table_selection ? { sel: (h.metadata as any).table_selection } : {}),
   }));
-  const tq = await chargeAnswerTokens(env, bucketId, undefined, messageChars(messages!), answer!.length, probeTokensUsed);
+  const tq = await chargeAnswerTokens(env, bucketId, undefined, messageChars(messages!), answer!.length, probeTokensUsed, keyDayLimit);
   // the reproducibility manifest (TODO.sota/14.6, v1): an opt-in, one-object
   // derivation record — the served snapshot identity, the answer model, the
   // retrieval anatomy (rank, corpus score, rerank score per used passage),
@@ -2267,7 +2273,7 @@ let convEntities: Array<{ entity: string; kind: string }> = [];
         total_ms: Date.now() - tStart,
       } }
     : {};
-  return json({ ...out, context: contextOut, read: readAs(), ...manifestOut, quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
+  return json({ ...out, context: contextOut, read: readAs(), ...manifestOut, quota: { ...quota, ...tq, credits: await creditBudget(env, bucketId, keyDayLimit), credit_estimate: creditPreview } }, 200, { ...corsHeaders(req), "server-timing": serverTiming() });
   }
 
   // THE DISPATCH: the streamed lane's response went out at the top — the
